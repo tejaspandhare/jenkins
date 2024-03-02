@@ -1,4 +1,5 @@
-  hosts: masters
+- name: Gather CPU RAM and Disk Space Usage
+  hosts: all
   gather_facts: yes
   tasks:
     - name: Gather CPU usage
@@ -17,3 +18,4 @@
           - "CPU Usage: {{ cpu_usage.stdout }}%"
           - "RAM Usage: {{ ram_usage.stdout }}%"
           - "Disk Space Used: {{ disk_space.stdout }}"
+
