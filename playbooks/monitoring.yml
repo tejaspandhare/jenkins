@@ -1,3 +1,4 @@
+  hosts: masters
   gather_facts: yes
   tasks:
     - name: Gather CPU usage
