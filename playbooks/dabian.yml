@@ -4,13 +4,6 @@
    hosts: "all"
    become: true
    tasks: 
-    - name: Ansible apt remove apache2
-      apt:
-        name: apache2
-        state: absent
-        update_cache: yes
-        autoremove: yes
-        purge: yes
     - name : Ansible remove rc packges
       shell: "dpkg -l | grep '^rc' | awk '{print $2}' | xargs apt-get purge -y"
       #shell: "dpkg -l | grep '^rc' | awk '{print $2}' | sudo xargs dpkg --purge"
