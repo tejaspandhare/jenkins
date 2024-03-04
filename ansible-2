@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh 'ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY ansible-roles/debian.yml'
+        sh 'ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY playbooks/debian.yml'
         
       }
     }
