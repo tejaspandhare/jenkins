@@ -1,7 +1,7 @@
 ---
  - name: Playbook to install software on Dabian based servers
    #hosts: "master:worker"
-   hosts: "lb"
+   hosts: "all"
    become: true
    tasks: 
     - name : Ansible remove rc packges
