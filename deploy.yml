@@ -1,7 +1,11 @@
 ---
 - hosts: all
-  connection: local
-  vars:
-    - firstname: "tejas"
-  roles:
-    - { role: helloworld }
+  gather_facts: no
+
+  tasks:
+  -  name: Root FS usage
+     shell: df -h {{ FS_NAME }} |awk ' { print $5 } ' |grep -v Use
+     register: dfroot
+
+  -  debug:
+       msg: "System {{ inventory_hostname }}'s {{ FS_NAME }} FS utiliation is {{ dfroot.stdout }}"
