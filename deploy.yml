@@ -1,5 +1,5 @@
 ---
-- hosts: masters
+- hosts: kmaster1
   connection: local
   vars:
     - firstname: "John"
