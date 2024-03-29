@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh """ansible-playbook --extra-vars '{"name":"${params.first_name}"}' deploy.yml"""
+        sh """ansible-playbook -i masters --extra-vars '{"name":"${params.first_name}"}' deploy.yml"""
         
       }
     }
