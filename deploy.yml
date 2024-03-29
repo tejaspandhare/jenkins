@@ -1,6 +1,6 @@
 ---
-- hosts: kmaster1
-  connection: local
+- hosts: masters
+  #connection: local
   vars:
     - firstname: "John"
   roles:
