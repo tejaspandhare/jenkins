@@ -4,4 +4,4 @@
   vars:
     - firstname: "John"
   roles:
-    - { role: apache }
+    - { role: ansible-roles/apache }
