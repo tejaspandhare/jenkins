@@ -3,7 +3,7 @@ pipeline {
   stages {
     stage(“Pull Playbook from SCM”) {
       steps {
-        git ‘https://github.com/sezginerdem/playbook_user_management.git'
+        git ‘https://github.com/tejaspandhare/jenkins.git'
       }
     }
     stage(“Assign Variables into the Playbook”) {
