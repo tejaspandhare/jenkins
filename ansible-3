@@ -1,7 +1,10 @@
 pipeline {
   agent any
+  environment {
+   ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+  }
   stages {
-    stage(“Pull Playbook from SCM”) {
+    stage('Pull Playbook from SCM') {
       steps {
         git ‘https://github.com/tejaspandhare/jenkins.git'
       }
