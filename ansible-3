@@ -4,7 +4,7 @@ pipeline {
    ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
   }
   stages {
-    stage(“Assign Variables into the Playbook”) {
+    stage('Assign Variables into the Playbook') {
       steps {
         script {
           if (params.ADD_USER != “”){
