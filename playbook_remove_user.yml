@@ -1,0 +1,12 @@
+- name: Create Group, User and Deploy the Public Key
+  hosts: [var_server_name]
+  become: true
+
+  tasks:
+# Removing user
+  - name: Remove User
+    user:
+      name: var_remove_user
+      state: absent
+      remove: yes
+      force: yes
