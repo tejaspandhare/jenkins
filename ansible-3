@@ -22,7 +22,7 @@ pipeline {
         }
       }
     }
-    stage(“Run Playbook”) {
+    stage('Run Playbook') {
       steps {
         script {
            if (params.ADD_USER != “”){
