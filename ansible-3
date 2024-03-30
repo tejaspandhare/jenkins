@@ -1,6 +1,12 @@
 pipeline {
   agent any
-  stage(“Assign Variables into the Playbook”) {
+  stages {
+    stage(“Pull Playbook from SCM”) {
+      steps {
+        git ‘https://github.com/tejaspandhare/jenkins.git'
+      }
+    }
+    stage(“Assign Variables into the Playbook”) {
       steps {
         script {
           if (params.ADD_USER != “”){
@@ -22,10 +28,10 @@ pipeline {
       steps {
         script {
            if (params.ADD_USER != “”){
-             ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks/playbook_add_user.yml’
+             ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks//playbook_add_user.yml’
            }
            if(params.REMOVE_USER != “”){
-             ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks/playbook_remove_user.yml’
+             ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks//playbook_remove_user.yml’
            }
          }
        }
