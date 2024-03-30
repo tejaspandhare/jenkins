@@ -7,7 +7,7 @@ pipeline {
     stage('Assign Variables into the Playbook') {
       steps {
         script {
-          if (params.ADD_USER != “”){
+          if (params.ADD_USER != ""){
             sh """sed -i ‘s/var_server_name/${SERVER_NAME}/’ playbooks/playbook_add_user.yml"""
             sh """sed -i ‘s/var_add_user/${ADD_USER}/’ playbooks/playbook_add_user.yml"""
             sh """sed -i ‘s/var_group_name/${GROUP_NAME}/’ playbooks/playbook_add_user.yml"""
@@ -15,7 +15,7 @@ pipeline {
             ${USER_PUBLIC_KEY}
             """
           }
-          if(params.REMOVE_USER != “”){
+          if(params.REMOVE_USER != ""){
             sh """sed -i ‘s/var_server_name/${SERVER_NAME}/’ playbooks/playbook_remove_user.yml"""
             sh """sed -i ‘s/var_remove_user/${REMOVE_USER}/’ playbooks/playbook_remove_user.yml"""
           }
@@ -25,16 +25,16 @@ pipeline {
     stage('Run Playbook') {
       steps {
         script {
-           if (params.ADD_USER != “”){
+           if (params.ADD_USER != ""){
              ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks//playbook_add_user.yml’
            }
-           if(params.REMOVE_USER != “”){
+           if(params.REMOVE_USER != ""){
              ansiblePlaybook disableHostKeyChecking: true, installation: ‘ansible’, playbook: ‘playbooks//playbook_remove_user.yml’
            }
          }
        }
      }
-     stage(“Cleaning Workspace”) {
+     stage('Cleaning Workspace') {
        steps {
          sh ‘rm -rf ./*’
        }
