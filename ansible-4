@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh 'ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY  --extra-vars "${FS_PATH}"  diskspace.yaml'
+        sh 'ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY  --extra-vars {FS_NAME:"${FS_PATH}"}  diskspace.yaml'
         
       }
     }
