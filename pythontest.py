@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh "python3 smiley.py --extra-vars '{"message":"${params.message}"}'"
+        sh """python3 smiley.py --extra-vars '{"message":"${params.message}"}'"""
       }
     }
   }
