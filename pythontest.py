@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh 'python3 smiley.py'
+        sh 'python3 smiley.py $message'
         
       }
     }
