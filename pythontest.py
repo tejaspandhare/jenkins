@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh('python3 hello.py ' + params.message)
+        sh('python3 hello.py ' --input_message + params.message)
       }
     }
   }
