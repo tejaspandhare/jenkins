@@ -1,2 +1,2 @@
 message = input("message")
-print (f{message})
+print (f"{message}")
