@@ -1,2 +1,1 @@
-message = input("message")
-print (f"{message}")
+print ("Hello World!")
