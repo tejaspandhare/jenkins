@@ -1,8 +1,5 @@
 pipeline {
-  agent { label 'linux' }
-  environment {
-   ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
-  }
+  agent any
   stages {
     stage('Hello') {
       steps {
