@@ -6,7 +6,7 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh """python3   'hello.py' '{"message":"${message}"}' """
+        sh """python3   'hello.py' """
       }
     }
   }
