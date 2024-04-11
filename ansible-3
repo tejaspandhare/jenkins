@@ -8,16 +8,16 @@ pipeline {
       steps {
         script {
           if (params.ADD_USER != ""){
-            sh """sed -i 's/var_server_name/${SERVER_NAME}/' playbook_add_user.yml"""
-            sh """sed -i 's/var_add_user/${ADD_USER}/' playbook_add_user.yml"""
-            sh """sed -i 's/var_group_name/${GROUP_NAME}/' playbook_add_user.yml"""
+            sh """sed -i 's/var_server_name/${SERVER_NAME}/' playbooks/playbook_add_user.yml"""
+            sh """sed -i 's/var_add_user/${ADD_USER}/' playbooks/playbook_add_user.yml"""
+            sh """sed -i 's/var_group_name/${GROUP_NAME}/' playbooks/playbook_add_user.yml"""
             sh """cat > user_public_key.pub <<EOF
             ${USER_PUBLIC_KEY}
             """
           }
           if(params.REMOVE_USER != ""){
-            sh """sed -i 's/var_server_name/${SERVER_NAME}/' playbook_remove_user.yml"""
-            sh """sed -i 's/var_remove_user/${REMOVE_USER}/' playbook_remove_user.yml"""
+            sh """sed -i 's/var_server_name/${SERVER_NAME}/' playbooks/playbook_remove_user.yml"""
+            sh """sed -i 's/var_remove_user/${REMOVE_USER}/' playbooks/playbook_remove_user.yml"""
           }
         }
       }
@@ -26,10 +26,10 @@ pipeline {
       steps {
         script {
            if (params.ADD_USER != ""){
-             sh """ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"ADD_USER":"${params.ADD_USER}"}' './playbook_add_user.yml'"""
+             sh """ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"ADD_USER":"${params.ADD_USER}"}' 'playbooks/playbook_add_user.yml'"""
            }
            if(params.REMOVE_USER != ""){
-             sh """ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"REMOVE_USER":"${params.REMOVE_USER}"}' './playbook_remove_user.yml'"""
+             sh """ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"REMOVE_USER":"${params.REMOVE_USER}"}' 'playbooks/playbook_remove_user.yml'"""
            }
          }
        }
