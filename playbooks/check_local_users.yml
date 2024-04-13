@@ -3,7 +3,7 @@
   hosts: all
   tasks:
     - name: Gather local user information
-      shell: getent passwd | grep -v '/bin/false' | grep -v '/sbin/nologin' | cut -d: -f1"
+      shell: "getent passwd | grep -v '/bin/false' | grep -v '/sbin/nologin' | cut -d: -f1"
       register: local_users_info
 
     - name: Extract local users
