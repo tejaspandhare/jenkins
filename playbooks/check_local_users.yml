@@ -1,6 +1,5 @@
 ---
 - name: Check Local Users
-  hosts: all
   become: yes
 
   tasks:
