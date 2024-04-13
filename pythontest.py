@@ -1,10 +1,14 @@
 pipeline {
-  agent any
-  stages {
-    stage('Get Message from Terminal') {
-      steps {
-        sh """python3   'hello.py' ${params.message} """
-      }
+    agent any
+    
+    stages {
+        stage('Run Python Script') {
+            steps {
+                script {
+                    def message = "  " // Provide your input message here
+                    sh "echo '${message}' | /usr/bin/python3 smiley.py"
+                }
+            }
+        }
     }
-  }
 }
