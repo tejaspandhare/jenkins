@@ -13,5 +13,5 @@ def emoji_converter(message):
     return output
 
 # Read message from standard input
-message = sys.stdin.readline()
+message = sys.stdin.readline().strip:()
 print(emoji_converter(message))
