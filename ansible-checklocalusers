@@ -3,6 +3,7 @@ pipeline {
 
     parameters {
         choice(name: 'Server_Choice', choices: ['kmaster1', 'lb1', 'lb2'], description: 'Select servers')
+        string(name: 'SSH_Key', defaultValue: '', description: 'automation-key')
     }
 
     stages {
@@ -13,6 +14,7 @@ pipeline {
                         playbook: 'playbooks/check_local_users.yml',
                         inventory: 'inventory/hosts',
                         extraVars: [target_servers: params.Server_Choice]
+                        credentialsId: params.SSH_Key // Pass the SSH key ID
                     )
                 }
             }
