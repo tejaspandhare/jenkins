@@ -1,19 +1,12 @@
 ---
-- name: Check Local Users
-  hosts: [var_server_name]
-  become: yes
-  
-  vars:
-    server_name:
-    - name: kmaster1
-    - name: lb1
-    - name: lb2
-  
+- name: Check Users on Servers
+  hosts: "{{ target_servers }}"
   tasks:
-    - name: Get local users
-      shell: "cut -d: -f1 /etc/passwd | sort | uniq"
-      register: local_users_output
+    - name: Display users
+      command: "cat /etc/passwd"
+      register: users_output
+      changed_when: false
+      ignore_errors: yes
 
-    - name: Display local users
-      debug:
-        msg: "{{ local_users_output.stdout_lines }}"
+    - debug:
+        msg: "{{ users_output.stdout_lines }}"
