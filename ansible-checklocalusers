@@ -1,19 +1,14 @@
 pipeline {
-    agent any
-    environment {
+  agent { label 'linux' }
+  environment {
    ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
   }
-    parameters {
-        string(name: 'SERVER_NAME', defaultValue: '', description: 'Enter the server name to check local users')
+  stages {
+    stage('Check Local Users'') {
+      steps {
+        sh """ansible-playbook -i inventory/hosts  --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"SERVER_NAME":"${params.SERVER_NAME}"}'  'playbooks/check_local_users.yml' """
+        
+      }
     }
-    
-    stages {
-        stage('Check Local Users') {
-            steps {
-                script {
-                    sh """ansible-playbook -i inventory/hosts  --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"SERVER_NAME":"${params.SERVER_NAME}"}'  'playbooks/check_local_users.yml'                 
-                }
-            }
-        }
-    }
+  }
 }
