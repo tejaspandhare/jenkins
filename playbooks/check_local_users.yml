@@ -1,6 +1,6 @@
 ---
 - name: Check Local Users
-  hosts: "{{ server_name }}"
+  hosts: "{{ SERVER_NAME }}"
   become: yes
 
   tasks:
