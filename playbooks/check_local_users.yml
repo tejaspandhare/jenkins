@@ -1,12 +1,15 @@
 ---
-- name: Check Users on Servers
-  hosts: "{{ target_servers }}"
+- name: Find Local Users
+  hosts: all
   tasks:
-    - name: Display users
-      command: "cat /etc/passwd"
-      register: users_output
-      changed_when: false
-      ignore_errors: yes
+    - name: Gather local user information
+      ansible.builtin.shell: getent passwd
+      register: local_users_info
 
-    - debug:
-        msg: "{{ users_output.stdout_lines }}"
+    - name: Extract local users
+      set_fact:
+        local_users: "{{ local_users_info.stdout_lines | map('split', ':') | map(attribute=0) | list }}"
+      
+    - name: Display local users
+      debug:
+        var: local_users
