@@ -11,11 +11,7 @@ pipeline {
         stage('Check Local Users') {
             steps {
                 script {
-                    ansiblePlaybook  --private-key=$ANSIBLE_PRIVATE_KEY (
-                        playbook: 'check_local_users.yml',
-                        inventory: "${params.SERVER_NAME},",
-                        extras: "-e server_name=${params.SERVER_NAME}"
-                    )
+                    sh """ansible-playbook -i inventory/hosts  --private-key=$ANSIBLE_PRIVATE_KEY -extra-vars '{"SERVER_NAME":"${params.SERVER_NAME}"}'  'playbooks/check_local_users.yml'                 
                 }
             }
         }
