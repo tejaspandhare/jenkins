@@ -1,0 +1,21 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'SERVER_NAME', defaultValue: '', description: 'Enter the server name to check local users')
+    }
+    
+    stages {
+        stage('Check Local Users') {
+            steps {
+                script {
+                    ansiblePlaybook(
+                        playbook: 'check_local_users.yml',
+                        inventory: "${params.SERVER_NAME},",
+                        extras: "-e server_name=${params.SERVER_NAME}"
+                    )
+                }
+            }
+        }
+    }
+}
