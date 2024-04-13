@@ -1,21 +1,10 @@
 pipeline {
     agent any
-
-    parameters {
-        choice(name: 'Server_Choice', choices: ['kmaster1', 'lb1', 'lb2'], description: 'Select servers')
-        string(name: 'SSH_Key', defaultValue: '', description: 'automation-key')
-    }
-
     stages {
         stage('Check Users') {
-            steps {
-                script {
-                    ansiblePlaybook(
-                        playbook: 'playbooks/check_local_users.yml',
-                        inventory: 'inventory/hosts',
-                        extraVars: [target_servers: params.Server_Choice],
-                        credentialsId: params.SSH_Key
-                    )
+         steps {
+          sh "ansible-playbook -i inventory/hosts playbooks/check_local_users.yml --extra-vars "target_servers=kmaster1,lb1,lb2" --private-key=automation-key
+
                 }
             }
         }
