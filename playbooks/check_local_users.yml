@@ -1,6 +1,6 @@
 ---
 - name: Check Local Users
-  hosts: all
+  hosts: masters
   become: yes
 
   tasks:
