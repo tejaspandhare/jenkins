@@ -1,11 +1,11 @@
 ---
 - name: Check Local Users
-  hosts: "{{ SERVER_NAME }}"
+  hosts: all
   become: yes
 
   tasks:
     - name: Get local users
-      shell: cut -d: -f1 /etc/passwd | sort | uniq
+      shell: ssh -q {{ SERVER_NAME }} "cut -d: -f1 /etc/passwd | sort | uniq"
       register: local_users_output
 
     - name: Display local users
