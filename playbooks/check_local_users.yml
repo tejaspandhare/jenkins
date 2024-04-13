@@ -2,7 +2,13 @@
 - name: Check Local Users
   hosts: "all"
   become: yes
-
+  
+  vars:
+    server_name:
+    - name: kmaster1
+    - name: lb1
+    - name: lb2
+  
   tasks:
     - name: Get local users
       shell: "cut -d: -f1 /etc/passwd | sort | uniq"
