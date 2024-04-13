@@ -10,7 +10,7 @@ pipeline {
             steps {
                 script {
                     ansiblePlaybook(
-                        playbook: 'check_users.yml',
+                        playbook: 'check_local_users.yml',
                         inventory: 'inventory/hosts',
                         extraVars: [target_servers: params.Server_Choice]
                     )
