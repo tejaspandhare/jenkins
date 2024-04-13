@@ -1,0 +1,13 @@
+---
+- name: Check Local Users
+  hosts: "{{ server_name }}"
+  become: yes
+
+  tasks:
+    - name: Get local users
+      shell: cut -d: -f1 /etc/passwd | sort | uniq
+      register: local_users_output
+
+    - name: Display local users
+      debug:
+        msg: "{{ local_users_output.stdout_lines }}"
