@@ -13,7 +13,7 @@ pipeline {
                     ansiblePlaybook(
                         playbook: 'playbooks/check_local_users.yml',
                         inventory: 'inventory/hosts',
-                        extraVars: [target_servers: params.Server_Choice]
+                        extraVars: [target_servers: params.Server_Choice],
                         credentialsId: params.SSH_Key // Pass the SSH key ID
                     )
                 }
