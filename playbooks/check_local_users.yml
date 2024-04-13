@@ -5,7 +5,7 @@
 
   tasks:
     - name: Get local users
-      shell: ssh -q {{ SERVER_NAME }} "cut -d: -f1 /etc/passwd | sort | uniq"
+      shell: "cut -d: -f1 /etc/passwd | sort | uniq"
       register: local_users_output
 
     - name: Display local users
