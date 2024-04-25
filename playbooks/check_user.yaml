@@ -3,10 +3,10 @@
   hosts: all
   tasks:
     - name: Check if user exists
-      command: id "{{ username }}"
+      command: id "{{ USERNAME }}"
       register: user_check
       ignore_errors: yes
 
     - name: Print result
       debug:
-        msg: "User {{ username }} exists: {{ user_check.rc == 0 }}"
+        msg: "User {{ USERNAME }} exists: {{ user_check.rc == 0 }}"
