@@ -6,8 +6,8 @@ pipeline {
   stages {
     stage('Hello') {
       steps {
-        sh 'ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY playbooks/check_user.yaml -extra-vars '{"USERNAME":"${params.USERNAME}"}'' 
-        
+        sh 'ansible-playbook -i inventory/hosts --private-key="$ANSIBLE_PRIVATE_KEY" playbooks/check_user.yaml --extra-vars '{"USERNAME":"'"${params.USERNAME}"'"}''
+
       }
     }
   }
