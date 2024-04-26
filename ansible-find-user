@@ -1,13 +1,21 @@
 pipeline {
-  agent { label 'linux' }
-  environment {
-   ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
-  }
-  stages {
-    stage('Hello') {
-      steps {
-        sh 'ansible-playbook -i inventory/hosts --private-key="$ANSIBLE_PRIVATE_KEY" playbooks/check_user.yaml --extra-vars '{"USERNAME":"${params.USERNAME}"}''
+    agent any
 
-      }
+    parameters {
+        string(name: 'USERNAMES', defaultValue: '', description: 'Enter usernames to check (comma-separated)')
     }
-  }
+
+    stages {
+        stage('Check Users') {
+            steps {
+                script {
+                    checkout scm // This fetches the Jenkinsfile and other files from the repository
+                    ansiblePlaybook(
+                        playbook: 'playbooks/check_users.yml',
+                        inventory: 'inventory/hosts',
+                        extraVars: [usernames: params.USERNAMES]
+                    )
+                }
+            }
+        }
+    }
