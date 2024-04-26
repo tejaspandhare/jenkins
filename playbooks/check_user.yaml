@@ -1,15 +1,12 @@
 ---
-- name: Check if user exists
-  hosts: all  # Define the target hosts here or use a specific group
-
+- name: Check User
+  hosts: localhost
   tasks:
-    - name: Check if the user exists
-      #become: true  # If needed, run this task with sudo
-      #become_user: root  # If needed, run this task as a specific user
-      user:
-        name: "{{ USERNAME }}"  # Username to check
-      register: user_exists
+    - name: Check if user exists
+      command: "id {{ username }}"
+      register: user_check
+      ignore_errors: yes
 
-    - name: Print the result
+    - name: Display result
       debug:
-        msg: "User '{{ USERNAME }}' {{ 'exists' if user_exists|bool else 'does not exist' }}"
+        msg: "{{ 'User exists' if user_check.rc == 0 else 'User does not exist' }}"
