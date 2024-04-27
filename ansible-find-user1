@@ -1,1 +1,25 @@
 
+pipeline {
+    agent any
+    environment {
+     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+  }
+    parameters {
+        string(name: 'targetUsername', defaultValue: '', description: 'Username to check')
+    }
+
+    stages {
+        stage('Check Local User') {
+            steps {
+                script {
+                    
+                        sh """
+                        
+                        ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_user.yaml --private-key=$ANSIBLE_PRIVATE_KEY
+                        """
+                    
+                }
+            }
+        }
+    }
+}
