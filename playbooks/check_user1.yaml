@@ -13,5 +13,6 @@
       ignore_errors: true
 
     - debug:
-        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}."
+        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
+      delegate_to: "{{ inventory_hostname }}"
       when: user_info.rc == 0
