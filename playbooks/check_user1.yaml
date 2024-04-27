@@ -14,5 +14,5 @@
 
     - debug:
         msg: "User '{{ target_username }}' does not exist on {{ inventory_hostname }}"
-      #delegate_to: localhost
+      delegate_to: all
       when: user_info.rc != 0
