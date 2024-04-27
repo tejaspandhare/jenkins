@@ -11,7 +11,7 @@ pipeline {
         stage('Check Local User') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'your-credentials-id', passwordVariable: 'ANSIBLE_PRIVATE_KEY', usernameVariable: '')]) {
+                    withCredentials([usernamePassword(credentialsId: 'automation-key', passwordVariable: 'ANSIBLE_PRIVATE_KEY', usernameVariable: '')]) {
                         sh """
                         export TARGET_USERNAME=${params.targetUsername}
                         ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_local_user.yml, --private-key=$ANSIBLE_PRIVATE_KEY
