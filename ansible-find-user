@@ -1,7 +1,7 @@
 pipeline {
     agent any
     environment {
-       ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
   }
     parameters {
         string(name: 'targetUsername', defaultValue: '', description: 'Username to check')
