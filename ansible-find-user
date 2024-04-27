@@ -2,20 +2,22 @@ pipeline {
     agent any
 
     parameters {
-        string(name: 'USERNAMES', defaultValue: '', description: 'Enter usernames to check (comma-separated)')
+        string(name: 'targetUsername', defaultValue: '', description: 'Username to check')
     }
 
     stages {
-        stage('Check Users') {
+        stage('Check Local User') {
             steps {
                 script {
-                    checkout scm // This fetches the Jenkinsfile and other files from the repository
-                    ansiblePlaybook(
-                        playbook: 'playbooks/check_users.yml',
-                        inventory: 'inventory/hosts',
-                        extraVars: [usernames: params.USERNAMES]
-                    )
+                    withCredentials([usernamePassword(credentialsId: 'your-credentials-id', passwordVariable: 'ANSIBLE_PRIVATE_KEY', usernameVariable: '')]) {
+                        sh """
+                        export ANSIBLE_PRIVATE_KEY
+                        export TARGET_USERNAME=${params.targetUsername}
+                        ansible-playbook -i all, -e ansible_connection=local check_local_user.yml
+                        """
+                    }
                 }
             }
         }
     }
+}
