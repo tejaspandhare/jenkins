@@ -12,7 +12,7 @@ pipeline {
                 script {
                     
                         sh """
-                        
+                        export TARGET_USERNAME=${params.targetUsername}
                         ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_user.yaml --private-key=$ANSIBLE_PRIVATE_KEY
                         """
                     
