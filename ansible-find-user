@@ -16,7 +16,7 @@ pipeline {
                         export TARGET_USERNAME=${params.targetUsername}
                         ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_local_user.yml, --private-key=$ANSIBLE_PRIVATE_KEY
                         """
-                    }
+                    
                 }
             }
         }
