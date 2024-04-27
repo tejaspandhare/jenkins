@@ -5,8 +5,7 @@ pipeline {
      ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
   }
 
-    }
-
+    
     stages {
         stage('Check Local User') {
             steps {
