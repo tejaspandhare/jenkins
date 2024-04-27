@@ -13,7 +13,6 @@ pipeline {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'your-credentials-id', passwordVariable: 'ANSIBLE_PRIVATE_KEY', usernameVariable: '')]) {
                         sh """
-                        export ANSIBLE_PRIVATE_KEY
                         export TARGET_USERNAME=${params.targetUsername}
                         ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_local_user.yml
                         """
