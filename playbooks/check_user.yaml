@@ -1,12 +1,16 @@
 ---
-- name: Check User
+- name: Check Local User
   hosts: localhost
-  tasks:
-    - name: Check if user exists
-      command: "id {{ username }}"
-      register: user_check
-      ignore_errors: yes
+  gather_facts: false
 
-    - name: Display result
-      debug:
-        msg: "{{ 'User exists' if user_check.rc == 0 else 'User does not exist' }}"
+  vars:
+    target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+
+  tasks:
+    - name: Display local user
+      command: "id {{ target_username }}"
+      register: user_info
+      ignore_errors: true
+
+    - debug:
+        msg: "User '{{ target_username }}' {{ 'exists.' if user_info.rc == 0 else 'does not exist.' }}"
