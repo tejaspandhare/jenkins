@@ -13,7 +13,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts, -e ansible_connection=local playbooks/check_user1.yaml --private-key=$ANSIBLE_PRIVATE_KEY
+                        ansible-playbook -i inventory/hosts,  playbooks/check_user1.yaml --private-key=$ANSIBLE_PRIVATE_KEY
                         """
                     
                 }
