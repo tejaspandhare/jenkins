@@ -1,6 +1,6 @@
 ---
 - name: Check Local User
-  hosts: kmaster1
+  hosts: all
   gather_facts: false
 
   vars:
