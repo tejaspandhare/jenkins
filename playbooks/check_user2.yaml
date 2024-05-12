@@ -19,4 +19,3 @@
     - debug:
         msg: "User '{{ target_username }}' does not exist on {{ inventory_hostname }}"
       when: user_info.rc != 0
-
