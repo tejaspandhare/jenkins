@@ -12,12 +12,6 @@
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
 
   tasks:
-    - name: Check if server is reachable
-      ping:
-      register: ping_result
-      delegate_to: "{{ server_name }}"
-      ignore_errors: true
-
     - name: Display local user
       command: "id {{ target_username }}"
       register: user_info
