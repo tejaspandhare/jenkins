@@ -1,6 +1,6 @@
 ---
 - name: Check Local User
-  hosts: localhost
+  hosts: all
   gather_facts: false
 
   vars_prompt:
@@ -22,8 +22,11 @@
       command: "id {{ target_username }}"
       register: user_info
       ignore_errors: true
-      when: ping_result|success
 
     - debug:
         msg: "User '{{ target_username }}' exists on {{ server_name }}"
-      when: user_info.rc == 0 and ping_result|success
+      when: user_info.rc == 0
+
+    - debug:
+        msg: "User '{{ target_username }}' does not exist on {{ server_name }}"
+      when: user_info.rc != 0
