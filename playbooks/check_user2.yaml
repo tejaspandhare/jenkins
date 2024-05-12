@@ -1,0 +1,29 @@
+---
+- name: Check Local User
+  hosts: localhost
+  gather_facts: false
+
+  vars_prompt:
+    - name: server_name
+      prompt: "Enter the server name:"
+      private: no
+
+  vars:
+    target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+
+  tasks:
+    - name: Check if server is reachable
+      ping:
+      register: ping_result
+      delegate_to: "{{ server_name }}"
+      ignore_errors: true
+
+    - name: Display local user
+      command: "id {{ target_username }}"
+      register: user_info
+      ignore_errors: true
+      when: ping_result|success
+
+    - debug:
+        msg: "User '{{ target_username }}' exists on {{ server_name }}"
+      when: user_info.rc == 0 and ping_result|success
