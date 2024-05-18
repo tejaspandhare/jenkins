@@ -1,0 +1,19 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'server_name', defaultValue: '', description: 'Name of the server to search')
+    }
+
+    stages {
+        stage('Check Local User') {
+            steps {
+                script {
+                    sh """
+                    ansible-playbook -i inventory/hosts --extra-vars 'server_name=${params.server_name}' playbooks/check_user2.yaml --private-key=$ANSIBLE_PRIVATE_KEY
+                    """
+                }
+            }
+        }
+    }
+}
