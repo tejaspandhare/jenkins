@@ -5,6 +5,7 @@
 
   vars:
     user_name: "{{ lookup('env', 'USER_NAME') }}"
+    server_name: "{{ lookup('env', 'SERVER_NAME') }}"
 
   tasks:
     - name: Display local user
