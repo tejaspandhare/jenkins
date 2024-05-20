@@ -16,3 +16,8 @@
         msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
       delegate_to: all
       when: user_info.rc == 0
+
+    - debug:
+        msg: "User '{{ target_username }}' doe not exist on {{ inventory_hostname }}"
+      delegate_to: all
+      when: user_info.rc != 0
