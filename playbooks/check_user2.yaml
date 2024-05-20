@@ -1,21 +1,18 @@
 ---
 - name: Check Local User
-  hosts: all
+  hosts: lb
   gather_facts: false
 
   vars:
-    user_name: "{{ lookup('env', 'USER_NAME') }}"
-   
+    target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+
   tasks:
     - name: Display local user
-      command: "id {{ user_name }}"
+      command: "id {{ target_username }}"
       register: user_info
       ignore_errors: true
 
     - debug:
-        msg: "User '{{ user_name }}' exists on {{ inventory_hostname }}"
+        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
+      delegate_to: all
       when: user_info.rc == 0
-
-    - debug:
-        msg: "User '{{ user_name }}' does not exist on {{ inventory_hostname }}"
-      when: user_info.rc != 0
