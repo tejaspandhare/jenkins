@@ -5,7 +5,6 @@
 
   vars:
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-  vars:
     server_name: "{{ lookup('env', 'SERVER_NAME') }}"
   
   tasks:
