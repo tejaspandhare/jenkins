@@ -5,6 +5,7 @@
 
   vars:
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+    server_name: "{{ inventory_hostname }}"
 
   tasks:
     - name: Display local user
@@ -13,6 +14,6 @@
       ignore_errors: true
 
     - debug:
-        msg: "User '{{ target_username }}' exists on {{ inventory_hostname  }}"
+        msg: "User '{{ target_username }}' exists on {{ server_name }}"
       delegate_to: all
       when: user_info.rc == 0
