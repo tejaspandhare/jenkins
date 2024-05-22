@@ -1,11 +1,11 @@
 ---
 - name: Check Local User
-  hosts: all
+  hosts: lb
   gather_facts: false
 
   vars:
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-  
+
   tasks:
     - name: Display local user
       command: "id {{ target_username }}"
@@ -14,4 +14,5 @@
 
     - debug:
         msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
+      delegate_to: all
       when: user_info.rc == 0
