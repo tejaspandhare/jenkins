@@ -4,6 +4,7 @@
   gather_facts: false
 
   vars:
+    server_name: "{{ lookup('env', 'SERVER_NAME') }}"
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
 
   tasks:
