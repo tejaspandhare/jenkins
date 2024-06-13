@@ -1,0 +1,18 @@
+---
+- name: Check Local User
+  hosts: "{{ hosts }}"
+  gather_facts: false
+
+  vars:
+    target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+
+  tasks:
+    - name: Display local user
+      command: "id {{ target_username }}"
+      register: user_info
+      ignore_errors: true
+
+    - debug:
+        msg: "User '{{ target_username }}' exists on {{ item }}"
+      with_items: "{{ ansible_play_hosts }}"
+      when: user_info.rc == 0
