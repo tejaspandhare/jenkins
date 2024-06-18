@@ -1,0 +1,29 @@
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'SERVER_NAME', defaultValue: '', description: 'Server name to execute playbook on')
+    }
+    
+    stages {
+        stage('Execute Ansible Playbook') {
+            steps {
+                script {
+                    // Construct the Ansible command
+                    def ansibleCommand = "ansible-playbook -i inventory/hosts playbooks/check_user3.yaml"
+                    
+                    // Append private key option if available
+                    if (env.ANSIBLE_PRIVATE_KEY) {
+                        ansibleCommand += " --private-key=${env.ANSIBLE_PRIVATE_KEY}"
+                    }
+                    
+                    // Pass the server name as an extra variable
+                    ansibleCommand += " -e 'hosts=${params.SERVER_NAME}'"
+                    
+                    // Execute the Ansible command
+                    sh ansibleCommand
+                }
+            }
+        }
+    }
+}
