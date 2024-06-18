@@ -1,7 +1,7 @@
 ---
 - name: Check Local User
-  #hosts: "{{ hosts }}"
-  hosts: "{{ hosts.split(',') }}"
+  hosts: "{{ hosts.split(',') }}"  # Split SERVER_NAME into a list
+
   gather_facts: false
 
   vars:
@@ -15,5 +15,4 @@
 
     - debug:
         msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
-      with_items: "{{ ansible_play_hosts }}"
       when: user_info.rc == 0
