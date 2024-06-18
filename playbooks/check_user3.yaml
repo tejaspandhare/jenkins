@@ -6,6 +6,8 @@
 
   vars:
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+    results_file: "/var/jenkins_home/jobs/demopod1/results.txt"
+    jenkins_job_id: "{{ lookup('env', 'BUILD_ID', default='Unknown') }}"  # Use Jenkins BUILD_ID environment variable
 
   tasks:
     - name: Display local user
