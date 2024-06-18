@@ -1,6 +1,7 @@
 ---
 - name: Check Local User
-  hosts: "{{ hosts }}"
+  #hosts: "{{ hosts }}"
+  hosts: "{{ hosts.split(',') }}"
   gather_facts: false
 
   vars:
