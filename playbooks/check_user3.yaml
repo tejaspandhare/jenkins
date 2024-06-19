@@ -6,7 +6,7 @@
 
   vars:
     target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-    results_file: "/var/jenkins_home/jobs/demopod1/results.txt"
+    results_file: "{{ lookup('env', 'WORKSPACE') }}/results.txt"
     jenkins_job_id: "{{ lookup('env', 'BUILD_ID', default='Unknown') }}"  # Use Jenkins BUILD_ID environment variable
 
   tasks:
@@ -14,7 +14,15 @@
       command: "id {{ target_username }}"
       register: user_info
       ignore_errors: true
+      args:
+        chdir: "{{ lookup('env', 'WORKSPACE') }}"  # Change to Jenkins workspace directory
+
+    - name: Save output to file
+      copy:
+        content: "{{ user_info.stdout }}"
+        dest: "{{ results_file }}"
+      when: user_info.rc == 0
 
     - debug:
-        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
+        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}. Output saved in {{ results_file }}"
       when: user_info.rc == 0
