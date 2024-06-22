@@ -34,3 +34,8 @@
       loop_control:
         loop_var: item
       when: item.rc != 0
+
+    # Final summary message
+    - name: Final message
+      debug:
+        msg: "User existence check completed across all hosts."
