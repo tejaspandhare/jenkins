@@ -1,0 +1,27 @@
+---
+- name: Check Local User
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: false
+
+  vars:
+    # Splitting TARGET_USERNAME into a list of usernames
+    target_usernames_list: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
+
+  tasks:
+    # Loop through each username in the list
+    - name: Check existence of multiple users
+      command: "id {{ item }}"
+      register: user_info
+      ignore_errors: true
+      loop: "{{ target_usernames_list }}"
+      loop_control:
+        loop_var: item
+
+    # Debug message for each user
+    - name: Display user existence
+      debug:
+        msg: "User '{{ item }}' exists on {{ inventory_hostname }}"
+      loop: "{{ target_usernames_list }}"
+      loop_control:
+        loop_var: item
+      when: user_info.results[loop.index0].rc == 0
