@@ -41,7 +41,7 @@
     # Aggregate results into a list
     - set_fact:
         user_existence_results: "{{ user_existence_results + [{'host': inventory_hostname, 'username': item.item, 'exists': user_exists_result.changed | default(false), 'not_exists': user_not_exists_result.changed | default(false)}] }}"
-      loop: "{{ target_usernames_list }}"
+      loop: "{{ user_info.results }}"
       loop_control:
         loop_var: item
 
