@@ -5,7 +5,7 @@
 
   vars:
     #target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-    target_username: "{{ lookup('env', 'TARGET_USERNAME'(';')) | quote }}"
+    target_username: "{{ lookup('env', 'TARGET_USERNAME.split(';')') | quote }}"
     
   tasks:
     - name: Display local user
