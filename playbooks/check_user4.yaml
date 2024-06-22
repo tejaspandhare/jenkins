@@ -40,7 +40,10 @@
 
     # Aggregate results into a list
     - set_fact:
-        user_existence_results: "{{ user_existence_results + [{'host': inventory_hostname, 'user_exists': user_exists_result.changed | default(false), 'user_not_exists': user_not_exists_result.changed | default(false)}] }}"
+        user_existence_results: "{{ user_existence_results + [{'host': inventory_hostname, 'username': item.item, 'exists': user_exists_result.changed | default(false), 'not_exists': user_not_exists_result.changed | default(false)}] }}"
+      loop: "{{ target_usernames_list }}"
+      loop_control:
+        loop_var: item
 
     # Final summary message
     - name: Final message
@@ -49,10 +52,10 @@
           User existence check completed across all hosts:
           {% for result in user_existence_results %}
           - Host: {{ result.host }}
-            {% if result.user_exists %}
-            - User exists
+            {% if result.exists %}
+            - User '{{ result.username }}' exists
             {% endif %}
-            {% if result.user_not_exists %}
-            - User does not exist
+            {% if result.not_exists %}
+            - User '{{ result.username }}' does not exist
             {% endif %}
           {% endfor %}
