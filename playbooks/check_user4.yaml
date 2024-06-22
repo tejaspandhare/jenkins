@@ -25,16 +25,10 @@
       loop_control:
         loop_var: item
 
-    # Final summary message
-    - name: Final message
+    # Final message per host
+    - name: Final message per host
       debug:
-        msg: |
-          User existence check completed across all hosts:
-          {% for result in user_existence_results %}
-          - Host: {{ result.host }}
-            {% if result.exists %}
-            - User '{{ result.username }}' exists
-            {% else %}
-            - User '{{ result.username }}' does not exist
-            {% endif %}
-          {% endfor %}
+        msg: "User {{ 'exists' if result.exists else 'does not exist' }} on {{ inventory_hostname }}"
+      loop: "{{ user_existence_results }}"
+      loop_control:
+        loop_var: result
