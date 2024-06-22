@@ -8,6 +8,11 @@
     target_usernames_list: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
     user_existence_results: []  # Initialize an empty list to store results
 
+    # Define colors for existence and non-existence
+    color_exists: '\033[0;32m'  # Green color
+    color_not_exists: '\033[0;31m'  # Red color
+    color_reset: '\033[0m'  # Reset to default color
+
   tasks:
     # Loop through each username in the list
     - name: Check existence of multiple users
@@ -28,7 +33,8 @@
     # Final message per host
     - name: Final message per host
       debug:
-        msg: "User {{ 'exists' if result.exists else 'does not exist' }} on {{ inventory_hostname }}"
+        msg: >
+          "User {{ color_exists if result.exists else color_not_exists }}{{ 'exists' if result.exists else 'does not exist' }}{{ color_reset }} on {{ inventory_hostname }}"
       loop: "{{ user_existence_results }}"
       loop_control:
         loop_var: result
