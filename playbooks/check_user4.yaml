@@ -17,16 +17,16 @@
       loop_control:
         loop_var: item
 
-    # Debug message for each user
+    # Debug message for each user existence
     - name: Display user existence
       debug:
-        msg: "User '{{ item }}' exists on {{ inventory_hostname }}"
-      loop: "{{ user_info.results | map(attribute='item') | list }}"
-      when: item.rc == 0
+        msg: "User '{{ item.item }}' exists on {{ inventory_hostname }}"
+      loop: "{{ user_info.results }}"
+      when: item.stdout != ""  # Check if there is stdout to determine existence
 
-    # Debug message for non-existing users
+    # Debug message for each user non-existence
     - name: Display user does not exist
       debug:
-        msg: "User '{{ item }}' does not exist on {{ inventory_hostname }}"
-      loop: "{{ user_info.results | rejectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
-      when: item.rc != 0
+        msg: "User '{{ item.item }}' does not exist on {{ inventory_hostname }}"
+      loop: "{{ user_info.results }}"
+      when: item.stdout == ""  # Check if stdout is empty to determine non-existence
