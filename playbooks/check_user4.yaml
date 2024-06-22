@@ -20,13 +20,13 @@
     # Debug message for each user
     - name: Display user existence
       debug:
-        msg: "User '{{ item.item }}' exists on {{ inventory_hostname }}"
-      delegate_to: all  
+        msg: "User '{{ item }}' exists on {{ inventory_hostname }}"
+      loop: "{{ user_info.results | map(attribute='item') | list }}"
       when: item.rc == 0
 
     # Debug message for non-existing users
     - name: Display user does not exist
       debug:
-        msg: "User '{{ item.item }}' does not exist on {{ inventory_hostname }}"
-      delegate_to: all
+        msg: "User '{{ item }}' does not exist on {{ inventory_hostname }}"
+      loop: "{{ user_info.results | rejectattr('rc', 'eq', 0) | map(attribute='item') | list }}"
       when: item.rc != 0
