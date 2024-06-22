@@ -4,8 +4,9 @@
   gather_facts: false
 
   vars:
-    target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-
+    #target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
+    target_username: "{{ lookup('env', 'TARGET_USERNAME') | quote }}"
+    
   tasks:
     - name: Display local user
       command: "id {{ target_username }}"
