@@ -20,8 +20,8 @@
     # Debug message for each user
     - name: Display user existence
       debug:
-        msg: "User '{{ item }}' exists on {{ inventory_hostname }}"
-      loop: "{{ target_usernames_list }}"
+        msg: "User '{{ item.item }}' exists on {{ inventory_hostname }}"
+      loop: "{{ user_info.results }}"
       loop_control:
         loop_var: item
-      when: user_info.results[loop.index].rc == 0
+      when: item.rc == 0
