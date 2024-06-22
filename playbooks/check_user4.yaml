@@ -30,8 +30,11 @@
       debug:
         msg: |
           User existence check completed across all hosts:
-
           {% for result in user_existence_results %}
           - Host: {{ result.host }}
-            - User '{{ result.username }}' {% if result.exists %}exists{% else %}does not exist{% endif %}
+            {% if result.exists %}
+            - User '{{ result.username }}' exists
+            {% else %}
+            - User '{{ result.username }}' does not exist
+            {% endif %}
           {% endfor %}
