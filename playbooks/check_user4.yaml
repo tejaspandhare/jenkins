@@ -6,8 +6,7 @@
   vars:
     # Splitting TARGET_USERNAME into a list of usernames
     target_usernames_list: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
-    user_existence_results: []  # Initialize an empty list to store results
-
+  
   tasks:
     # Loop through each username in the list
     - name: Check existence of multiple users
@@ -26,7 +25,6 @@
       loop_control:
         loop_var: item
       when: item.rc == 0
-      register: user_exists_result
 
     # Debug message for non-existing users
     - name: Display user does not exist
@@ -36,26 +34,3 @@
       loop_control:
         loop_var: item
       when: item.rc != 0
-      register: user_not_exists_result
-
-    # Aggregate results into a list
-    - set_fact:
-        user_existence_results: "{{ user_existence_results + [{'host': inventory_hostname, 'username': item.item, 'exists': user_exists_result.changed | default(false), 'not_exists': user_not_exists_result.changed | default(false)}] }}"
-      loop: "{{ user_info.results }}"
-      loop_control:
-        loop_var: item
-
-    # Final summary message
-    - name: Final message
-      debug:
-        msg: |
-          User existence check completed across all hosts:
-          {% for result in user_existence_results %}
-          - Host: {{ result.host }}
-            {% if result.exists %}
-            - User '{{ result.username }}' exists
-            {% endif %}
-            {% if result.not_exists %}
-            - User '{{ result.username }}' does not exist
-            {% endif %}
-          {% endfor %}
