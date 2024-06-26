@@ -1,0 +1,23 @@
+---
+- name: Perform Maintenance Tasks
+  hosts: your_target_hosts  # Specify your target hosts or group here
+  become: true  # To run commands with sudo privileges
+
+  tasks:
+    - name: Remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap list --all"
+      register: snap_list_output
+      changed_when: false
+
+    - name: Process snap list output and remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
+      with_items: "{{ snap_list_output.stdout_lines }}"
+      when: "'disabled' in item"
+      changed_when: false
+
+    - name: Vacuum journalctl logs to limit size to 20M
+      ansible.builtin.shell:
+        cmd: "journalctl --vacuum-size=20M"
+      changed_when: false
