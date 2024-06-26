@@ -1,7 +1,7 @@
 ---
 - name: Perform Maintenance Tasks
-  hosts: your_target_hosts  # Specify your target hosts or group here
-  become: true  # To run commands with sudo privileges
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: false
 
   tasks:
     - name: Remove disabled snaps
