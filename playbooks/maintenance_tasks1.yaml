@@ -1,0 +1,43 @@
+---
+- name: Perform Maintenance Tasks
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: false
+
+  tasks:
+    - name: Remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap list --all"
+      register: snap_list_output
+      changed_when: false
+
+    - name: Process snap list output and remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
+      with_items: "{{ snap_list_output.stdout_lines }}"
+      when: "'disabled' in item"
+      changed_when: false
+
+    - name: Vacuum journalctl logs to limit size to 20M
+      ansible.builtin.shell:
+        cmd: "journalctl --vacuum-size=20M"
+      changed_when: false
+
+    - name: Perform apt autoremove
+      ansible.builtin.shell:
+        cmd: "apt autoremove -y"
+      changed_when: false
+
+    - name: Check disk usage of /var and /boot
+      ansible.builtin.shell:
+        cmd: "du -sh /var /boot"
+      register: disk_usage_output
+      changed_when: false
+
+    - name: Format disk usage output
+      set_fact:
+        formatted_disk_usage: "{{ disk_usage_output.stdout_lines | map('regex_replace', '^([0-9.]+)([A-Za-z]+)\t(.*)$', '\\3 \\1\\2') | list }}"
+      changed_when: false
+
+    - name: Display formatted disk usage output
+      debug:
+        msg: "{{ formatted_disk_usage }}"
