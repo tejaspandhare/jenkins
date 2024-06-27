@@ -33,6 +33,13 @@
       register: disk_usage_output
       changed_when: false
 
-    - name: Display disk usage output
+    - name: Format disk usage output
+      set_fact:
+        formatted_disk_usage:
+          - "{{ item.split('\t')[1] }} {{ item.split('\t')[0] }}"
+      with_items: "{{ disk_usage_output.stdout_lines }}"
+      changed_when: false
+
+    - name: Display formatted disk usage output
       debug:
-        var: disk_usage_output.stdout_lines
+        msg: "{{ formatted_disk_usage }}"
