@@ -21,3 +21,13 @@
       ansible.builtin.shell:
         cmd: "journalctl --vacuum-size=20M"
       changed_when: false
+
+    - name: Perform apt autoremove
+      ansible.builtin.shell:
+        cmd: "apt autoremove -y"
+      changed_when: false
+
+    - name: Check disk usage of /var and /boot
+      ansible.builtin.shell:
+        cmd: "du -sh /var /boot"
+      changed_when: false
