@@ -1,7 +1,6 @@
 ---
 - name: Perform Maintenance Tasks
-  #hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  hosts: "{{ hosts.split(' ') }}"  # Split SERVER_NAME into a list based on spaces
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: false
 
   tasks:
