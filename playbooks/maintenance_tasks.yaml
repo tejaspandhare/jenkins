@@ -39,7 +39,3 @@
           - "{{ item.split('\t')[1] }} {{ item.split('\t')[0] }}"
       with_items: "{{ disk_usage_output.stdout_lines }}"
       changed_when: false
-
-    - name: Display formatted disk usage output
-      debug:
-        msg: "{{ formatted_disk_usage }}"
