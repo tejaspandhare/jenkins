@@ -42,7 +42,7 @@
 
     - name: Update OS patches (apt update and apt dist-upgrade)
       ansible.builtin.shell:
-        cmd: "apt update && apt dist-upgrade -y -qq"
+        cmd: "apt update && dpkg --configure -a && apt dist-upgrade -y"
       changed_when: false
 
     - name: Get current OS version before patching
