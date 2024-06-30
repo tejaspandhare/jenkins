@@ -24,7 +24,7 @@
 
     - name: Perform apt update to check for updates
       ansible.builtin.shell:
-        cmd: "apt update && dpkg --configure -a"
+        cmd: "apt update && dpkg  --configure -a"
       changed_when: false
 
     - name: Check kernel version before patching
@@ -39,39 +39,24 @@
       register: apt_upgrade_simulate
       changed_when: false
 
-    - name: Prompt for service restart confirmation if upgrades are detected
-      ansible.builtin.pause:
-        prompt: "Some packages may need to be upgraded. Proceed with package upgrades and restart services if necessary? (yes/no)"
-      register: upgrade_confirm
-      when: apt_upgrade_simulate.stdout_lines | length > 0
-
-    - name: Perform apt-get dist-upgrade if confirmed
+    - name: Perform apt-get dist-upgrade if upgrades are detected
       ansible.builtin.shell:
-        cmd: "apt-get dist-upgrade -y"
+        cmd: "DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y"
       register: apt_upgrade_result
       changed_when: "'0 upgraded, 0 newly installed' not in apt_upgrade_result.stdout"
-      when: upgrade_confirm.user_input | lower == 'yes'
+      when: apt_upgrade_simulate.stdout_lines | length > 0
+
+    - name: Restart Docker service if upgraded and prompt appears
+      ansible.builtin.command:
+        cmd: "DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall docker.io"
+      register: docker_restart_result
+      changed_when: "'Automatically restart Docker daemon?' in docker_restart_result.stdout"
 
     - name: Check kernel version after patching
       ansible.builtin.command:
         cmd: "uname -r"
       register: kernel_version_after
       changed_when: false
-
-    - name: Restart services if packages were upgraded and confirmed
-      ansible.builtin.service:
-        name: "{{ item }}"
-        state: restarted
-      loop: "{{ apt_upgrade_result.packages }}"
-      when: apt_upgrade_result.changed and upgrade_confirm.user_input | lower == 'yes'
-
-    - name: Reboot if kernel version has changed
-      ansible.builtin.reboot:
-      when: kernel_version_before.stdout != kernel_version_after.stdout
-      async: 0
-      poll: 0
-      ignore_errors: true
-      changed_when: true
 
     - name: Display OS version changes
       ansible.builtin.debug:
