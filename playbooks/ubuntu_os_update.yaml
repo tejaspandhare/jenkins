@@ -42,7 +42,7 @@
 
     - name: Update OS patches (apt update and apt dist-upgrade)
       ansible.builtin.shell:
-        cmd: "apt update && dpkg --configure -a && apt dist-upgrade -y"
+        cmd: "apt update && apt dist-upgrade -y"
       changed_when: false
 
     - name: Get current OS version before patching
@@ -68,8 +68,5 @@
     - name: Display OS version changes
       ansible.builtin.debug:
         msg: |
-          OS version before patching:
-          {{ os_version_before.stdout }}
-
-          OS version after patching and reboot:
-          {{ os_version_after.stdout }}
+          \033[0;32mOS version before patching:\n{{ os_version_before.stdout }}\n\n
+          OS version after patching and reboot:\n{{ os_version_after.stdout }}\n\033[0m
