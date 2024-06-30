@@ -55,6 +55,5 @@
     - name: Display OS version changes
       ansible.builtin.debug:
         msg: |
-          **OS version before patching:** {{ kernel_version_before.stdout }}
-
-          **OS version after patching:** {{ kernel_version_after.stdout }}
+          - Before patching: {{ kernel_version_before.stdout }}
+          - After patching : {{ kernel_version_after.stdout }}
