@@ -22,7 +22,7 @@
         cmd: "journalctl --vacuum-size=20M"
       changed_when: false
 
-    - name: Perform apt update to check for kernel updates
+    - name: Perform apt update to check for updates
       ansible.builtin.shell:
         cmd: "apt update"
       changed_when: false
@@ -35,8 +35,8 @@
 
     - name: Update OS patches (apt dist-upgrade)
       ansible.builtin.shell:
-        cmd: "apt dist-upgrade -y"
-      changed_when: "stdout_lines|select('search', 'The following packages will be upgraded: linux-image-')|list"
+        cmd: "apt-get dist-upgrade -y --with-new-pkgs"
+      changed_when: "stdout | regex_search('^[0-9]+ upgraded')"
 
     - name: Check kernel version after patching
       ansible.builtin.command:
