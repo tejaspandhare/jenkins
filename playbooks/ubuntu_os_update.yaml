@@ -24,7 +24,7 @@
 
     - name: Perform apt update to check for updates
       ansible.builtin.shell:
-        cmd: "apt update"
+        cmd: "apt update  && dpkg --configure -a"
       changed_when: false
 
     - name: Check kernel version before patching
