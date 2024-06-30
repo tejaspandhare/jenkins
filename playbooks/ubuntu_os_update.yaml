@@ -33,16 +33,31 @@
       register: kernel_version_before
       changed_when: false
 
+    - name: Prompt for service restart confirmation before dist-upgrade
+      ansible.builtin.pause:
+        prompt: "Some services may need to be restarted due to package upgrades. Proceed with service restarts? (yes/no)"
+      register: service_restart_confirm
+      when: ansible_distribution == 'Ubuntu'  # Adjust this condition based on your OS distribution
+
     - name: Update OS patches (apt dist-upgrade)
       ansible.builtin.shell:
         cmd: "apt-get dist-upgrade -y"
-      changed_when: false
+      register: apt_upgrade_result
+      changed_when: "'0 upgraded, 0 newly installed' not in apt_upgrade_result.stdout"
+      when: service_restart_confirm.user_input | lower == 'yes'
 
     - name: Check kernel version after patching
       ansible.builtin.command:
         cmd: "uname -r"
       register: kernel_version_after
       changed_when: false
+
+    - name: Restart services if packages were upgraded and confirmed
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+      loop: "{{ apt_upgrade_result.packages }}"
+      when: apt_upgrade_result.changed and service_restart_confirm.user_input | lower == 'yes'
 
     - name: Reboot if kernel version has changed
       ansible.builtin.reboot:
@@ -55,5 +70,6 @@
     - name: Display OS version changes
       ansible.builtin.debug:
         msg: |
-          - Before patching: {{ kernel_version_before.stdout }}
-          - After patching : {{ kernel_version_after.stdout }}
+          OS version changes:
+            - Before patching: {{ kernel_version_before.stdout }}
+            - After patching : {{ kernel_version_after.stdout }}
