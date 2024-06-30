@@ -38,12 +38,26 @@
       register: kernel_version_before
       changed_when: false
 
-    - name: Perform Os patch update
+    - name: Perform OS patch update
       ansible.builtin.shell:
         cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
       register: apt_upgrade_simulate
       changed_when: false
 
+    - name: Check kernel version after patching
+      ansible.builtin.command:
+        cmd: "uname -r"
+      register: kernel_version_after
+      changed_when: false
+
+    - name: Reboot if kernel version has changed
+      ansible.builtin.reboot:
+      when: kernel_version_before.stdout != kernel_version_after.stdout
+      async: 0
+      poll: 0
+      ignore_errors: true
+      changed_when: true
+      
     - name: Check kernel version after patching
       ansible.builtin.command:
         cmd: "uname -r"
