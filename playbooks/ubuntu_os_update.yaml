@@ -36,7 +36,7 @@
     - name: Update OS patches (apt dist-upgrade)
       ansible.builtin.shell:
         cmd: "apt-get dist-upgrade -y"
-      changed_when: "stdout | regex_search('^[0-9]+ upgraded')"
+      changed_when: false
 
     - name: Check kernel version after patching
       ansible.builtin.command:
