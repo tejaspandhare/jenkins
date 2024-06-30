@@ -24,7 +24,7 @@
 
     - name: Perform apt update to check for updates
       ansible.builtin.shell:
-        cmd: "apt update && dpkg  --configure -a"
+        cmd: "apt update"
       changed_when: false
 
     - name: Check kernel version before patching
@@ -46,11 +46,20 @@
       changed_when: "'0 upgraded, 0 newly installed' not in apt_upgrade_result.stdout"
       when: apt_upgrade_simulate.stdout_lines | length > 0
 
-    - name: Restart Docker service if upgraded and prompt appears
-      ansible.builtin.command:
-        cmd: "DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall docker.io"
-      register: docker_restart_result
-      changed_when: "'Automatically restart Docker daemon?' in docker_restart_result.stdout"
+    - name: Reinstall packages if prompted for restarts
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall {{ item }}"
+      register: service_restart_result
+      changed_when: "'restart' in service_restart_result.stderr or 'restart' in service_restart_result.stdout"
+      loop: "{{ apt_upgrade_result.packages | map(attribute='name') | list }}"
+      when: "'restart' in apt_upgrade_result.stderr"
+
+    - name: Restart services if reinstalled
+      ansible.builtin.service:
+        name: "{{ item.item }}"
+        state: restarted
+      loop: "{{ service_restart_result.results }}"
+      when: item.changed
 
     - name: Check kernel version after patching
       ansible.builtin.command:
