@@ -41,7 +41,7 @@
 
     - name: Prompt for service restart confirmation if upgrades are detected
       ansible.builtin.pause:
-        prompt: "Some packages need to be upgraded. Proceed with package upgrades and restart services if necessary? (yes/no)"
+        prompt: "Some packages may need to be upgraded. Proceed with package upgrades and restart services if necessary? (yes/no)"
       register: upgrade_confirm
       when: apt_upgrade_simulate.stdout_lines | length > 0
 
@@ -62,7 +62,7 @@
       ansible.builtin.service:
         name: "{{ item }}"
         state: restarted
-      loop: "{{ apt_upgrade_result | default({'packages': []}).packages }}"
+      loop: "{{ apt_upgrade_result.packages }}"
       when: apt_upgrade_result.changed and upgrade_confirm.user_input | lower == 'yes'
 
     - name: Reboot if kernel version has changed
