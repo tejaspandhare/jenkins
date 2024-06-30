@@ -24,7 +24,7 @@
 
     - name: Fix Broken packages
       ansible.builtin.shell:
-        cmd: "NEEDRESTART_MODE=a dpkg --configure -a"
+        cmd: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
       changed_when: false
       
     - name: Perform apt update to check for updates
@@ -40,7 +40,7 @@
 
     - name: Perform Os patch update
       ansible.builtin.shell:
-        cmd: "NEEDRESTART_MODE=a apt dist-upgrade -y"
+        cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
       register: apt_upgrade_simulate
       changed_when: false
 
