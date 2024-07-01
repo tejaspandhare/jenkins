@@ -41,18 +41,21 @@
       register: kernel_version_before
       changed_when: false
 
+    - name: Hold specified packages
+      ansible.builtin.shell:
+        cmd: "apt-mark hold {{ item }}"
+      with_items: "{{ EXCLUDE_PKGS.split(';') }}"
+      when: EXCLUDE_PKGS is defined and EXCLUDE_PKGS | length > 0
+      ignore_errors: true
+      changed_when: false
+
     - name: Perform OS patch update
       ansible.builtin.shell:
         cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
       register: apt_upgrade_simulate
       changed_when: false
 
-    - name: Hold specified packages
-      ansible.builtin.shell:
-        cmd: "apt-mark hold {{ item }}"
-      with_items: "{{ EXCLUDE_PKGS.split() }}"
-      when: EXCLUDE_PKGS is defined and EXCLUDE_PKGS | length > 0
-      changed_when: false
+
 
     - name: Check kernel version after patching
       ansible.builtin.command:
