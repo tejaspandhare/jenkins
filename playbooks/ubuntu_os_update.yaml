@@ -3,6 +3,9 @@
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
 
+  vars:
+    EXCLUDE_PKGS: "package1 package2 package3"
+
   tasks:
     - name: Remove disabled snaps
       ansible.builtin.shell:
@@ -47,7 +50,7 @@
     - name: Hold specified packages
       ansible.builtin.shell:
         cmd: "apt-mark hold {{ item }}"
-      with_items: "{{ EXCLUDE_PKGS }}"
+      with_items: "{{ EXCLUDE_PKGS.split() }}"
       when: EXCLUDE_PKGS is defined and EXCLUDE_PKGS | length > 0
       changed_when: false
 
