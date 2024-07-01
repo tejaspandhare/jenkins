@@ -4,7 +4,8 @@
   gather_facts: true  # Ensure facts are gathered to check OS version
 
   vars:
-    EXCLUDE_PKGS: "package1 package2 package3"
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
+    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
 
   tasks:
     - name: Remove disabled snaps
