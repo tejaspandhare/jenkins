@@ -1,6 +1,8 @@
-  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+---
+- name: Perform SSH fix Tasks
+  hosts: "{{ SERVER_NAME.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
-
+  become: true
   tasks:
     - name: Upgrade SSH on Ubuntu/Debian
       apt:
