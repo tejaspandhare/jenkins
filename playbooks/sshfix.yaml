@@ -1,4 +1,3 @@
-- name: Perform SSH Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
 
