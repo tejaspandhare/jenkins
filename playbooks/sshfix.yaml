@@ -2,17 +2,17 @@
 - name: Perform SSH fix Tasks
   hosts: "{{ SERVER_NAME.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
-    
+
   tasks:
     - name: Upgrade SSH on Ubuntu/Debian
       apt:
-        dpkg_options: 'force-confdef,force-confold'
         name: openssh-server
         state: latest
-        update_cache: true
+        update_cache: yes
+        dpkg_options: 'force-confdef,force-confold'
       register: ssh_update
       when: ansible_os_family == "Debian"
- 
+
     - name: Restart SSH on Ubuntu/Debian
       service:
         name: ssh
@@ -26,7 +26,7 @@
         regexp: "^#?SERVER_NAME"
         line: "SERVER_NAME myserver.example.com"
         validate: "/usr/sbin/sshd -tf %s"
-        backup: true
+        backup: yes
       when: ansible_os_family == "RedHat"
 
     - name: Restart SSH on RedHat
