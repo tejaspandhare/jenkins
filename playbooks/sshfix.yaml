@@ -1,3 +1,4 @@
+---
 - name: Perform SSH fix Tasks
   hosts: "{{ SERVER_NAME.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
@@ -14,7 +15,7 @@
  
     - name: Restart SSH on Ubuntu/Debian
       service:
-        name: ssh.service
+        name: ssh
         state: restarted
       when: ssh_update.changed and ansible_os_family == "Debian"
 
@@ -30,6 +31,6 @@
 
     - name: Restart SSH on RedHat
       service:
-        name: sshd.service
+        name: sshd
         state: restarted
       when: ansible_os_family == "RedHat"
