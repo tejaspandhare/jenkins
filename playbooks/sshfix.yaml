@@ -1,5 +1,7 @@
 ---
-- hosts: "{{ SERVER_NAME.split(';') }}"
+- name: Perform SSH fix Tasks
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: true  # Ensure facts are gathered to check OS version
   gather_facts: true
   become: true
   tasks:
