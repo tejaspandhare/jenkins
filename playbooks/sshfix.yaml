@@ -1,5 +1,5 @@
 ---
-- hosts: all
+- hosts: "{{ SERVER_NAME.split(';') }}"
   gather_facts: true
   become: true
   tasks:
@@ -17,7 +17,7 @@
         name: ssh.service
         state: restarted
       when: ssh_update.changed and ansible_os_family == "Debian"
- 
+
     - name: Modify SSHD Config on RedHat
       lineinfile:
         path: /etc/ssh/sshd_config
@@ -27,7 +27,7 @@
         validate: "/usr/sbin/sshd -tf %s"
         backup: true
       when: ansible_os_family == "RedHat"
- 
+
     - name: Restart SSH on RedHat
       service:
         name: sshd.service
