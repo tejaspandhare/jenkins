@@ -1,0 +1,35 @@
+---
+- hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Upgrade SSH on Ubuntu/Debian
+      apt:
+        dpkg_options: 'force-confdef,force-confold'
+        name: openssh-server
+        state: latest
+        update_cache: true
+      register: ssh_update
+      when: ansible_os_family == "Debian"
+ 
+    - name: Restart SSH on Ubuntu/Debian
+      service:
+        name: ssh.service
+        state: restarted
+      when: ssh_update.changed and ansible_os_family == "Debian"
+ 
+    - name: Modify SSHD Config on RedHat
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        state: present
+        regexp: "^#?SERVER_NAME"
+        line: "SERVER_NAME myserver.example.com"
+        validate: "/usr/sbin/sshd -tf %s"
+        backup: true
+      when: ansible_os_family == "RedHat"
+ 
+    - name: Restart SSH on RedHat
+      service:
+        name: sshd.service
+        state: restarted
+      when: ansible_os_family == "RedHat"
