@@ -19,14 +19,15 @@
         state: restarted
       when: ssh_update.changed and ansible_os_family == "Debian"
 
-    - name: Modify SSHD Config on RedHat
+    - name: Modify sshd config redhat
       lineinfile:
         path: /etc/ssh/sshd_config
-        state: present
-        regexp: "^#?SERVER_NAME"
-        line: "SERVER_NAME myserver.example.com"
+        state:  present
+        regexp: "^LoginGraceTime"
+        insertafter: "^#LoginGraceTime"
+        line: "LoginGraceTime 0"
         validate: "/usr/sbin/sshd -tf %s"
-        backup: yes
+        backup: true
       when: ansible_os_family == "RedHat"
 
     - name: Restart SSH on RedHat
