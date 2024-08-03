@@ -63,7 +63,7 @@
 
     - name: Get the last installed kernel version from dpkg.log
       shell: |
-        grep 'install linux-image' /var/log/dpkg.log | tail -n 1
+        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 |awk '{print $4}' |cut -d ":" -f1
       register: last_kernel_install
       changed_when: false
 
