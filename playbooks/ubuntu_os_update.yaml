@@ -61,22 +61,11 @@
       command: uname -r
       register: kernel_version_before
 
-    - name: Get the last installed kernel version from dpkg.log
+    - name: Get the latest installed kernel version from dpkg.log
       shell: |
-        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 |awk '{print $4}' |cut -d ":" -f1
-      register: last_kernel_install
+        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 |awk '{print $4}' |cut -d ":" -f1 |cut -d "-" -f3-5
+      register: latest_kernel_install
       changed_when: false
-
-    - name: Debug dpkg.log entry
-      debug:
-        msg: "Raw dpkg.log entry: {{ last_kernel_install.stdout }}"
-
-    - name: Extract the newly installed kernel version
-      set_fact:
-        new_kernel_version: >-
-          {{
-            last_kernel_install.stdout | regex_search('linux-image-([0-9.]+-[a-zA-Z0-9.-]+)', '\\1') | default('')
-          }}
 
     - name: Debug extracted kernel version
       debug:
