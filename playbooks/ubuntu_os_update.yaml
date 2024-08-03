@@ -61,7 +61,8 @@
       register: kernel_version_before
 
     - name: Get the last installed kernel version from dpkg.log
-      command: grep 'install linux-image' /var/log/dpkg.log | tail -n 1
+      shell: |
+        grep 'install linux-image' /var/log/dpkg.log | tail -n 1
       register: last_kernel_install
       changed_when: false
 
