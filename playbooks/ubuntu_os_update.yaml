@@ -67,19 +67,16 @@
       register: latest_kernel_install
       changed_when: false
 
-    - name: Debug extracted kernel version
-      debug:
-        msg: "Extracted kernel version: {{ new_kernel_version }}"
 
     - name: Check if a new kernel was installed
       set_fact:
-        reboot_required: "{{ new_kernel_version and kernel_version_before.stdout != new_kernel_version }}"
+        reboot_required: "{{ latest_kernel_install != kernel_version_before }}"
 
     - name: Debug information about kernel versions
       debug:
         msg:
           - "Current kernel version: {{ kernel_version_before.stdout }}"
-          - "New kernel version detected: {{ new_kernel_version }}"
+          - "New kernel version detected: {{ latest_kernel_install }}"
           - "Reboot required: {{ reboot_required }}"
 
     - name: Reboot if a new kernel is installed
