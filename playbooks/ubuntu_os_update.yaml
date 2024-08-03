@@ -72,12 +72,9 @@
 
     - name: Extract the newly installed kernel version
       set_fact:
-        # Improved regex pattern to capture the complete kernel version
         new_kernel_version: >-
           {{
-            (last_kernel_install.stdout
-              | regex_search('linux-image-([0-9.]+-[a-zA-Z0-9.-]+)(?:[^ ]*)', '\\1')
-            ) | default('')
+            last_kernel_install.stdout | regex_search('linux-image-([0-9.-]+-[a-zA-Z0-9.-]+)', '\\1') | default('')
           }}
 
     - name: Display extracted kernel version
@@ -100,4 +97,3 @@
       when: reboot_required
       ignore_errors: true
       changed_when: true
-
