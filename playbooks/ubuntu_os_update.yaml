@@ -66,9 +66,9 @@
       register: last_kernel_install
       changed_when: false
 
-    - name: Display raw dpkg.log entry
+    - name: Debug dpkg.log entry
       debug:
-        msg: "{{ last_kernel_install.stdout }}"
+        msg: "Raw dpkg.log entry: {{ last_kernel_install.stdout }}"
 
     - name: Extract the newly installed kernel version
       set_fact:
@@ -97,3 +97,4 @@
       when: reboot_required
       ignore_errors: true
       changed_when: true
+
