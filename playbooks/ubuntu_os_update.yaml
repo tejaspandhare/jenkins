@@ -74,12 +74,12 @@
       set_fact:
         new_kernel_version: >-
           {{
-            last_kernel_install.stdout | regex_search('linux-image-([0-9.-]+-[a-zA-Z0-9.-]+)', '\\1') | default('')
+            last_kernel_install.stdout | regex_search('linux-image-([0-9.]+-[a-zA-Z0-9.-]+)', '\\1') | default('')
           }}
 
-    - name: Display extracted kernel version
+    - name: Debug extracted kernel version
       debug:
-        msg: "{{ new_kernel_version }}"
+        msg: "Extracted kernel version: {{ new_kernel_version }}"
 
     - name: Check if a new kernel was installed
       set_fact:
