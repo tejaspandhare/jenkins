@@ -63,20 +63,23 @@
 
     - name: Get the latest installed kernel version from dpkg.log
       shell: |
-        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 |awk '{print $4}' |cut -d ":" -f1 |cut -d "-" -f3-5
+        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
       register: latest_kernel_install
       changed_when: false
 
+    - name: Debug extracted latest kernel version
+      debug:
+        msg: "Latest installed kernel version: {{ latest_kernel_install.stdout }}"
 
     - name: Check if a new kernel was installed
       set_fact:
-        reboot_required: "{{ latest_kernel_install != kernel_version_before }}"
+        reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
 
     - name: Debug information about kernel versions
       debug:
         msg:
-          - "Current kernel version: {{ kernel_version_before.stdout }}"
-          - "New kernel version detected: {{ latest_kernel_install }}"
+          - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
+          - "New kernel version detected: {{ latest_kernel_install.stdout.strip() }}"
           - "Reboot required: {{ reboot_required }}"
 
     - name: Reboot if a new kernel is installed
