@@ -56,25 +56,32 @@
       register: apt_upgrade_simulate
       changed_when: false
 
+    - name: Get current kernel version
+      command: uname -r
+      register: kernel_version_before
 
-
-    - name: Check kernel version after patching
-      ansible.builtin.command:
-        cmd: "uname -r"
-      register: kernel_version_after
+    - name: Get the last installed kernel version from dpkg.log
+      command: grep 'install linux-image' /var/log/dpkg.log | tail -n 1
+      register: last_kernel_install
       changed_when: false
 
-    - name: Reboot if kernel version has changed
+    - name: Extract the newly installed kernel version
+      set_fact:
+        new_kernel_version: "{{ (last_kernel_install.stdout | regex_search('linux-image-([0-9.]+)', '\\1')) if last_kernel_install.stdout else '' }}"
+
+    - name: Check if a new kernel was installed
+      set_fact:
+        reboot_required: "{{ new_kernel_version and kernel_version_before.stdout != new_kernel_version }}"
+
+    - name: Debug information about kernel versions
+      debug:
+        msg:
+          - "Current kernel version: {{ kernel_version_before.stdout }}"
+          - "New kernel version detected: {{ new_kernel_version }}"
+          - "Reboot required: {{ reboot_required }}"
+
+    - name: Reboot if a new kernel is installed
       ansible.builtin.reboot:
-      when: kernel_version_before.stdout != kernel_version_after.stdout
-      async: 0
-      poll: 0
+      when: reboot_required
       ignore_errors: true
       changed_when: true
-      
-    - name: Display OS version changes
-      ansible.builtin.debug:
-        msg: |
-          OS version changes:
-            - Before patching: {{ kernel_version_before.stdout }}
-            - After patching : {{ kernel_version_after.stdout }}
