@@ -56,6 +56,7 @@
       register: apt_upgrade_simulate
       changed_when: false
 
+
     - name: Get current kernel version
       command: uname -r
       register: kernel_version_before
@@ -97,4 +98,3 @@
       when: reboot_required
       ignore_errors: true
       changed_when: true
-
