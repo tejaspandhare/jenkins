@@ -66,10 +66,18 @@
       register: last_kernel_install
       changed_when: false
 
+    - name: Display raw dpkg.log entry
+      debug:
+        msg: "{{ last_kernel_install.stdout }}"
+
     - name: Extract the newly installed kernel version
       set_fact:
-        # Adjust the regex pattern to capture the full kernel version string
-        new_kernel_version: "{{ (last_kernel_install.stdout | regex_search('linux-image-([0-9.]+-[^ ]+)', '\\1'))[0] if last_kernel_install.stdout | regex_search('linux-image-([0-9.]+-[^ ]+)', '\\1') else '' }}"
+        # Refine regex pattern to capture the kernel version correctly
+        new_kernel_version: "{{ (last_kernel_install.stdout | regex_search('linux-image-([0-9.-]+)', '\\1'))[0] if last_kernel_install.stdout | regex_search('linux-image-([0-9.-]+)', '\\1') else '' }}"
+
+    - name: Display extracted kernel version
+      debug:
+        msg: "{{ new_kernel_version }}"
 
     - name: Check if a new kernel was installed
       set_fact:
