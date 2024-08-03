@@ -3,6 +3,7 @@ pipeline {
     agent any
     environment {
      ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+     ANSIBLE_FORCE_COLOR = 'true'
   }
 
     
