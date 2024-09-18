@@ -41,17 +41,22 @@
 
     - name: Create CSV file header
       lineinfile:
-        path: "{{ lookup('env', 'WORKSPACE') }}/system_info.csv"
+        path: "system_info.csv"  # Save in the current working directory
         line: "Hostname,Distribution,CPU,RAM,Kernel,Hardware"
         state: present
         create: yes
 
     - name: Append system information to CSV
       lineinfile:
-        path: "{{ lookup('env', 'WORKSPACE') }}/system_info.csv"
+        path: "system_info.csv"
         line: "{{ item.hostname }},{{ item.distribution }},{{ item.cpu }},{{ item.ram }},{{ item.kernel }},{{ item.hardware }}"
       loop: "{{ all_systems_info | sort(attribute='hostname') }}"
 
-    - name: Display path to CSV file
+    - name: Check if CSV file exists
+      stat:
+        path: "system_info.csv"
+      register: csv_file_check
+
+    - name: Debug CSV file existence
       debug:
-        msg: "CSV file created at {{ lookup('env', 'WORKSPACE') }}/system_info.csv"
+        var: csv_file_check.stat.exists
