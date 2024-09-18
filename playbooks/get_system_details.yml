@@ -35,10 +35,6 @@
           kernel: "{{ kernel_version.stdout }}"
           hardware: "{{ hardware_type.stdout }}"
 
-    - name: Gather all system information
-      group_by:
-        key: "all_systems"
-
     - name: Collect all system information for display
       set_fact:
         all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
@@ -47,12 +43,18 @@
       debug:
         msg: |
           ### System Information for **{{ item.hostname }}** ###
-          | **Field**           | **Value**                                     |
-          |---------------------|-----------------------------------------------|
-          | Distribution        | {{ item.distribution | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }} |
-          | CPU                 | {{ item.cpu | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}         |
-          | RAM                 | {{ item.ram | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}         |
-          | Kernel Version      | {{ item.kernel }}                             |
-          | Hardware Type       | {{ item.hardware }}                           |
-          |---------------------|-----------------------------------------------|
+          **Distribution:**
+          {{ item.distribution | regex_replace('\n', '\n  ') }}
+
+          **CPU:**
+          {{ item.cpu | regex_replace('\n', '\n  ') }}
+
+          **RAM:**
+          {{ item.ram | regex_replace('\n', '\n  ') }}
+
+          **Kernel Version:**
+          {{ item.kernel }}
+
+          **Hardware Type:**
+          {{ item.hardware }}
       loop: "{{ all_systems_info | sort(attribute='hostname') }}"
