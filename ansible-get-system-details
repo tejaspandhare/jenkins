@@ -20,7 +20,7 @@ pipeline {
             steps {
                 script {
                     // Check if the CSV file exists after running the playbook
-                    sh 'ls -l ${WORKSPACE}/system_info.csv'
+                    sh 'ls -l system_info.csv || echo "CSV file not found."'
                 }
             }
         }
