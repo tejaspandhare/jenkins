@@ -8,22 +8,42 @@
       command: cat /etc/os-release
       register: distro_info
 
+    - name: Debug distribution info
+      debug:
+        msg: "{{ distro_info.stdout }}"
+
     - name: Get CPU information
       command: lscpu
       register: cpu_info
+
+    - name: Debug CPU info
+      debug:
+        msg: "{{ cpu_info.stdout }}"
 
     - name: Get RAM information
       command: free -h
       register: ram_info
 
+    - name: Debug RAM info
+      debug:
+        msg: "{{ ram_info.stdout }}"
+
     - name: Get kernel version
       command: uname -r
       register: kernel_version
+
+    - name: Debug kernel version
+      debug:
+        msg: "{{ kernel_version.stdout }}"
 
     - name: Get hardware type
       command: sudo dmidecode -s system-product-name
       register: hardware_type
       become: true  # Use become to run as root for dmidecode
+
+    - name: Debug hardware type
+      debug:
+        msg: "{{ hardware_type.stdout }}"
 
     - name: Aggregate information
       set_fact:
@@ -41,20 +61,20 @@
 
     - name: Create CSV file header
       lineinfile:
-        path: "system_info.csv"  # Save in the current working directory
+        path: "/tmp/system_info.csv"  # Save in a writable directory
         line: "Hostname,Distribution,CPU,RAM,Kernel,Hardware"
         state: present
         create: yes
 
     - name: Append system information to CSV
       lineinfile:
-        path: "system_info.csv"
+        path: "/tmp/system_info.csv"
         line: "{{ item.hostname }},{{ item.distribution }},{{ item.cpu }},{{ item.ram }},{{ item.kernel }},{{ item.hardware }}"
       loop: "{{ all_systems_info | sort(attribute='hostname') }}"
 
     - name: Check if CSV file exists
       stat:
-        path: "system_info.csv"
+        path: "/tmp/system_info.csv"
       register: csv_file_check
 
     - name: Debug CSV file existence
