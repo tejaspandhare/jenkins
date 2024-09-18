@@ -8,75 +8,53 @@
       command: cat /etc/os-release
       register: distro_info
 
-    - name: Debug distribution info
-      debug:
-        msg: "{{ distro_info.stdout }}"
-
     - name: Get CPU information
       command: lscpu
       register: cpu_info
-
-    - name: Debug CPU info
-      debug:
-        msg: "{{ cpu_info.stdout }}"
 
     - name: Get RAM information
       command: free -h
       register: ram_info
 
-    - name: Debug RAM info
-      debug:
-        msg: "{{ ram_info.stdout }}"
-
     - name: Get kernel version
       command: uname -r
       register: kernel_version
-
-    - name: Debug kernel version
-      debug:
-        msg: "{{ kernel_version.stdout }}"
 
     - name: Get hardware type
       command: sudo dmidecode -s system-product-name
       register: hardware_type
       become: true  # Use become to run as root for dmidecode
 
-    - name: Debug hardware type
-      debug:
-        msg: "{{ hardware_type.stdout }}"
-
     - name: Aggregate information
       set_fact:
         system_info:
           hostname: "{{ inventory_hostname }}"
-          distribution: "{{ distro_info.stdout | replace('\n', ' ') }}"
-          cpu: "{{ cpu_info.stdout | replace('\n', ' ') }}"
-          ram: "{{ ram_info.stdout | replace('\n', ' ') }}"
+          distribution: "{{ distro_info.stdout }}"
+          cpu: "{{ cpu_info.stdout }}"
+          ram: "{{ ram_info.stdout }}"
           kernel: "{{ kernel_version.stdout }}"
-          hardware: "{{ hardware_type.stdout | replace('\n', ' ') }}"
+          hardware: "{{ hardware_type.stdout }}"
 
-    - name: Collect all system information for CSV
+    - name: Collect all system information for display
       set_fact:
         all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
 
-    - name: Create CSV file header
-      lineinfile:
-        path: "/tmp/system_info.csv"  # Save in a writable directory
-        line: "Hostname,Distribution,CPU,RAM,Kernel,Hardware"
-        state: present
-        create: yes
-
-    - name: Append system information to CSV
-      lineinfile:
-        path: "/tmp/system_info.csv"
-        line: "{{ item.hostname }},{{ item.distribution }},{{ item.cpu }},{{ item.ram }},{{ item.kernel }},{{ item.hardware }}"
-      loop: "{{ all_systems_info | sort(attribute='hostname') }}"
-
-    - name: Check if CSV file exists
-      stat:
-        path: "/tmp/system_info.csv"
-      register: csv_file_check
-
-    - name: Debug CSV file existence
+    - name: Sort and display gathered information
       debug:
-        var: csv_file_check.stat.exists
+        msg: |
+          ### System Information for **{{ item.hostname }}** ###
+          **Distribution:**
+          {{ item.distribution | regex_replace('\n', '\n  ') }}
+
+          **CPU:**
+          {{ item.cpu | regex_replace('\n', '\n  ') }}
+
+          **RAM:**
+          {{ item.ram | regex_replace('\n', '\n  ') }}
+
+          **Kernel Version:**
+          {{ item.kernel }}
+
+          **Hardware Type:**
+          {{ item.hardware }}
+      loop: "{{ all_systems_info | sort(attribute='hostname') }}"
