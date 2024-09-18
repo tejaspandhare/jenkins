@@ -1,5 +1,5 @@
 ---
-- name: Collect System Details
+- name: Perform Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
 
@@ -28,9 +28,14 @@
     - name: Display gathered information
       debug:
         msg: |
-          Distribution: {{ distro_info.stdout }}
-          CPU: {{ cpu_info.stdout }}
-          RAM: {{ ram_info.stdout }}
-          Kernel Version: {{ kernel_version.stdout }}
-          Hardware Type: {{ hardware_type.stdout }}
-
+          **System Information for {{ inventory_hostname }}**
+          - **Distribution**: 
+            {{ distro_info.stdout | replace('\n', ', ') }}
+          - **CPU**: 
+            {{ cpu_info.stdout | replace('\n', ', ') }}
+          - **RAM**: 
+            {{ ram_info.stdout | replace('\n', ', ') }}
+          - **Kernel Version**: 
+            {{ kernel_version.stdout }}
+          - **Hardware Type**: 
+            {{ hardware_type.stdout }}
