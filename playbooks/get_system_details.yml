@@ -29,13 +29,28 @@
       debug:
         msg: |
           **System Information for {{ inventory_hostname }}**
-          - **Distribution**: 
-            {{ distro_info.stdout | replace('\n', ', ') }}
-          - **CPU**: 
-            {{ cpu_info.stdout | replace('\n', ', ') }}
-          - **RAM**: 
-            {{ ram_info.stdout | replace('\n', ', ') }}
-          - **Kernel Version**: 
-            {{ kernel_version.stdout }}
-          - **Hardware Type**: 
-            {{ hardware_type.stdout }}
+          
+          **Distribution:** 
+          ```
+          {{ distro_info.stdout | replace('\n', '\n          ') }}
+          ```
+          
+          **CPU:** 
+          ```
+          {{ cpu_info.stdout | replace('\n', '\n          ') }}
+          ```
+
+          **RAM:** 
+          ```
+          {{ ram_info.stdout | replace('\n', '\n          ') }}
+          ```
+
+          **Kernel Version:** 
+          ```
+          {{ kernel_version.stdout }}
+          ```
+
+          **Hardware Type:** 
+          ```
+          {{ hardware_type.stdout }}
+          ```
