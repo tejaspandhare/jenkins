@@ -39,6 +39,10 @@
       group_by:
         key: "all_systems"
 
+    - name: Collect all system information for display
+      set_fact:
+        all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
+
     - name: Sort and display gathered information
       debug:
         msg: |
@@ -51,4 +55,4 @@
           | Kernel Version      | {{ item.kernel }}                             |
           | Hardware Type       | {{ item.hardware }}                           |
           |---------------------|-----------------------------------------------|
-      loop: "{{ groups['all_systems'] | map('extract', hostvars) | sort(attribute='hostname') }}"
+      loop: "{{ all_systems_info | sort(attribute='hostname') }}"
