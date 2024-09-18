@@ -29,32 +29,29 @@
       set_fact:
         system_info:
           hostname: "{{ inventory_hostname }}"
-          distribution: "{{ distro_info.stdout }}"
-          cpu: "{{ cpu_info.stdout }}"
-          ram: "{{ ram_info.stdout }}"
+          distribution: "{{ distro_info.stdout | replace('\n', ' ') }}"
+          cpu: "{{ cpu_info.stdout | replace('\n', ' ') }}"
+          ram: "{{ ram_info.stdout | replace('\n', ' ') }}"
           kernel: "{{ kernel_version.stdout }}"
-          hardware: "{{ hardware_type.stdout }}"
+          hardware: "{{ hardware_type.stdout | replace('\n', ' ') }}"
 
-    - name: Collect all system information for display
+    - name: Collect all system information for CSV
       set_fact:
         all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
 
-    - name: Sort and display gathered information
-      debug:
-        msg: |
-          ### System Information for **{{ item.hostname }}** ###
-          **Distribution:**
-          {{ item.distribution | regex_replace('\n', '\n  ') }}
+    - name: Create CSV file header
+      lineinfile:
+        path: "{{ lookup('env', 'WORKSPACE') }}/system_info.csv"
+        line: "Hostname,Distribution,CPU,RAM,Kernel,Hardware"
+        state: present
+        create: yes
 
-          **CPU:**
-          {{ item.cpu | regex_replace('\n', '\n  ') }}
-
-          **RAM:**
-          {{ item.ram | regex_replace('\n', '\n  ') }}
-
-          **Kernel Version:**
-          {{ item.kernel }}
-
-          **Hardware Type:**
-          {{ item.hardware }}
+    - name: Append system information to CSV
+      lineinfile:
+        path: "{{ lookup('env', 'WORKSPACE') }}/system_info.csv"
+        line: "{{ item.hostname }},{{ item.distribution }},{{ item.cpu }},{{ item.ram }},{{ item.kernel }},{{ item.hardware }}"
       loop: "{{ all_systems_info | sort(attribute='hostname') }}"
+
+    - name: Display path to CSV file
+      debug:
+        msg: "CSV file created at {{ lookup('env', 'WORKSPACE') }}/system_info.csv"
