@@ -25,22 +25,30 @@
       register: hardware_type
       become: true  # Use become to run as root for dmidecode
 
-    - name: Display gathered information
+    - name: Aggregate information
+      set_fact:
+        system_info:
+          hostname: "{{ inventory_hostname }}"
+          distribution: "{{ distro_info.stdout }}"
+          cpu: "{{ cpu_info.stdout }}"
+          ram: "{{ ram_info.stdout }}"
+          kernel: "{{ kernel_version.stdout }}"
+          hardware: "{{ hardware_type.stdout }}"
+
+    - name: Gather all system information
+      group_by:
+        key: "all_systems"
+
+    - name: Sort and display gathered information
       debug:
         msg: |
-          ### System Information for **{{ inventory_hostname }}** ###
-          
-          **Distribution:** 
-          {{ distro_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
-
-          **CPU:**
-          {{ cpu_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
-
-          **RAM:**
-          {{ ram_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
-
-          **Kernel Version:**
-          {{ kernel_version.stdout }}
-
-          **Hardware Type:**
-          {{ hardware_type.stdout }}
+          ### System Information for **{{ item.hostname }}** ###
+          | **Field**           | **Value**                                     |
+          |---------------------|-----------------------------------------------|
+          | Distribution        | {{ item.distribution | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }} |
+          | CPU                 | {{ item.cpu | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}         |
+          | RAM                 | {{ item.ram | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}         |
+          | Kernel Version      | {{ item.kernel }}                             |
+          | Hardware Type       | {{ item.hardware }}                           |
+          |---------------------|-----------------------------------------------|
+      loop: "{{ groups['all_systems'] | map('extract', hostvars) | sort(attribute='hostname') }}"
