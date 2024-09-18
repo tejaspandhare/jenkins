@@ -28,29 +28,19 @@
     - name: Display gathered information
       debug:
         msg: |
-          **System Information for {{ inventory_hostname }}**
+          ### System Information for **{{ inventory_hostname }}** ###
           
           **Distribution:** 
-          ```
-          {{ distro_info.stdout | replace('\n', '\n          ') }}
-          ```
-          
-          **CPU:** 
-          ```
-          {{ cpu_info.stdout | replace('\n', '\n          ') }}
-          ```
+          {{ distro_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
 
-          **RAM:** 
-          ```
-          {{ ram_info.stdout | replace('\n', '\n          ') }}
-          ```
+          **CPU:**
+          {{ cpu_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
 
-          **Kernel Version:** 
-          ```
+          **RAM:**
+          {{ ram_info.stdout | regex_replace('^', '  ') | regex_replace('\\n', '\\n  ') }}
+
+          **Kernel Version:**
           {{ kernel_version.stdout }}
-          ```
 
-          **Hardware Type:** 
-          ```
+          **Hardware Type:**
           {{ hardware_type.stdout }}
-          ```
