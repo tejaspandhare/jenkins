@@ -1,22 +1,36 @@
 ---
-- name: Perform Maintenance Tasks
+- name: Collect System Details
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
   gather_facts: true  # Ensure facts are gathered to check OS version
 
-  vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
-
   tasks:
-    - name: Remove disabled snaps
-      ansible.builtin.shell:
-        cmd: "snap list --all"
-      register: snap_list_output
-      changed_when: false
+    - name: Get distribution name
+      command: cat /etc/os-release
+      register: distro_info
 
-    - name: Process snap list output and remove disabled snaps
-      ansible.builtin.shell:
-        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
-      with_items: "{{ snap_list_output.stdout_lines }}"
-      when: "'disabled' in item"
-      changed_when: false
+    - name: Get CPU information
+      command: lscpu
+      register: cpu_info
+
+    - name: Get RAM information
+      command: free -h
+      register: ram_info
+
+    - name: Get kernel version
+      command: uname -r
+      register: kernel_version
+
+    - name: Get hardware type
+      command: sudo dmidecode -s system-product-name
+      register: hardware_type
+      become: true  # Use become to run as root for dmidecode
+
+    - name: Display gathered information
+      debug:
+        msg: |
+          Distribution: {{ distro_info.stdout }}
+          CPU: {{ cpu_info.stdout }}
+          RAM: {{ ram_info.stdout }}
+          Kernel Version: {{ kernel_version.stdout }}
+          Hardware Type: {{ hardware_type.stdout }}
+
