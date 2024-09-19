@@ -27,10 +27,10 @@
           failed_when: false
 
         - name: Get hardware type
-          command: sudo dmidecode -s system-product-name
+          command: dmidecode -s system-product-name
           register: hardware_type
-          become: true
           failed_when: false
+          ignore_errors: true
 
         - name: Aggregate information
           set_fact:
@@ -46,9 +46,9 @@
           set_fact:
             all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
 
-    - name: Write report to CSV file
+    - name: Write report to CSV file in the Jenkins workspace
       copy:
-        dest: /tmp/system_report.csv
+        dest: "{{ playbook_dir }}/system_report.csv"  # Save in the Ansible playbook directory
         content: |
           hostname,distribution,cpu,ram,kernel,hardware
           {% for system in all_systems_info %}
