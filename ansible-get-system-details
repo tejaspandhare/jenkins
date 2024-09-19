@@ -20,7 +20,7 @@ pipeline {
         stage('Archive CSV Report') {
             steps {
                 // Archive the generated CSV file
-                archiveArtifacts artifacts: '*/tmp/system_report.csv', fingerprint: true
+                archiveArtifacts artifacts: 'system_report.csv', fingerprint: true
             }
         }
 
@@ -28,7 +28,7 @@ pipeline {
             steps {
                 script {
                     // Construct the download URL
-                    def buildUrl = "${env.JENKINS_URL}job/${env.JOB_NAME}/${env.BUILD_NUMBER}/artifact/tmp/system_report.csv"
+                    def buildUrl = "${env.JENKINS_URL}job/${env.JOB_NAME}/${env.BUILD_NUMBER}/artifact/system_report.csv"
                     echo "Output is available at: ${buildUrl}"
                 }
             }
