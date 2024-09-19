@@ -1,39 +1,44 @@
 ---
 - name: Perform Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: true  # Ensure facts are gathered to check OS version
+  gather_facts: true  # Gather basic facts
 
   tasks:
     - name: Get distribution name
       command: cat /etc/os-release
       register: distro_info
+      failed_when: false  # Don't fail the playbook if this command fails
 
     - name: Get CPU information
       command: lscpu
       register: cpu_info
+      failed_when: false
 
     - name: Get RAM information
       command: free -h
       register: ram_info
+      failed_when: false
 
     - name: Get kernel version
       command: uname -r
       register: kernel_version
+      failed_when: false
 
     - name: Get hardware type
       command: sudo dmidecode -s system-product-name
       register: hardware_type
       become: true  # Use become to run as root for dmidecode
+      failed_when: false  # Don't fail if dmidecode fails
 
     - name: Aggregate information
       set_fact:
         system_info:
           hostname: "{{ inventory_hostname }}"
-          distribution: "{{ distro_info.stdout }}"
-          cpu: "{{ cpu_info.stdout }}"
-          ram: "{{ ram_info.stdout }}"
-          kernel: "{{ kernel_version.stdout }}"
-          hardware: "{{ hardware_type.stdout }}"
+          distribution: "{{ distro_info.stdout | default('N/A') }}"
+          cpu: "{{ cpu_info.stdout | default('N/A') }}"
+          ram: "{{ ram_info.stdout | default('N/A') }}"
+          kernel: "{{ kernel_version.stdout | default('N/A') }}"
+          hardware: "{{ hardware_type.stdout | default('N/A') }}"
 
     - name: Collect all system information for display
       set_fact:
