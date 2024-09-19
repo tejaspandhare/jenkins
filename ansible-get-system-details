@@ -1,22 +1,26 @@
 pipeline {
     agent any
     environment {
-     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
-  }
+        ANSIBLE_PRIVATE_KEY = credentials('automation-key')
+    }
 
-    
     stages {
-        stage('Cleanup Junk data') {
+        stage('Cleanup Junk Data') {
             steps {
                 script {
-                    
+                    try {
                         sh """
-                        
-                        ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        ansible-playbook -i inventory/hosts playbooks/get_system_details.yml \
+                        --private-key=${ANSIBLE_PRIVATE_KEY} -e 'hosts=${params.SERVER_NAME}'
                         """
-                    
+                    } catch (Exception e) {
+                        error "Ansible playbook failed: ${e.message}"
+                    }
                 }
             }
         }
+    }
+    parameters {
+        string(name: 'SERVER_NAME', defaultValue: '', description: 'Name of the server to clean up')
     }
 }
