@@ -3,7 +3,15 @@
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
 
+  vars:
+    all_systems_info: []  # Initialize to avoid undefined variable issues
+
   tasks:
+    - name: Ensure playbook directory exists
+      file:
+        path: "{{ playbook_dir }}"
+        state: directory
+
     - name: Gather system information
       block:
         - name: Get distribution name
@@ -32,6 +40,17 @@
           failed_when: false
           ignore_errors: true
 
+        - name: Log errors for failed commands
+          debug:
+            msg: "Error retrieving information for {{ inventory_hostname }}: {{ item }}"
+          loop:
+            - "{{ distro_info.stderr }}"
+            - "{{ cpu_info.stderr }}"
+            - "{{ ram_info.stderr }}"
+            - "{{ kernel_version.stderr }}"
+            - "{{ hardware_type.stderr }}"
+          when: item is not none
+
         - name: Aggregate information
           set_fact:
             system_info:
@@ -44,13 +63,13 @@
 
         - name: Collect all system information for display
           set_fact:
-            all_systems_info: "{{ all_systems_info | default([]) + [system_info] }}"
+            all_systems_info: "{{ all_systems_info + [system_info] }}"
 
     - name: Write report to CSV file in the Jenkins workspace
       copy:
-        dest: "{{ playbook_dir }}/system_report.csv"  # Save in the Ansible playbook directory
+        dest: "{{ playbook_dir }}/../system_report.csv"  # Adjust path as necessary
         content: |
           hostname,distribution,cpu,ram,kernel,hardware
           {% for system in all_systems_info %}
-          {{ system.hostname }},{{ system.distribution | replace(',', ' ') }},{{ system.cpu | replace(',', ' ') }},{{ system.ram | replace(',', ' ') }},{{ system.kernel }},{{ system.hardware | replace(',', ' ') }}
+          "{{ system.hostname }}","{{ system.distribution | replace(',', ' ') }}","{{ system.cpu | replace(',', ' ') }}","{{ system.ram | replace(',', ' ') }}","{{ system.kernel }}","{{ system.hardware | replace(',', ' ') }}"
           {% endfor %}
