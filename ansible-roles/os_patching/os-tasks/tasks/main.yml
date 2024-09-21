@@ -1,4 +1,4 @@
-  tasks:
+
     - name: Remove disabled snaps
       ansible.builtin.shell:
         cmd: "snap list --all"
