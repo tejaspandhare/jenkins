@@ -1,4 +1,0 @@
----
-# vars file for ansible-roles/apache
-httpd_packages:
-  - apache2
