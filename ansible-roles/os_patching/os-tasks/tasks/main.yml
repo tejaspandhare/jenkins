@@ -1,0 +1,90 @@
+---
+- name: Perform Maintenance and Patching Tasks
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: true  # Ensure facts are gathered to check OS version
+
+  vars:
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
+    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
+
+  tasks:
+    - name: Remove disabled snaps on Ubuntu servers
+      ansible.builtin.shell:
+        cmd: "snap list --all"
+      register: snap_list_output
+      changed_when: false
+      when: ansible_distribution == 'Ubuntu'
+
+    - name: Process snap list output and remove disabled snaps on Ubuntu servers
+      ansible.builtin.shell:
+        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
+      with_items: "{{ snap_list_output.stdout_lines }}"
+      when: ansible_distribution == 'Ubuntu' and 'disabled' in item
+      changed_when: false
+
+    - name: Vacuum journalctl logs to limit size to 20M
+      ansible.builtin.shell:
+        cmd: "journalctl --vacuum-size=20M"
+      changed_when: false
+
+    - name: Fix Broken packages on Debian-based systems
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Perform apt update to check for updates on Debian-based systems
+      ansible.builtin.shell:
+        cmd: "apt update"
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Hold specified packages on Debian-based systems
+      ansible.builtin.shell:
+        cmd: "apt-mark hold {{ item }}"
+      with_items: "{{ exclude_packages_list }}"
+      when: ansible_os_family == 'Debian' and exclude_packages_list | length > 0
+      ignore_errors: true
+      changed_when: false
+
+    - name: Perform OS patch update on Debian-based systems
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
+      register: apt_upgrade_simulate
+      changed_when: false
+      when: ansible_os_family == 'Debian'
+
+    - name: Check kernel version before patching
+      ansible.builtin.command:
+        cmd: "uname -r"
+      register: kernel_version_before
+      changed_when: false
+
+    - name: Perform OS patch update on Red Hat, CentOS, and SUSE systems
+      ansible.builtin.shell:
+        cmd: "yum update -y"
+      register: yum_update
+      changed_when: yum_update.stdout | regex_search('Updated') | length > 0
+      when: ansible_os_family == 'RedHat' or ansible_os_family == 'Suse'
+
+    - name: Check kernel version after patching
+      ansible.builtin.command:
+        cmd: "uname -r"
+      register: kernel_version_after
+      changed_when: false
+
+    - name: Reboot if kernel version has changed
+      ansible.builtin.reboot:
+      when: kernel_version_before.stdout != kernel_version_after.stdout
+      async: 0
+      poll: 0
+      ignore_errors: true
+      changed_when: true
+
+    - name: Display OS version changes
+      ansible.builtin.debug:
+        msg: |
+          OS version changes:
+            - Before patching: {{ kernel_version_before.stdout }}
+            - After patching : {{ kernel_version_after.stdout }}
+

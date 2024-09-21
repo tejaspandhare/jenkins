@@ -1,0 +1,6 @@
+- name: Patch servers and perform maintenance tasks
+  hosts: all
+  become: yes  # Ensure privilege escalation is enabled if required
+
+  roles:
+    - os-task
