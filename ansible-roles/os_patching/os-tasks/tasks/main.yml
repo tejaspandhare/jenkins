@@ -1,4 +1,4 @@
-
+---
   # Remove disabled snaps on Ubuntu servers
   - name: Remove disabled snaps on Ubuntu servers
     ansible.builtin.shell: "snap list --all"
@@ -90,12 +90,12 @@
     ansible.builtin.debug:
       msg:
         - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
-        - "New kernel version detected: {{ latest_kernel_install.stdout.strip() }}"
-        - "Reboot required: {{ reboot_required }}"
+        - "New kernel version detected: {{ latest_kernel_install.stdout.strip() if latest_kernel_install.stdout is defined else 'N/A' }}"
+        - "Reboot required: {{ reboot_required | default(false) }}"
 
   # Reboot if a new kernel is installed
   - name: Reboot if a new kernel is installed
     ansible.builtin.reboot:
-    when: reboot_required
+    when: reboot_required | default(false)
     ignore_errors: true
     changed_when: true
