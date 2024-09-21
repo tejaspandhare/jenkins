@@ -1,6 +1,6 @@
 - name: Patch servers and perform maintenance tasks
   hosts: hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  become: yes  # Ensure privilege escalation is enabled if required
+  #become: yes  # Ensure privilege escalation is enabled if required
 
   roles:
     - os-task
