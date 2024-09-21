@@ -14,7 +14,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts  playbooks/ubuntu_os_update.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        ansible-playbook -i inventory/hosts  ansible-roles/os_patching/patch_servers.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
                         """
                     
                 }
