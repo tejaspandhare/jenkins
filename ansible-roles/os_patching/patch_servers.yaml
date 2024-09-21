@@ -1,4 +1,4 @@
-- name: Patch servers and perform maintenance tasks
+- name: OS update
   #hosts: "{{ hosts.split(';') }}"
   #become: yes  # Ensure privilege escalation is enabled if required
 
