@@ -1,4 +1,4 @@
-tasks:
+
   # Remove disabled snaps on Ubuntu servers
   - name: Remove disabled snaps on Ubuntu servers
     ansible.builtin.shell: "snap list --all"
