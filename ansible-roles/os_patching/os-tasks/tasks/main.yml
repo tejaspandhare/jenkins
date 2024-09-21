@@ -100,4 +100,19 @@
   ignore_errors: true
   changed_when: true
 
+# Remove contents of ansiballz_cache directory if it exists
+- name: Remove contents of ansiballz_cache directory
+  ansible.builtin.file:
+    path: ansiballz_cache
+    state: absent
+  when: ansible.builtin.stat:
+      path: ansiballz_cache
+  register: cache_directory
+  ignore_errors: true
 
+- name: Remove ansiballz_cache directory if it is empty
+  ansible.builtin.file:
+    path: ansiballz_cache
+    state: absent
+  when: cache_directory.stat.exists and cache_directory.stat.isdir and cache_directory.stat.size == 0
+  ignore_errors: true
