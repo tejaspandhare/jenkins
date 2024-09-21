@@ -1,5 +1,5 @@
 - name: Patch servers and perform maintenance tasks
-  hosts: all
+  hosts: "{{ hosts.split(';') }}"
   #become: yes  # Ensure privilege escalation is enabled if required
 
   roles:
