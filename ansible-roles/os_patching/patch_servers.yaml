@@ -3,4 +3,4 @@
   #become: yes  # Ensure privilege escalation is enabled if required
 
   roles:
-    - os-task
+    - os-tasks
