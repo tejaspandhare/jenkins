@@ -1,8 +1,8 @@
 ---
 
-- name: Perform Maintenance and Patching Tasks
-  #hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: true  # Ensure facts are gathered to check OS version
+  - name: Perform Maintenance and Patching Tasks
+     #hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+    gather_facts: true  # Ensure facts are gathered to check OS version
 
   vars:
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
