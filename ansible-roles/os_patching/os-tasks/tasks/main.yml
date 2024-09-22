@@ -93,6 +93,3 @@
       ansible.builtin.reboot:
       when: reboot_required | default(false)
       ignore_errors: true
-
-    # Clean up ansiballz_cache directory contents
-    - name: Clean up contents of an
