@@ -1,4 +1,5 @@
 ---
+
     # Remove disabled snaps on Ubuntu servers
     - name: Remove disabled snaps on Ubuntu servers
       ansible.builtin.command: "snap list --all"
@@ -56,7 +57,7 @@
 
     # Get the latest installed kernel version from dpkg.log (Debian-based)
     - name: Get the latest installed kernel version from dpkg.log (Debian-based)
-      ansible.builtin.command: |
+      ansible.builtin.shell: |
         grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
       register: latest_kernel_install
       when: ansible_os_family == 'Debian'
@@ -95,15 +96,4 @@
       ignore_errors: true
 
     # Clean up ansiballz_cache directory contents
-    - name: Clean up contents of ansiballz_cache directory
-      ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ansible/tmp/ansiballz_cache"
-        state: absent
-      when: ansible.builtin.file(path="{{ ansible_env.HOME }}/.ansible/tmp/ansiballz_cache", state="directory").stat.exists
-
-    # Remove ansiballz_cache directory if empty
-    - name: Remove ansiballz_cache directory if it exists
-      ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ansible/tmp/ansiballz_cache"
-        state: absent
-      when: not ansible.builtin.file(path="{{ ansible_env.HOME }}/.ansible/tmp/ansiballz_cache", state="directory").stat.exists
+    - name: Clean up contents of an
