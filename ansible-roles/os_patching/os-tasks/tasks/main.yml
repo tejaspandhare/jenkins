@@ -1,97 +1,89 @@
- 
-    # Remove disabled snaps on Ubuntu servers
-    - name: Remove disabled snaps on Ubuntu servers
-      ansible.builtin.command: "snap list --all"
+---
+- name: Perform Maintenance Tasks
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: true  # Ensure facts are gathered to check OS version
+
+  vars:
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
+    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
+
+  tasks:
+    - name: Remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap list --all"
       register: snap_list_output
-      when: ansible_distribution == 'Ubuntu'
+      changed_when: false
 
-    - name: Process snap list output and remove disabled snaps on Ubuntu servers
-      ansible.builtin.command: "snap remove {{ item.0 }} --revision={{ item.1 }}"
-      loop: "{{ snap_list_output.stdout_lines | select('search', 'disabled') | map('split', ' ') | list }}"
-      when: ansible_distribution == 'Ubuntu'
+    - name: Process snap list output and remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
+      with_items: "{{ snap_list_output.stdout_lines }}"
+      when: "'disabled' in item"
+      changed_when: false
 
-    # Vacuum journalctl logs to limit size to 20M
     - name: Vacuum journalctl logs to limit size to 20M
-      ansible.builtin.command: "journalctl --vacuum-size=20M"
+      ansible.builtin.shell:
+        cmd: "journalctl --vacuum-size=20M"
+      changed_when: false
 
-    # Fix broken packages on Debian-based systems
-    - name: Fix broken packages on Debian-based systems
-      ansible.builtin.command: "dpkg --configure -a"
-      environment:
-        DEBIAN_FRONTEND: noninteractive
-      when: ansible_os_family == 'Debian'
+    - name: Fix Broken packages
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
+      changed_when: false
+      
+    - name: Perform apt update to check for updates
+      ansible.builtin.shell:
+        cmd: "apt update"
+      changed_when: false
 
-    # Perform apt update on Debian-based systems
-    - name: Perform apt update to check for updates on Debian-based systems
-      ansible.builtin.command: "apt update"
-      when: ansible_os_family == 'Debian'
+    - name: Check kernel version before patching
+      ansible.builtin.command:
+        cmd: "uname -r"
+      register: kernel_version_before
+      changed_when: false
 
-    # Hold specified packages on Debian-based systems
-    - name: Hold specified packages on Debian-based systems
-      ansible.builtin.command: "apt-mark hold {{ item }}"
-      loop: "{{ exclude_packages_list }}"
-      when: ansible_os_family == 'Debian' and exclude_packages_list | length > 0
+    - name: Hold specified packages
+      ansible.builtin.shell:
+        cmd: "apt-mark hold {{ item }}"
+      with_items: "{{ EXCLUDE_PKGS.split(';') }}"
+      when: EXCLUDE_PKGS is defined and EXCLUDE_PKGS | length > 0
       ignore_errors: true
+      changed_when: false
 
-    # Perform OS patch update on Debian-based systems
-    - name: Perform OS patch update on Debian-based systems
-      ansible.builtin.command: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
+    - name: Perform OS patch update
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
       register: apt_upgrade_simulate
-      when: ansible_os_family == 'Debian'
+      changed_when: false
 
-    # Get the current kernel version
-    - name: Get the current kernel version
-      ansible.builtin.command: "uname -r"
+
+    - name: Get current kernel version
+      command: uname -r
       register: kernel_version_before
 
-    # Perform OS patch update on Red Hat, CentOS, and SUSE systems
-    - name: Perform OS patch update on Red Hat, CentOS, and SUSE systems
-      ansible.builtin.command: "yum update -y"
-      register: yum_update
-      when: ansible_os_family in ['RedHat', 'CentOS', 'Suse']
-
-    # Get the latest installed kernel version from dpkg.log (Debian-based)
-    - name: Get the latest installed kernel version from dpkg.log (Debian-based)
-      ansible.builtin.command: |
+    - name: Get the latest installed kernel version from dpkg.log
+      shell: |
         grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
       register: latest_kernel_install
-      when: ansible_os_family == 'Debian'
+      changed_when: false
 
-    # Check if a new kernel was installed (Debian-based)
-    - name: Check if a new kernel was installed (Debian-based)
-      ansible.builtin.set_fact:
+    - name: Debug extracted latest kernel version
+      debug:
+        msg: "Latest installed kernel version: {{ latest_kernel_install.stdout }}"
+
+    - name: Check if a new kernel was installed
+      set_fact:
         reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
-      when: ansible_os_family == 'Debian' and latest_kernel_install.stdout | length > 0
 
-    # Get the latest installed kernel version from RPM database (RedHat/CentOS/SUSE)
-    - name: Get the latest installed kernel version from rpm database (RedHat/CentOS/SUSE)
-      ansible.builtin.command: |
-        rpm -q --queryformat '%{VERSION}-%{RELEASE}\n' kernel | sort -V | tail -n 1
-      register: latest_kernel_install
-      when: ansible_os_family in ['RedHat', 'CentOS', 'Suse']
-
-    # Check if a new kernel was installed (RedHat/CentOS/SUSE)
-    - name: Check if a new kernel was installed (RedHat/CentOS/SUSE)
-      ansible.builtin.set_fact:
-        reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
-      when: ansible_os_family in ['RedHat', 'CentOS', 'Suse'] and latest_kernel_install.stdout | length > 0
-
-    # Debug information about kernel versions
     - name: Debug information about kernel versions
-      ansible.builtin.debug:
+      debug:
         msg:
           - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
-          - "New kernel version detected: {{ latest_kernel_install.stdout.strip() if latest_kernel_install.stdout is defined else 'N/A' }}"
-          - "Reboot required: {{ reboot_required | default(false) }}"
+          - "New kernel version detected: {{ latest_kernel_install.stdout.strip() }}"
+          - "Reboot required: {{ reboot_required }}"
 
-    # Reboot if a new kernel is installed
     - name: Reboot if a new kernel is installed
       ansible.builtin.reboot:
-      when: reboot_required | default(false)
+      when: reboot_required
       ignore_errors: true
-
-    # Clean up ansiballz_cache directory
-    - name: Clean up ansiballz_cache directory
-      ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ansible/tmp/ansiballz_cache"
-        state: absent
+      changed_when: true
