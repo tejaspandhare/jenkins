@@ -1,5 +1,4 @@
 ---
-  tasks:
     - name: Check the OS
       ansible.builtin.setup:
       register: os_info
