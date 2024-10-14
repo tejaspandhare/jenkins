@@ -1,8 +1,8 @@
 ---
 - name: Check home directories for modification
   hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: no  # Ensure facts are gathered to check OS version
- 
+  gather_facts: true  # Set to true to gather facts including ansible_date_time
+
   tasks:
     - name: Get list of home directories
       find:
@@ -15,7 +15,7 @@
         path: "{{ item.path }}"
       register: dir_stat
       loop: "{{ home_dirs.files }}"
-    
+
     - name: Print directories not modified in the last 10 days
       debug:
         msg: "The home directory {{ item.item.path }} has not been modified in the last 10 days."
