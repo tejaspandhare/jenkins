@@ -1,11 +1,12 @@
 ---
 - name: Check home directories for modification
-  hosts: all
-  gather_facts: no
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: no  # Ensure facts are gathered to check OS version
+ 
   tasks:
     - name: Get list of home directories
       find:
-        paths: /home
+        paths: /var
         file_type: directory
       register: home_dirs
 
