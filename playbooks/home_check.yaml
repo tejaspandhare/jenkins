@@ -1,0 +1,22 @@
+---
+- name: Check home directories for modification
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Get list of home directories
+      find:
+        paths: /home
+        file_type: directory
+      register: home_dirs
+
+    - name: Check last modified time of home directories
+      stat:
+        path: "{{ item.path }}"
+      register: dir_stat
+      loop: "{{ home_dirs.files }}"
+    
+    - name: Print directories not modified in the last 10 days
+      debug:
+        msg: "The home directory {{ item.item.path }} has not been modified in the last 10 days."
+      when: (ansible_date_time.epoch | int - item.stat.mtime) > (10 * 86400)
+      loop: "{{ dir_stat.results }}"
