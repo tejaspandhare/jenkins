@@ -6,7 +6,7 @@
   tasks:
     - name: Get list of home directories
       find:
-        paths: /var
+        paths: /home
         file_type: directory
       register: home_dirs
 
