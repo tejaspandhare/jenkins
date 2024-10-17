@@ -18,7 +18,7 @@
 
     - name: Print directories not modified in the last 10 days
       debug:
-        msg: "{{ item.item.path }} last modified date: {{ (item.stat.mtime | to_datetime('%Y-%m-%d')) }}"
+        msg: "{{ item.item.path }} last modified date: {{ (item.stat.mtime | int | to_datetime('%Y-%m-%d')) }}"
       when: (ansible_date_time.epoch | int - item.stat.mtime) > (10 * 86400)
       loop: "{{ dir_stat.results }}"
       loop_control:
