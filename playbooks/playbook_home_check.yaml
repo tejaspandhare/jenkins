@@ -10,7 +10,7 @@
         file_type: directory
       register: home_dirs
 
-    - name: Check last modified and last accessed time of subdirectories
+    - name: Check last modified time of subdirectories
       stat:
         path: "{{ item.path }}"
       register: dir_stat
@@ -18,7 +18,7 @@
 
     - name: List subdirectories not modified in the last 10 days
       debug:
-        msg: "Subdirectory {{ item.item.path }} last accessed on {{ item.stat.atime | to_datetime('%Y-%m-%d %H:%M:%S') }}"
+        msg: "Subdirectory {{ item.item.path }} last modified date: {{ item.stat.mtime | int | to_datetime('%Y-%m-%d') }}"
       when: (ansible_date_time.epoch | int - item.stat.mtime) > (10 * 86400)
       loop: "{{ dir_stat.results }}"
       loop_control:
