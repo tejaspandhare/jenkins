@@ -71,4 +71,11 @@
 
     - name: Output all collected system information
       debug:
-        var: all_systems_info
+        msg: |
+          Hostname: {{ item.hostname }}
+          Distribution: {{ item.distribution }}
+          CPU Information: {{ item.cpu }}
+          RAM Information: {{ item.ram }}
+          Kernel Version: {{ item.kernel }}
+          Hardware Type: {{ item.hardware }}
+      loop: "{{ all_systems_info }}"
