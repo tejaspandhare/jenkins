@@ -18,21 +18,25 @@
           command: cat /etc/os-release
           register: distro_info
           failed_when: false
+          ignore_errors: true
 
         - name: Get CPU information
           command: lscpu
           register: cpu_info
           failed_when: false
+          ignore_errors: true
 
         - name: Get RAM information
           command: free -h
           register: ram_info
           failed_when: false
+          ignore_errors: true
 
         - name: Get kernel version
           command: uname -r
           register: kernel_version
           failed_when: false
+          ignore_errors: true
 
         - name: Get hardware type
           command: dmidecode -s system-product-name
@@ -61,15 +65,10 @@
               kernel: "{{ kernel_version.stdout | default('N/A') }}"
               hardware: "{{ hardware_type.stdout | default('N/A') }}"
 
-        - name: Collect all system information for display
+        - name: Add system information to all_systems_info
           set_fact:
             all_systems_info: "{{ all_systems_info + [system_info] }}"
 
-    - name: Write report to CSV file in the Jenkins workspace
-      copy:
-        dest: "{{ playbook_dir }}/../system_report.csv"  # Adjust path as necessary
-        content: |
-          hostname,distribution,cpu,ram,kernel,hardware
-          {% for system in all_systems_info %}
-          "{{ system.hostname }}","{{ system.distribution | replace(',', ' ') }}","{{ system.cpu | replace(',', ' ') }}","{{ system.ram | replace(',', ' ') }}","{{ system.kernel }}","{{ system.hardware | replace(',', ' ') }}"
-          {% endfor %}
+    - name: Output all collected system information
+      debug:
+        var: all_systems_info
