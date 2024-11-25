@@ -1,0 +1,37 @@
+pipeline {
+  agent {
+    kubernetes {
+      label 'jenkins-agent'  // This should match the label you set in the pod template
+      defaultContainer 'jnlp' // The default container where Jenkins will run the builds
+      yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: jenkins-agent
+  labels:
+    purpose: jenkins-agent
+spec:
+  containers:
+  - name: jnlp
+    image: jenkins/inbound-agent:latest  // The image for the Jenkins agent
+    args: ['${computer.jnlpmac}', '${computer.name}']
+  - name: ansible
+    image: ansible/ansible:latest  // Ansible container (add necessary image)
+    command:
+      - cat
+    tty: true
+  """
+  }
+  environment {
+    ANSIBLE_PRIVATE_KEY = credentials('automation-key')  // Your private key credentials
+  }
+  stages {
+    stage('Hello') {
+      steps {
+        container('ansible') {  // Use the 'ansible' container for running the ansible-playbook command
+          sh """ansible-playbook -i inventory/hosts --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars '{"FS_NAME":"${params.FS_NAME}"}' diskspace.yaml"""
+        }
+      }
+    }
+  }
+}
