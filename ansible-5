@@ -1,7 +1,7 @@
 pipeline {
   agent {
     kubernetes {
-      label 'jenkins-agent'  // This should match the label you set in the pod template
+      label 'jenkins-ansible'  // This should match the label you set in the pod template
       defaultContainer 'jnlp' // The default container where Jenkins will run the builds
       yaml """
 apiVersion: v1
