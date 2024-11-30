@@ -1,5 +1,5 @@
 pipeline {
-  agent kubernetes
+  agent any
   environment {
    ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
   }
