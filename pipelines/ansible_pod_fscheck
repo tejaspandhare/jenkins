@@ -1,0 +1,91 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+              apiVersion: v1
+              kind: Pod
+              spec:
+                initContainers:
+                - name: set-ssh-key-permissions
+                  image: alpine
+                  command:
+                  - sh
+                  - -c
+                  - |
+                    # Create the .ssh directory and copy the SSH private key with proper permissions
+                    mkdir -p /home/jenkins/.ssh
+                    cp /secrets/ssh-private-key/automation.key /home/jenkins/.ssh/id_rsa
+                    chmod 600 /home/jenkins/.ssh/id_rsa
+                    ls -l /home/jenkins/.ssh/id_rsa  # Verify the permissions
+                  volumeMounts:
+                    - name: ssh-private-key
+                      mountPath: /secrets/ssh-private-key
+                      readOnly: true
+                    - name: jenkins-ssh-dir
+                      mountPath: /home/jenkins/.ssh/
+
+                containers:
+                - name: ansible
+                  image: alpine/ansible:latest
+                  command:
+                  - sh
+                  - -c
+                  - |
+                    # Keep the container running
+                    tail -f /dev/null
+                  volumeMounts:
+                    - name: ansible-inventory
+                      mountPath: /etc/ansible/hosts
+                      subPath: hosts
+                    - name: jenkins-ssh-dir
+                      mountPath: /home/jenkins/.ssh  # Mount directory as writable
+                    - name: playbooks
+                      mountPath: /home/jenkins/playbooks
+
+                volumes:
+                  - name: ansible-inventory
+                    configMap:
+                      name: ansible-inventory-configmap
+                  - name: ssh-private-key
+                    secret:
+                      secretName: ssh-private-key
+                      readOnly: true
+                  - name: jenkins-ssh-dir
+                    emptyDir: {}
+                  - name: playbooks
+                    configMap:
+                     name: playbooks
+            '''
+        }
+    }
+
+    parameters {
+        string(name: 'FS_NAME', defaultValue: '/dev/sda1', description: 'Filesystem to check')
+    }
+
+    stages {
+        stage('Run Ansible Playbook') {
+            steps {
+                container('ansible') {
+                    script {
+                        // Debug: Check the value of FS_NAME before running the playbook
+                        sh """
+                            # Pass FS_NAME to the shell command via environment variable
+                            export FS_NAME=${params.FS_NAME}
+                            
+                            # Ensure bash is being used and run ansible-playbook with the passed variable
+                            echo "Running ansible-playbook with FS_NAME=${FS_NAME}"
+                            ansible-playbook -i /etc/ansible/hosts --extra-vars "FS_NAME=${FS_NAME}" /home/jenkins/playbooks/diskspace.yaml
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution finished.'
+        }
+    }
+}
