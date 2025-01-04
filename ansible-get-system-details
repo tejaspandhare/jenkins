@@ -12,7 +12,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts  playbooks/playbook_home_check.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
                         """
                     
                 }
