@@ -15,12 +15,6 @@
       register: memory_info
       changed_when: false
 
-    - name: Get system manufacturer to check machine type (VMware, Xen, or physical)
-      command: dmidecode -s system-manufacturer
-      register: manufacturer
-      changed_when: false
-      failed_when: false
-
     - name: Output CPU information
       debug:
         var: cpu_info.stdout
