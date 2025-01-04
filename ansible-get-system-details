@@ -1,41 +1,22 @@
 pipeline {
     agent any
-
     environment {
-        ANSIBLE_PRIVATE_KEY = credentials('automation-key')
-    }
+     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+  }
 
+    
     stages {
-        stage('Run Ansible Playbook') {
+        stage('Cleanup Junk data') {
             steps {
                 script {
-                    // Run the Ansible playbook
-                    sh """
-                    ansible-playbook -i inventory/hosts playbooks/get_system_details.yml --private-key=${ANSIBLE_PRIVATE_KEY} -e 'hosts=${params.SERVER_NAME}'
-                    """
+                    
+                        sh """
+                        
+                        ansible-playbook -i inventory/hosts  playbooks/playbook_home_check.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        """
+                    
                 }
             }
         }
-
-        stage('Archive CSV Report') {
-            steps {
-                // Archive the generated CSV file
-                archiveArtifacts artifacts: 'system_report.csv', fingerprint: true
-            }
-        }
-
-        stage('Provide Download Link') {
-            steps {
-                script {
-                    // Construct the download URL
-                    def buildUrl = "${env.JENKINS_URL}job/${env.JOB_NAME}/${env.BUILD_NUMBER}/artifact/system_report.csv"
-                    echo "Output is available at: ${buildUrl}"
-                }
-            }
-        }
-    }
-
-    parameters {
-        string(name: 'SERVER_NAME', defaultValue: '', description: 'Name of the server to clean up')
     }
 }
