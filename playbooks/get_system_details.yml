@@ -1,81 +1,42 @@
 ---
-- name: Perform Maintenance Tasks
+- name: Gather Linux system details
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
+  become: true
+    - name: Get CPU information
+      command: lscpu
+      register: cpu_info
+      changed_when: false
 
-  vars:
-    all_systems_info: []  # Initialize to avoid undefined variable issues
+    - name: Get Memory information
+      command: free -h
+      register: memory_info
+      changed_when: false
 
-  tasks:
-    - name: Ensure playbook directory exists
-      file:
-        path: "{{ playbook_dir }}"
-        state: directory
+    - name: Get serial number
+      command: dmidecode -s system-serial-number
+      register: serial_number
+      changed_when: false
+      failed_when: false
 
-    - name: Gather system information
-      block:
-        - name: Get distribution name
-          command: cat /etc/os-release
-          register: distro_info
-          failed_when: false
-          ignore_errors: true
+    - name: Get system manufacturer to check machine type (VMware, Xen, or physical)
+      command: dmidecode -s system-manufacturer
+      register: manufacturer
+      changed_when: false
+      failed_when: false
 
-        - name: Get CPU information
-          command: lscpu
-          register: cpu_info
-          failed_when: false
-          ignore_errors: true
-
-        - name: Get RAM information
-          command: free -h
-          register: ram_info
-          failed_when: false
-          ignore_errors: true
-
-        - name: Get kernel version
-          command: uname -r
-          register: kernel_version
-          failed_when: false
-          ignore_errors: true
-
-        - name: Get hardware type
-          command: dmidecode -s system-product-name
-          register: hardware_type
-          failed_when: false
-          ignore_errors: true
-
-        - name: Log errors for failed commands
-          debug:
-            msg: "Error retrieving information for {{ inventory_hostname }}: {{ item }}"
-          loop:
-            - "{{ distro_info.stderr }}"
-            - "{{ cpu_info.stderr }}"
-            - "{{ ram_info.stderr }}"
-            - "{{ kernel_version.stderr }}"
-            - "{{ hardware_type.stderr }}"
-          when: item is not none
-
-        - name: Aggregate information
-          set_fact:
-            system_info:
-              hostname: "{{ inventory_hostname }}"
-              distribution: "{{ distro_info.stdout | default('N/A') }}"
-              cpu: "{{ cpu_info.stdout | default('N/A') }}"
-              ram: "{{ ram_info.stdout | default('N/A') }}"
-              kernel: "{{ kernel_version.stdout | default('N/A') }}"
-              hardware: "{{ hardware_type.stdout | default('N/A') }}"
-
-        - name: Add system information to all_systems_info
-          set_fact:
-            all_systems_info: "{{ all_systems_info + [system_info] }}"
-
-    - name: Output all collected system information
+    - name: Output CPU information
       debug:
-        msg: |
-          Hostname: {{ item.hostname }}
-          Distribution: {{ item.distribution }}
-          CPU Information: {{ item.cpu }}
-          RAM Information: {{ item.ram }}
-          Kernel Version: {{ item.kernel }}
-          Hardware Type: {{ item.hardware }}
-      loop: "{{ all_systems_info }}"
+        var: cpu_info.stdout
+
+    - name: Output Memory information
+      debug:
+        var: memory_info.stdout
+
+    - name: Output Serial Number
+      debug:
+        var: serial_number.stdout
+
+    - name: Output Manufacturer
+      debug:
+        var: manufacturer.stdout
