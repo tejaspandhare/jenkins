@@ -22,11 +22,3 @@
     - name: Output Memory information
       debug:
         var: memory_info.stdout
-
-    - name: Output Serial Number
-      debug:
-        var: serial_number.stdout
-
-    - name: Output Manufacturer
-      debug:
-        var: manufacturer.stdout
