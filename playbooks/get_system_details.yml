@@ -6,7 +6,7 @@
 
   tasks:
     - name: Get CPU information
-      command: lscpu
+      command: nproc
       register: cpu_info
       changed_when: false
 
