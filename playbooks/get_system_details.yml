@@ -15,12 +15,6 @@
       register: memory_info
       changed_when: false
 
-    - name: Get serial number
-      command: dmidecode -s system-serial-number
-      register: serial_number
-      changed_when: false
-      failed_when: false
-
     - name: Get system manufacturer to check machine type (VMware, Xen, or physical)
       command: dmidecode -s system-manufacturer
       register: manufacturer
