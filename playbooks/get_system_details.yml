@@ -3,6 +3,8 @@
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
+
+  tasks:
     - name: Get CPU information
       command: lscpu
       register: cpu_info
