@@ -12,7 +12,8 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        #ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars "hosts=$SERVER_NAME"
                         """
                     
                 }
