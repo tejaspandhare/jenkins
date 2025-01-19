@@ -60,7 +60,7 @@ pipeline {
     }
 
     parameters {
-        string(name: 'FS_NAME', defaultValue: '/dev/sda1', description: 'Filesystem to check')
+        string(name: 'FS_NAME', description: 'Filesystem to check')
     }
 
     stages {
