@@ -1,0 +1,103 @@
+---
+- name: Perform Maintenance Tasks
+  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+  gather_facts: true
+  become: true
+
+  vars:
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
+    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | list }}"
+
+  tasks:
+
+    - name: Remove disabled snaps - list all snaps
+      ansible.builtin.shell:
+        cmd: "snap list --all"
+      register: snap_list_output
+      changed_when: false
+
+    - name: Extract disabled snaps and prepare for removal
+      set_fact:
+        disabled_snaps: >-
+          {{
+            snap_list_output.stdout_lines
+            | select("search", "disabled")
+            | map("regex_search", "^(\S+)\s+\S+\s+\S+\s+disabled\s+.*", "\\1")
+            | select("string")
+            | list
+          }}
+
+    - name: Remove disabled snaps
+      ansible.builtin.shell:
+        cmd: "snap remove {{ item }} --purge"
+      loop: "{{ disabled_snaps }}"
+      ignore_errors: true
+      changed_when: true
+
+    - name: Vacuum journalctl logs to limit size to 20M
+      ansible.builtin.shell:
+        cmd: "journalctl --vacuum-size=20M"
+      changed_when: true
+
+    - name: Fix Broken packages
+      ansible.builtin.shell:
+        cmd: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
+      changed_when: false
+
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Check current kernel version
+      ansible.builtin.command: uname -r
+      register: kernel_version_before
+      changed_when: false
+
+    - name: Hold specified packages
+      ansible.builtin.shell:
+        cmd: "apt-mark hold {{ item }}"
+      loop: "{{ exclude_packages_list }}"
+      when: exclude_packages_list | length > 0
+      ignore_errors: true
+      changed_when: true
+
+    - name: Perform OS patch update
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: no
+      register: apt_upgrade_result
+      changed_when: "'upgraded' in apt_upgrade_result.stdout_lines | join(' ')"
+
+    - name: Get latest installed kernel version from dpkg.log
+      ansible.builtin.shell: |
+        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
+      register: latest_kernel_install
+      changed_when: false
+
+    - name: Debug extracted latest kernel version
+      debug:
+        msg: "Latest installed kernel version: {{ latest_kernel_install.stdout.strip() }}"
+
+    - name: Determine if reboot is required
+      set_fact:
+        reboot_required: >-
+          {{ not kernel_version_before.stdout.strip().startswith(latest_kernel_install.stdout.strip()) }}
+
+    - name: Debug kernel comparison
+      debug:
+        msg:
+          - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
+          - "Latest installed kernel: {{ latest_kernel_install.stdout.strip() }}"
+          - "Reboot required: {{ reboot_required }}"
+
+    - name: Reboot if a new kernel is installed
+      ansible.builtin.reboot:
+      when: reboot_required
+      ignore_errors: true
+      changed_when: true
+
+    - name: Cleanup Ansible temporary cache (if it exists)
+      ansible.builtin.file:
+        path: /tmp/ansiballz_cache
+        state: absent
+      ignore_errors: true
