@@ -48,3 +48,9 @@
       ansible.builtin.shell: "zypper clean --all"
       when: ansible_facts['os_family'] == "Suse"
       changed_when: false
+
+    - name: Cleanup Ansible temporary cache (if it exists)
+      ansible.builtin.file:
+        path: /tmp/ansiballz_cache
+        state: absent
+      ignore_errors: true
