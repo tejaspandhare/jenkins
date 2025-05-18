@@ -103,7 +103,13 @@
         recurse: yes
         file_type: directory
       register: ansiballz_dirs
-    
+
+    - name: Force cleanup of Ansible tmp dirs
+      ansible.builtin.shell: rm -rf /var/jenkins_home/.ansible/tmp/ansible-local-*
+      args:
+        warn: false
+      ignore_errors: true
+   
     - name: Remove all found ansiballz_cache directories
       ansible.builtin.file:
         path: "{{ item.path }}"
