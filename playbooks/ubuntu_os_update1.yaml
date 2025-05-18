@@ -98,7 +98,7 @@
 
     - name: Clean up all ansiballz_cache folders under Jenkins home
       ansible.builtin.find:
-        paths: /var/jenkins_home/.ansible/tmp
+        paths: /var/jenkins_home/.ansible/tmp/ansible-local*
         patterns: ansiballz_cache
         recurse: yes
         file_type: directory
