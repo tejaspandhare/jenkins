@@ -96,8 +96,14 @@
       ignore_errors: true
       changed_when: true
 
-    - name: Cleanup Ansible temporary cache (if it exists)
-      ansible.builtin.file:
-        path: /tmp/ansiballz_cache
-        state: absent
+    - name: Ensure ansiballz_cache is empty
+      ansible.builtin.shell: rm -rf /tmp/ansiballz_cache/*
       ignore_errors: true
+
+    - name: Cleanup Ansible temporary cache directory
+      ansible.builtin.file:
+       path: /tmp/ansiballz_cache
+       state: absent
+      ignore_errors: true
+
+
