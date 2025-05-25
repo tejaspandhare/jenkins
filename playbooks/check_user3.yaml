@@ -1,19 +1,44 @@
 ---
-- name: Check Local User
-  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
+- name: Check Local Users and GECOS Field
+  hosts: "{{ hosts.split(';') }}"
   gather_facts: false
 
   vars:
-    #target_username: "{{ lookup('env', 'TARGET_USERNAME') }}"
-    target_username: "{{ lookup('env', 'TARGET_USERNAME') | quote }}"
-    
+    target_usernames_list: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
+    user_existence_results: []
+
   tasks:
-    - name: Display local user
-      command: "id {{ target_username }}"
+    - name: Check existence and GECOS field of multiple users
+      shell: |
+        if id {{ item }} >/dev/null 2>&1; then
+          gecos=$(getent passwd {{ item }} | cut -d ':' -f 5)
+          echo "exists|${gecos}"
+        else
+          echo "not_exists|"
+        fi
       register: user_info
       ignore_errors: true
+      loop: "{{ target_usernames_list }}"
+      loop_control:
+        loop_var: item
 
-    - debug:
-        msg: "User '{{ target_username }}' exists on {{ inventory_hostname }}"
-      delegate_to: all
-      when: user_info.rc == 0
+    - name: Aggregate results with GECOS info
+      set_fact:
+        user_existence_results: "{{ user_existence_results + [{
+          'host': inventory_hostname,
+          'username': item.item,
+          'exists': item.stdout.split('|')[0] == 'exists',
+          'gecos': item.stdout.split('|')[1]
+        }] }}"
+      loop: "{{ user_info.results }}"
+      loop_control:
+        loop_var: item
+
+    - name: Final message per user on host
+      debug:
+        msg: >-
+          User '{{ result.username }}' {{ 'exists' if result.exists else 'does not exist' }}
+          on {{ result.host }}{{ ' with GECOS: ' ~ result.gecos if result.exists else '' }}
+      loop: "{{ user_existence_results }}"
+      loop_control:
+        loop_var: result
