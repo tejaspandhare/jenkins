@@ -1,67 +1,33 @@
----
-- name: Check Users by Username or GECOS Field
-  hosts: "{{ hosts.split(';') }}"
-  gather_facts: false
-
+- name: Aggregate results safely
+  set_fact:
+    user_search_results: "{{ user_search_results + [result_item] }}"
   vars:
-    input_identifiers: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
-    user_search_results: []
-
-  tasks:
-    - name: Check for user existence by username or GECOS
-      shell: |
-        input="{{ item }}"
-        # Try to find by username (id)
-        if id "$input" >/dev/null 2>&1; then
-          gecos=$(getent passwd "$input" | cut -d ':' -f 5)
-          echo "match_type=username|user=$input|gecos=$gecos"
-        else
-          # Try to find by GECOS (full name)
-          match=$(getent passwd | awk -F: -v name="$input" '$5 ~ name {print $1 ":" $5}' | head -n 1)
-          if [ -n "$match" ]; then
-            user=$(echo "$match" | cut -d ':' -f 1)
-            gecos=$(echo "$match" | cut -d ':' -f 2)
-            echo "match_type=gecos|user=$user|gecos=$gecos"
-          else
-            echo "match_type=none|user=|gecos="
-          fi
-        fi
-      register: user_info
-      ignore_errors: true
-      loop: "{{ input_identifiers }}"
-      loop_control:
-        loop_var: item
-
-    - name: Aggregate results safely
-      set_fact:
-        user_search_results: "{{ user_search_results + [result_item] }}"
-      vars:
-        stdout_val: "{{ item.stdout | default('') }}"
-        match_type_match: "{{ (stdout_val | regex_search('match_type=([^|]+)', '\\1')) | default(None) }}"
-        username_match: "{{ (stdout_val | regex_search('user=([^|]+)', '\\1')) | default(None) }}"
-        gecos_match: "{{ (stdout_val | regex_search('gecos=(.*)', '\\1')) | default(None) }}"
-        result_item: >-
-          {{
-            {
-              'host': inventory_hostname,
-              'input': item.item,
-              'match_type': match_type_match if match_type_match is not none else 'none',
-              'username': username_match if username_match is not none else '',
-              'gecos': gecos_match if gecos_match is not none else ''
-            }
-          }}
-      loop: "{{ user_info.results }}"
-      loop_control:
-        loop_var: item
-
-    - name: Final message for each input
-      debug:
-        msg: >-
-          Input '{{ result.input }}' {{
-            'matched by ' ~ result.match_type ~ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')'
-            if result.match_type != 'none'
-            else 'did not match any user'
-          }} on {{ result.host }}
-      loop: "{{ user_search_results }}"
-      loop_control:
-        loop_var: result
+    stdout_val: "{{ item.stdout | default('') }}"
+    match_type_match: >-
+      {{
+        (stdout_val | regex_search('match_type=([^|]+)', '\\1'))[0]
+        if (stdout_val | regex_search('match_type=([^|]+)', '\\1')) is not none else 'none'
+      }}
+    username_match: >-
+      {{
+        (stdout_val | regex_search('user=([^|]+)', '\\1'))[0]
+        if (stdout_val | regex_search('user=([^|]+)', '\\1')) is not none else ''
+      }}
+    gecos_match: >-
+      {{
+        (stdout_val | regex_search('gecos=(.*)', '\\1'))[0]
+        if (stdout_val | regex_search('gecos=(.*)', '\\1')) is not none else ''
+      }}
+    result_item: >-
+      {{
+        {
+          'host': inventory_hostname,
+          'input': item.item,
+          'match_type': match_type_match,
+          'username': username_match,
+          'gecos': gecos_match
+        }
+      }}
+  loop: "{{ user_info.results }}"
+  loop_control:
+    loop_var: item
