@@ -4,6 +4,7 @@
   gather_facts: false
 
   vars:
+    # Example: export TARGET_USERNAME="tpandhare;Tejas Pandhare;jdoe;John Doe"
     input_identifiers: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
     user_search_results: []
 
@@ -37,9 +38,9 @@
         user_search_results: "{{ user_search_results + [{
           'host': inventory_hostname,
           'input': item.item,
-          'match_type': (item.stdout | regex_search('match_type=(\\w+)', '\\1')) | default('none'),
-          'username': (item.stdout | regex_search('user=([^|]+)', '\\1')) | default(''),
-          'gecos': (item.stdout | regex_search('gecos=(.*)', '\\1')) | default('')
+          'match_type': (item.stdout | regex_search('match_type=([^|]+)', '\\1')) | default('none', true),
+          'username': (item.stdout | regex_search('user=([^|]+)', '\\1')) | default('', true),
+          'gecos': (item.stdout | regex_search('gecos=(.*)', '\\1')) | default('', true)
         }] }}"
       loop: "{{ user_info.results }}"
       loop_control:
@@ -48,8 +49,11 @@
     - name: Final message for each input
       debug:
         msg: >-
-          Input '{{ result.input }}' matched by {{ result.match_type }}
-          on {{ result.host }}{{ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')' if result.match_type != 'none' else ', no match found' }}
+          Input '{{ result.input }}' {{
+            'matched by ' ~ result.match_type ~ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')'
+            if result.match_type != 'none'
+            else 'did not match any user'
+          }} on {{ result.host }}
       loop: "{{ user_search_results }}"
       loop_control:
         loop_var: result
