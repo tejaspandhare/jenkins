@@ -4,7 +4,6 @@
   gather_facts: false
 
   vars:
-    # Accept semicolon-separated list from environment variable
     input_identifiers: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
     user_search_results: []
 
@@ -43,9 +42,18 @@
             {
               'host': inventory_hostname,
               'input': item.item,
-              'match_type': (stdout_val | regex_search('match_type=([^|]+)', '\\1') | default('none')),
-              'username': (stdout_val | regex_search('user=([^|]+)', '\\1') | default('')),
-              'gecos': (stdout_val | regex_search('gecos=(.*)', '\\1') | default(''))
+              'match_type': (
+                (stdout_val is string and stdout_val | length > 0)
+                | ternary((stdout_val | regex_search('match_type=([^|]+)', '\\1')), 'none')
+              ) | default('none'),
+              'username': (
+                (stdout_val is string and stdout_val | length > 0)
+                | ternary((stdout_val | regex_search('user=([^|]+)', '\\1')), '')
+              ) | default(''),
+              'gecos': (
+                (stdout_val is string and stdout_val | length > 0)
+                | ternary((stdout_val | regex_search('gecos=(.*)', '\\1')), '')
+              ) | default('')
             }
           }}
       loop: "{{ user_info.results }}"
