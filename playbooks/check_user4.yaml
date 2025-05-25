@@ -38,20 +38,15 @@
         user_existence_results: "{{ user_existence_results + [result_item] }}"
       vars:
         stdout_val: "{{ item.stdout | default('') }}"
-        match_type_match: >-
-          {{ (stdout_val | regex_search('match_type=([^|]+)', '\\1')) or 'none' }}
-        username_match: >-
-          {{ (stdout_val | regex_search('user=([^|]+)', '\\1')) or '' }}
-        gecos_match: >-
-          {{ (stdout_val | regex_search('gecos=(.*)', '\\1')) or '' }}
+        result_parts: "{{ dict(stdout_val.split('|') | map('split', '=')) }}"
         result_item: >-
           {{
             {
               'host': inventory_hostname,
               'input': item.item,
-              'match_type': match_type_match,
-              'username': username_match,
-              'gecos': gecos_match
+              'match_type': result_parts.get('match_type', 'none'),
+              'username': result_parts.get('user', ''),
+              'gecos': result_parts.get('gecos', '')
             }
           }}
       loop: "{{ user_info.results }}"
