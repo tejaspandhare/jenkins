@@ -8,6 +8,7 @@
     user_existence_results: []
 
   tasks:
+
     - name: Check user by username or GECOS field
       shell: |
         input="{{ item }}"
