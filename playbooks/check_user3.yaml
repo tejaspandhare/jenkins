@@ -1,44 +1,55 @@
 ---
-- name: Check Local Users and GECOS Field
+- name: Check Users by Username or GECOS Field
   hosts: "{{ hosts.split(';') }}"
   gather_facts: false
 
   vars:
-    target_usernames_list: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
-    user_existence_results: []
+    input_identifiers: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
+    user_search_results: []
 
   tasks:
-    - name: Check existence and GECOS field of multiple users
+    - name: Check for user existence by username or GECOS
       shell: |
-        if id {{ item }} >/dev/null 2>&1; then
-          gecos=$(getent passwd {{ item }} | cut -d ':' -f 5)
-          echo "exists|${gecos}"
+        input="{{ item }}"
+        # Try to find by username (id)
+        if id "$input" >/dev/null 2>&1; then
+          gecos=$(getent passwd "$input" | cut -d ':' -f 5)
+          echo "match_type=username|user=$input|gecos=$gecos"
         else
-          echo "not_exists|"
+          # Try to find by GECOS (full name)
+          match=$(getent passwd | awk -F: -v name="$input" '$5 ~ name {print $1 ":" $5}' | head -n 1)
+          if [ -n "$match" ]; then
+            user=$(echo "$match" | cut -d ':' -f 1)
+            gecos=$(echo "$match" | cut -d ':' -f 2)
+            echo "match_type=gecos|user=$user|gecos=$gecos"
+          else
+            echo "match_type=none|user=|gecos="
+          fi
         fi
       register: user_info
       ignore_errors: true
-      loop: "{{ target_usernames_list }}"
+      loop: "{{ input_identifiers }}"
       loop_control:
         loop_var: item
 
-    - name: Aggregate results with GECOS info
+    - name: Aggregate results
       set_fact:
-        user_existence_results: "{{ user_existence_results + [{
+        user_search_results: "{{ user_search_results + [{
           'host': inventory_hostname,
-          'username': item.item,
-          'exists': item.stdout.split('|')[0] == 'exists',
-          'gecos': item.stdout.split('|')[1]
+          'input': item.item,
+          'match_type': (item.stdout | regex_search('match_type=(\\w+)', '\\1')) | default('none'),
+          'username': (item.stdout | regex_search('user=([^|]+)', '\\1')) | default(''),
+          'gecos': (item.stdout | regex_search('gecos=(.*)', '\\1')) | default('')
         }] }}"
       loop: "{{ user_info.results }}"
       loop_control:
         loop_var: item
 
-    - name: Final message per user on host
+    - name: Final message for each input
       debug:
         msg: >-
-          User '{{ result.username }}' {{ 'exists' if result.exists else 'does not exist' }}
-          on {{ result.host }}{{ ' with GECOS: ' ~ result.gecos if result.exists else '' }}
-      loop: "{{ user_existence_results }}"
+          Input '{{ result.input }}' matched by {{ result.match_type }}
+          on {{ result.host }}{{ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')' if result.match_type != 'none' else ', no match found' }}
+      loop: "{{ user_search_results }}"
       loop_control:
         loop_var: result
