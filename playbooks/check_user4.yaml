@@ -56,10 +56,10 @@
     - name: Final message for each input
       debug:
         msg: >-
-          Input '{{ result.input }}' {{
-            'matched by ' ~ result.match_type ~ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')'
+          User '{{ result.input }}' {{
+            'found as ' ~ result.username
             if result.match_type != 'none'
-            else 'did not match any user'
+            else 'not found'
           }} on {{ result.host }}
       loop: "{{ user_existence_results }}"
       loop_control:
