@@ -4,6 +4,7 @@
   gather_facts: false
 
   vars:
+    # Accept semicolon-separated list from environment variable
     input_identifiers: "{{ lookup('env', 'TARGET_USERNAME').split(';') }}"
     user_search_results: []
 
@@ -32,21 +33,33 @@
       loop_control:
         loop_var: item
 
-    - name: Aggregate results
+    - name: Aggregate results safely
       set_fact:
         user_search_results: "{{ user_search_results + [result_item] }}"
       vars:
+        stdout_val: "{{ item.stdout | default('') }}"
         result_item: >-
           {{
             {
               'host': inventory_hostname,
               'input': item.item,
-              'match_type': (item.stdout | regex_search('match_type=([^|]+)', '\\1') | default(['none']))[0],
-              'username': (item.stdout | regex_search('user=([^|]+)', '\\1') | default(['']))[0],
-              'gecos': (item.stdout | regex_search('gecos=(.*)', '\\1') | default(['']))[0]
+              'match_type': (stdout_val | regex_search('match_type=([^|]+)', '\\1') | default('none')),
+              'username': (stdout_val | regex_search('user=([^|]+)', '\\1') | default('')),
+              'gecos': (stdout_val | regex_search('gecos=(.*)', '\\1') | default(''))
             }
           }}
       loop: "{{ user_info.results }}"
       loop_control:
         loop_var: item
-    
+
+    - name: Final message for each input
+      debug:
+        msg: >-
+          Input '{{ result.input }}' {{
+            'matched by ' ~ result.match_type ~ ' as user ' ~ result.username ~ ' (GECOS: ' ~ result.gecos ~ ')'
+            if result.match_type != 'none'
+            else 'did not match any user'
+          }} on {{ result.host }}
+      loop: "{{ user_search_results }}"
+      loop_control:
+        loop_var: result
