@@ -17,8 +17,8 @@
           gecos=$(getent passwd "$input" | cut -d ':' -f 5)
           echo "match_type=username|user=$input|gecos=$gecos"
         else
-          # Check in GECOS field (description)
-          match=$(getent passwd | awk -F: -v val="$input" '$5 ~ val {print $1 ":" $5}' | head -n 1)
+          # Check in GECOS field (description), case-insensitive
+          match=$(getent passwd | awk -F: -v val="$input" 'BEGIN{IGNORECASE=1} $5 ~ val {print $1 ":" $5}' | head -n 1)
           if [ -n "$match" ]; then
             user=$(echo "$match" | cut -d ':' -f 1)
             gecos=$(echo "$match" | cut -d ':' -f 2)
