@@ -37,23 +37,17 @@
         user_search_results: "{{ user_search_results + [result_item] }}"
       vars:
         stdout_val: "{{ item.stdout | default('') }}"
+        match_type_match: "{{ (stdout_val | regex_search('match_type=([^|]+)', '\\1')) | default(None) }}"
+        username_match: "{{ (stdout_val | regex_search('user=([^|]+)', '\\1')) | default(None) }}"
+        gecos_match: "{{ (stdout_val | regex_search('gecos=(.*)', '\\1')) | default(None) }}"
         result_item: >-
           {{
             {
               'host': inventory_hostname,
               'input': item.item,
-              'match_type': (
-                (stdout_val is string and stdout_val | length > 0)
-                | ternary((stdout_val | regex_search('match_type=([^|]+)', '\\1')), 'none')
-              ) | default('none'),
-              'username': (
-                (stdout_val is string and stdout_val | length > 0)
-                | ternary((stdout_val | regex_search('user=([^|]+)', '\\1')), '')
-              ) | default(''),
-              'gecos': (
-                (stdout_val is string and stdout_val | length > 0)
-                | ternary((stdout_val | regex_search('gecos=(.*)', '\\1')), '')
-              ) | default('')
+              'match_type': match_type_match if match_type_match is not none else 'none',
+              'username': username_match if username_match is not none else '',
+              'gecos': gecos_match if gecos_match is not none else ''
             }
           }}
       loop: "{{ user_info.results }}"
