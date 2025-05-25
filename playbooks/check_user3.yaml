@@ -34,7 +34,19 @@
 
     - name: Aggregate results
       set_fact:
-        user_search_results: "{{ user_search_results + [{
-          'host': inventory_hostname,
-          'input': item.item,
-          'match_type': (item.stdout | reg_
+        user_search_results: "{{ user_search_results + [result_item] }}"
+      vars:
+        result_item: >-
+          {{
+            {
+              'host': inventory_hostname,
+              'input': item.item,
+              'match_type': (item.stdout | regex_search('match_type=([^|]+)', '\\1') | default(['none']))[0],
+              'username': (item.stdout | regex_search('user=([^|]+)', '\\1') | default(['']))[0],
+              'gecos': (item.stdout | regex_search('gecos=(.*)', '\\1') | default(['']))[0]
+            }
+          }}
+      loop: "{{ user_info.results }}"
+      loop_control:
+        loop_var: item
+    
