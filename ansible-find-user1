@@ -13,7 +13,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts  playbooks/check_user4.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'  -e 'BUILD_ID=$BUILD_ID'
+                        ansible-playbook -i inventory/hosts  playbooks/check_user3.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'  -e 'BUILD_ID=$BUILD_ID'
                         """
                     
                 }
