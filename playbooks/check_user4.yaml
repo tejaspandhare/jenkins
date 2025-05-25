@@ -39,20 +39,11 @@
       vars:
         stdout_val: "{{ item.stdout | default('') }}"
         match_type_match: >-
-          {{
-            (stdout_val | regex_search('match_type=([^|]+)', '\\1'))[0]
-            if (stdout_val | regex_search('match_type=([^|]+)', '\\1')) is not none else 'none'
-          }}
+          {{ (stdout_val | regex_search('match_type=([^|]+)', '\\1')) or 'none' }}
         username_match: >-
-          {{
-            (stdout_val | regex_search('user=([^|]+)', '\\1'))[0]
-            if (stdout_val | regex_search('user=([^|]+)', '\\1')) is not none else ''
-          }}
+          {{ (stdout_val | regex_search('user=([^|]+)', '\\1')) or '' }}
         gecos_match: >-
-          {{
-            (stdout_val | regex_search('gecos=(.*)', '\\1'))[0]
-            if (stdout_val | regex_search('gecos=(.*)', '\\1')) is not none else ''
-          }}
+          {{ (stdout_val | regex_search('gecos=(.*)', '\\1')) or '' }}
         result_item: >-
           {{
             {
