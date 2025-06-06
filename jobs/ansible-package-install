@@ -14,7 +14,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i inventory/hosts  playbooks/pkginstall.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}' -e 'packages_list=${params.PKG_INSTALL}'
+                        ansible-playbook -i inventory/hosts  ../playbooks/pkginstall1.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}' -e 'packages_list=${params.PKG_INSTALL}'
                         """
                     
                 }
