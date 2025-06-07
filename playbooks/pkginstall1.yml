@@ -6,7 +6,7 @@
 
   vars:
     pkg_list_raw: "{{ pkg_list | default('') }}"
-    packages_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
+     pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
   tasks:
     - name: Debug list of packages to install/upgrade
