@@ -6,7 +6,8 @@
 
   vars:
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | list }}"
+    #exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | list }}"
+    exclude_packages_list: "{{ exclude_packages_list | default('') | split(';') | map('trim') | reject('equalto', '') | list }}"
 
   tasks:
 
