@@ -64,7 +64,7 @@
       shell: |
         cd {{ python_src_dir }}/Python-{{ python_version }}
         ./configure --prefix=/usr/local
-        make -j "$(nproc)"
+        make
         make altinstall
       args:
         creates: "{{ python_bin_path }}"
