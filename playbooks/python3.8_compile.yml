@@ -100,6 +100,10 @@
       command: /usr/bin/pip3.8 list
       register: pip_version_output
 
+    - name: Check installed pip3.8 modules
+      command: /usr/bin/pip3.8 list
+      register: pip_modules_output
+
     - name: Show Python version
       debug:
         msg: "Python 3.8 installed: {{ python_version_output.stdout }}"
