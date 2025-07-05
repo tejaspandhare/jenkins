@@ -96,6 +96,7 @@
 
     - name: Check installed pip3.8 version
       command: /usr/bin/pip3.8 --version
+      command: /usr/bin/pip3.8 list
       register: pip_version_output
 
     - name: Show Python version
