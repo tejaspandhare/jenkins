@@ -43,32 +43,56 @@
         state: present
       when: ansible_os_family == "RedHat"
 
+    - name: Check if Python 3.8 is already installed
+      stat:
+        path: "{{ python_bin_path }}"
+      register: python38_check
+
+    - name: Check if pip3.8 is already installed
+      stat:
+        path: "{{ pip_bin_path }}"
+      register: pip38_check
+
+    - name: Show message if Python 3.8 is already installed
+      debug:
+        msg: "Python 3.8 is already installed at {{ python_bin_path }}, skipping compilation."
+      when: python38_check.stat.exists
+
+    - name: Show message if pip3.8 is already installed
+      debug:
+        msg: "pip3.8 is already installed at {{ pip_bin_path }}, skipping pip installation."
+      when: pip38_check.stat.exists
+
     - name: Create source directory
       file:
         path: "{{ python_src_dir }}"
         state: directory
         mode: '0755'
+      when: not python38_check.stat.exists
 
     - name: Download Python 3.8.10 source
       get_url:
         url: "{{ python_url }}"
         dest: "{{ python_src_dir }}/{{ python_tarball }}"
         mode: '0644'
+      when: not python38_check.stat.exists
 
     - name: Extract Python tarball
       unarchive:
         src: "{{ python_src_dir }}/{{ python_tarball }}"
         dest: "{{ python_src_dir }}"
         remote_src: yes
+      when: not python38_check.stat.exists
 
     - name: Compile and install Python 3.8.10
       shell: |
         cd {{ python_src_dir }}/Python-{{ python_version }}
-        ./configure --prefix=/usr/local
-        make
+        ./configure --prefix={{ python_prefix }}
+        make -j"$(nproc)"
         make altinstall
       args:
         creates: "{{ python_bin_path }}"
+      when: not python38_check.stat.exists
 
     - name: Install pip for Python 3.8
       shell: |
@@ -76,6 +100,7 @@
         {{ python_bin_path }} /tmp/get-pip.py
       args:
         creates: "{{ pip_bin_path }}"
+      when: not pip38_check.stat.exists
 
     - name: Create symlink /usr/bin/python3.8
       file:
@@ -83,6 +108,7 @@
         dest: /usr/bin/python3.8
         state: link
         force: yes
+      when: not python38_check.stat.exists
 
     - name: Create symlink /usr/bin/pip3.8
       file:
@@ -90,6 +116,7 @@
         dest: /usr/bin/pip3.8
         state: link
         force: yes
+      when: not pip38_check.stat.exists
 
     - name: Check installed Python version
       command: /usr/bin/python3.8 --version
@@ -114,4 +141,3 @@
     - name: Show pip3.8 modules
       debug:
         msg: "pip3.8 modules: {{ pip_modules_output.stdout }}"
-
