@@ -71,7 +71,7 @@
 
     - name: Install pip for Python 3.8
       shell: |
-        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+        curl -sS https://bootstrap.pypa.io/pip/3.8/get-pip.py-o /tmp/get-pip.py
         {{ python_bin_path }} /tmp/get-pip.py
       args:
         creates: "{{ pip_bin_path }}"
