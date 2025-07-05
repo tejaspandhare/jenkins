@@ -97,7 +97,6 @@
 
     - name: Check installed pip3.8 version
       command: /usr/bin/pip3.8 --version
-      command: /usr/bin/pip3.8 list
       register: pip_version_output
 
     - name: Check installed pip3.8 modules
@@ -111,3 +110,8 @@
     - name: Show pip3.8 version
       debug:
         msg: "pip3.8 installed: {{ pip_version_output.stdout }}"
+
+    - name: Show pip3.8 modules
+      debug:
+        msg: "pip3.8 modules: {{ pip_modules_output.stdout }}"
+
