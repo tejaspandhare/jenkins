@@ -42,7 +42,7 @@
   vars:
     working_file: "fetched/packages_{{ working_host }}.txt"
     nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
-    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages1.py"
+    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
   tasks:
     - name: Download comparison script
       get_url:
@@ -50,14 +50,9 @@
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Run comparison script and capture output
+    - name: Run comparison and print missing packages only (no JSON, no localhost)
       shell: |
         python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain \
         | grep -v '^Packages' | grep -v '^$' | sed 's/^ *//'
       args:
         chdir: "{{ playbook_dir }}"
-      register: compare_output
-      failed_when: false
-
-    - name: Print missing packages cleanly to Jenkins console
-      shell: echo "{{ compare_output.stdout }}"
