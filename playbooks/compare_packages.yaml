@@ -3,11 +3,11 @@
   hosts: "{{ working_host }}"
   gather_facts: false
   tasks:
-    - name: Get installed packages
+    - name: Run dpkg to get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
 
-    - name: Save package list to file
+    - name: Save package list to a file
       copy:
         content: "{{ package_list.stdout }}"
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
@@ -16,11 +16,11 @@
   hosts: "{{ nonworking_host }}"
   gather_facts: false
   tasks:
-    - name: Get installed packages
+    - name: Run dpkg to get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
 
-    - name: Save package list to file
+    - name: Save package list to a file
       copy:
         content: "{{ package_list.stdout }}"
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
@@ -29,13 +29,13 @@
   hosts: "{{ working_host }},{{ nonworking_host }}"
   gather_facts: false
   tasks:
-    - name: Fetch package list file to controller
+    - name: Fetch the package list file
       fetch:
         src: "/tmp/packages_{{ inventory_hostname }}.txt"
         dest: "./fetched/"
         flat: true
 
-- name: Compare package lists locally
+- name: Compare packages locally
   hosts: localhost
   gather_facts: false
   vars:
@@ -43,20 +43,20 @@
     nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
     compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
   tasks:
-    - name: Ensure compare script is present
+    - name: Download comparison script from GitHub
       get_url:
         url: "{{ compare_script_url }}"
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Run package comparison script
+    - name: Run comparison script
       command: >
-        python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain
+        python3 compare_packages.py {{ working_file }} {{ nonworking_file }}
       args:
         chdir: "{{ playbook_dir }}"
       register: compare_result
-      failed_when: false
+      failed_when: false  # You control failure based on output if needed
 
-    - name: Clean and show comparison output
+    - name: Show clean comparison output
       debug:
-        msg: "{{ compare_result.stdout | regex_replace('\\x1B\\[[0-9;]*[mK]', '') }}"
+        msg: "{{ compare_result.stdout }}"
