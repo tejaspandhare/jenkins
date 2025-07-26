@@ -60,5 +60,5 @@
 
     - name: Print only missing package names in Jenkins console
       debug:
-        #msg: "{{ comparison_output.stdout_lines }}"
-        shell: echo "{{ comparison_output.stdout }}"
+        msg: "{{ comparison_output.stdout_lines }}"
+        #shell: echo "{{ comparison_output.stdout }}"
