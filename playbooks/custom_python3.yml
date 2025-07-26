@@ -1,149 +1,69 @@
 ---
-- name: Compile and install Python from source with version support
-  hosts: "{{ hosts.split(';') }}"
-  become: true
-  gather_facts: true
-
-  vars:
-    python_major_minor: "{{ python_version.split('.')[0] }}.{{ python_version.split('.')[1] }}"
-    python_src_dir: "/usr/src"
-    python_tarball: "Python-{{ python_version }}.tgz"
-    python_url: "https://www.python.org/ftp/python/{{ python_version }}/{{ python_tarball }}"
-    python_prefix: "/usr/local"
-    python_bin_path: "{{ python_prefix }}/bin/python{{ python_major_minor }}"
-    pip_bin_path: "{{ python_prefix }}/bin/pip{{ python_major_minor }}"
-
+- name: Gather installed packages from working host
+  hosts: "{{ working_host }}"
+  gather_facts: false
   tasks:
-    - name: Install dependencies on Debian/Ubuntu
-      apt:
-        name:
-          - build-essential
-          - zlib1g-dev
-          - libssl-dev
-          - wget
-          - curl
-          - libbz2-dev
-          - libreadline-dev
-          - libsqlite3-dev
-          - libffi-dev
-          - xz-utils
-          - tk-dev
-        state: present
-      when: ansible_os_family == "Debian"
+    - name: Run dpkg to get installed packages
+      shell: dpkg --get-selections | grep -w install
+      register: package_list
 
-    - name: Install dependencies on RHEL/CentOS
-      yum:
-        name:
-          - gcc
-          - openssl-devel
-          - bzip2-devel
-          - libffi-devel
-          - zlib-devel
-          - make
-          - readline-devel
-          - sqlite-devel
-          - xz-devel
-          - tk-devel
-          - wget
-          - curl
-        state: present
-      when: ansible_os_family == "RedHat"
+    - name: Save package list to a file
+      copy:
+        content: "{{ package_list.stdout }}"
+        dest: "/tmp/packages_{{ inventory_hostname }}.txt"
 
-    - name: Check if Python {{ python_version }} is already installed
-      stat:
-        path: "{{ python_bin_path }}"
-      register: python_check
+- name: Gather installed packages from nonworking host
+  hosts: "{{ nonworking_host }}"
+  gather_facts: false
+  tasks:
+    - name: Run dpkg to get installed packages
+      shell: dpkg --get-selections | grep -w install
+      register: package_list
 
-    - name: Check if pip for Python {{ python_major_minor }} is already installed
-      stat:
-        path: "{{ pip_bin_path }}"
-      register: pip_check
+    - name: Save package list to a file
+      copy:
+        content: "{{ package_list.stdout }}"
+        dest: "/tmp/packages_{{ inventory_hostname }}.txt"
 
-    - name: Show message if Python is already installed
-      debug:
-        msg: "Python {{ python_version }} is already installed at {{ python_bin_path }}."
-      when: python_check.stat.exists
+- name: Fetch package lists to control node
+  hosts: "{{ working_host }},{{ nonworking_host }}"
+  gather_facts: false
+  tasks:
+    - name: Fetch the package list file
+      fetch:
+        src: "/tmp/packages_{{ inventory_hostname }}.txt"
+        dest: "./fetched/"
+        flat: true
 
-    - name: Show message if pip is already installed
-      debug:
-        msg: "pip{{ python_major_minor }} is already installed at {{ pip_bin_path }}."
-      when: pip_check.stat.exists
-
-    - name: Create source directory
-      file:
-        path: "{{ python_src_dir }}"
-        state: directory
-        mode: '0755'
-      when: not python_check.stat.exists
-
-    - name: Download Python {{ python_version }} source
+- name: Compare packages locally
+  hosts: localhost
+  gather_facts: false
+  vars:
+    working_file: "fetched/packages_{{ working_host }}.txt"
+    nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
+    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
+  tasks:
+    - name: Download comparison script from GitHub
       get_url:
-        url: "{{ python_url }}"
-        dest: "{{ python_src_dir }}/{{ python_tarball }}"
-        mode: '0644'
-      when: not python_check.stat.exists
+        url: "{{ compare_script_url }}"
+        dest: "{{ playbook_dir }}/compare_packages.py"
+        mode: '0755'
 
-    - name: Extract Python tarball
-      unarchive:
-        src: "{{ python_src_dir }}/{{ python_tarball }}"
-        dest: "{{ python_src_dir }}"
-        remote_src: yes
-      when: not python_check.stat.exists
-
-    - name: Compile and install Python {{ python_version }}
-      shell: |
-        cd {{ python_src_dir }}/Python-{{ python_version }}
-        ./configure --prefix={{ python_prefix }}
-        make -j"$(nproc)"
-        make altinstall
+    - name: Compare packages between working and nonworking host
+      command: >
+        python3 compare_packages.py {{ working_file }} {{ nonworking_file }}
       args:
-        creates: "{{ python_bin_path }}"
-      when: not python_check.stat.exists
+        chdir: "{{ playbook_dir }}"
+      register: compare_result
+      failed_when: compare_result.rc != 0
 
-    - name: Install pip for Python {{ python_major_minor }}
-      shell: |
-        curl -sS https://bootstrap.pypa.io/pip/{{ python_major_minor }}/get-pip.py -o /tmp/get-pip.py
-        {{ python_bin_path }} /tmp/get-pip.py
-      args:
-        creates: "{{ pip_bin_path }}"
-      when: not pip_check.stat.exists
-
-    - name: Create symlink /usr/bin/python{{ python_major_minor }}
-      file:
-        src: "{{ python_bin_path }}"
-        dest: "/usr/bin/python{{ python_major_minor }}"
-        state: link
-        force: yes
-      when: not python_check.stat.exists
-
-    - name: Create symlink /usr/bin/pip{{ python_major_minor }}
-      file:
-        src: "{{ pip_bin_path }}"
-        dest: "/usr/bin/pip{{ python_major_minor }}"
-        state: link
-        force: yes
-      when: not pip_check.stat.exists
-
-    - name: Check installed Python version
-      command: "/usr/bin/python{{ python_major_minor }} --version"
-      register: python_version_output
-
-    - name: Check installed pip version
-      command: "/usr/bin/pip{{ python_major_minor }} --version"
-      register: pip_version_output
-
-    - name: List pip modules
-      command: "/usr/bin/pip{{ python_major_minor }} list"
-      register: pip_modules_output
-
-    - name: Show installed Python version
+    - name: Show comparison output line by line
       debug:
-        msg: "Python {{ python_major_minor }} installed: {{ python_version_output.stdout }}"
+        msg: "{{ item }}"
+      loop: "{{ compare_result.stdout_lines }}"
 
-    - name: Show installed pip version
+    - name: Show any stderr from comparison
       debug:
-        msg: "pip{{ python_major_minor }} installed: {{ pip_version_output.stdout }}"
-
-    - name: Show pip{{ python_major_minor }} modules
-      debug:
-        msg: "pip{{ python_major_minor }} modules: {{ pip_modules_output.stdout }}"
+        msg: "{{ item }}"
+      loop: "{{ compare_result.stderr_lines }}"
+      when: compare_result.stderr != ""
