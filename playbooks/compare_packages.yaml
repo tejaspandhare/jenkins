@@ -1,9 +1,8 @@
 ---
-- name: Gather installed packages from working hosts
-  hosts: "{{ working_hosts.split(';') }}"
+- name: Gather installed packages from working host
+  hosts: "{{ working_host }}"
   gather_facts: false
   tasks:
-
     - name: Run dpkg to get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
@@ -13,11 +12,10 @@
         content: "{{ package_list.stdout }}"
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
 
-- name: Gather installed packages from nonworking hosts
-  hosts: "{{ nonworking_hosts.split(';') }}"
+- name: Gather installed packages from nonworking host
+  hosts: "{{ nonworking_host }}"
   gather_facts: false
   tasks:
-
     - name: Run dpkg to get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
@@ -28,10 +26,9 @@
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
 
 - name: Fetch package lists to control node
-  hosts: "{{ working_hosts.split(';') + nonworking_hosts.split(';') }}"
+  hosts: "{{ working_host }},{{ nonworking_host }}"
   gather_facts: false
   tasks:
-
     - name: Fetch the package list file
       fetch:
         src: "/tmp/packages_{{ inventory_hostname }}.txt"
@@ -42,13 +39,10 @@
   hosts: localhost
   gather_facts: false
   vars:
-    working_list: "{{ working_hosts.split(';') }}"
-    nonworking_list: "{{ nonworking_hosts.split(';') }}"
-    working_file: "fetched/packages_{{ working_list[0] }}.txt"
-    nonworking_file: "fetched/packages_{{ nonworking_list[0] }}.txt"
+    working_file: "fetched/packages_{{ working_host }}.txt"
+    nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
     compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
   tasks:
-
     - name: Download comparison script from GitHub
       get_url:
         url: "{{ compare_script_url }}"
