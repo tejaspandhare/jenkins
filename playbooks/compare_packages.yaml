@@ -54,3 +54,13 @@
         python3 compare_packages.py {{ working_file }} {{ nonworking_file }}
       args:
         chdir: "{{ playbook_dir }}"
+      register: compare_result
+
+    - name: Show comparison output
+      debug:
+        var: compare_result.stdout
+
+    - name: Show comparison errors (if any)
+      debug:
+        var: compare_result.stderr
+      when: compare_result.stderr != ""
