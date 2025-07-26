@@ -35,7 +35,7 @@
         dest: "./fetched/"
         flat: true
 
-- name: Compare package lists and show results
+- name: Compare package lists locally
   hosts: localhost
   gather_facts: false
   vars:
@@ -43,18 +43,20 @@
     nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
     compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
   tasks:
-    - name: Ensure comparison script is downloaded
+    - name: Ensure compare script is present
       get_url:
         url: "{{ compare_script_url }}"
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Show readable package comparison result in Jenkins console
-      shell: |
-        echo ""
-        echo "### ✅ Package Comparison Result Preview"
-        echo "----------------------------------------"
-        python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain | head -n 50
-        echo "----------------------------------------"
+    - name: Run package comparison script
+      command: >
+        python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain
       args:
         chdir: "{{ playbook_dir }}"
+      register: compare_result
+      failed_when: false
+
+    - name: Clean and show comparison output
+      debug:
+        msg: "{{ compare_result.stdout | regex_replace('\\x1B\\[[0-9;]*[mK]', '') }}"
