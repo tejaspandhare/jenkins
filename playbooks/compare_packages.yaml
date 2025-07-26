@@ -35,34 +35,29 @@
         dest: "./fetched/"
         flat: true
 
-- name: Compare package lists and show results in Jenkins console
+- name: Compare package lists and print missing packages only
   hosts: localhost
-  connection: local  # Ensures proper cleanup and avoids temp file warnings
+  connection: local
   gather_facts: false
   vars:
     working_file: "fetched/packages_{{ working_host }}.txt"
     nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
     compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages1.py"
   tasks:
-    - name: Download comparison script from GitHub
+    - name: Download comparison script
       get_url:
         url: "{{ compare_script_url }}"
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Run comparison script and capture output
+    - name: Run comparison script and capture only missing packages
       shell: |
-        python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain | head -n 50
+        python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain | grep -v '^Packages' | grep -v '^$'
       args:
         chdir: "{{ playbook_dir }}"
       register: comparison_output
-      failed_when: false  # Optional: change if you want failures on mismatch
+      failed_when: false
 
-    - name: Show comparison output in Jenkins console
+    - name: Print only missing package names in Jenkins console
       debug:
-        msg: |
-          ----------------------------------------
-          ✅ Package Comparison Result Preview
-          ----------------------------------------
-          {{ comparison_output.stdout }}
-          ----------------------------------------
+        msg: "{{ comparison_output.stdout_lines }}"
