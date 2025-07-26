@@ -41,7 +41,7 @@
   vars:
     working_file: "fetched/packages_{{ working_host }}.txt"
     nonworking_file: "fetched/packages_{{ nonworking_host }}.txt"
-    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
+    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages1.py"
   tasks:
     - name: Ensure compare script is present
       get_url:
