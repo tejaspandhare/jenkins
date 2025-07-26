@@ -50,9 +50,14 @@
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Run comparison and print missing packages only (no JSON, no localhost)
+    - name: Run comparison script and capture output
       shell: |
         python3 compare_packages.py {{ working_file }} {{ nonworking_file }} --plain \
         | grep -v '^Packages' | grep -v '^$' | sed 's/^ *//'
       args:
         chdir: "{{ playbook_dir }}"
+      register: compare_output
+      failed_when: false
+
+    - name: Print missing packages cleanly to Jenkins console
+      shell: echo "{{ compare_output.stdout }}"
