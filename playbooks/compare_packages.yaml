@@ -1,0 +1,62 @@
+---
+- name: Gather installed packages from working hosts
+  hosts: "{{ working_hosts.split(';') }}"
+  gather_facts: false
+  tasks:
+
+    - name: Run dpkg to get installed packages
+      shell: dpkg --get-selections | grep -w install
+      register: package_list
+
+    - name: Save package list to a file
+      copy:
+        content: "{{ package_list.stdout }}"
+        dest: "/tmp/packages_{{ inventory_hostname }}.txt"
+
+- name: Gather installed packages from nonworking hosts
+  hosts: "{{ nonworking_hosts.split(';') }}"
+  gather_facts: false
+  tasks:
+
+    - name: Run dpkg to get installed packages
+      shell: dpkg --get-selections | grep -w install
+      register: package_list
+
+    - name: Save package list to a file
+      copy:
+        content: "{{ package_list.stdout }}"
+        dest: "/tmp/packages_{{ inventory_hostname }}.txt"
+
+- name: Fetch package lists to control node
+  hosts: "{{ working_hosts.split(';') + nonworking_hosts.split(';') }}"
+  gather_facts: false
+  tasks:
+
+    - name: Fetch the package list file
+      fetch:
+        src: "/tmp/packages_{{ inventory_hostname }}.txt"
+        dest: "./fetched/"
+        flat: true
+
+- name: Compare packages locally
+  hosts: localhost
+  gather_facts: false
+  vars:
+    working_list: "{{ working_hosts.split(';') }}"
+    nonworking_list: "{{ nonworking_hosts.split(';') }}"
+    working_file: "fetched/packages_{{ working_list[0] }}.txt"
+    nonworking_file: "fetched/packages_{{ nonworking_list[0] }}.txt"
+    compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages.py"
+  tasks:
+
+    - name: Download comparison script from GitHub
+      get_url:
+        url: "{{ compare_script_url }}"
+        dest: "{{ playbook_dir }}/compare_packages.py"
+        mode: '0755'
+
+    - name: Compare packages between working and nonworking host
+      command: >
+        python3 compare_packages.py {{ working_file }} {{ nonworking_file }}
+      args:
+        chdir: "{{ playbook_dir }}"
