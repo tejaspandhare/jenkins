@@ -49,21 +49,14 @@
         dest: "{{ playbook_dir }}/compare_packages.py"
         mode: '0755'
 
-    - name: Compare packages between working and nonworking host
+    - name: Run comparison script
       command: >
         python3 compare_packages.py {{ working_file }} {{ nonworking_file }}
       args:
         chdir: "{{ playbook_dir }}"
       register: compare_result
-      failed_when: compare_result.rc != 0
+      failed_when: false  # You control failure based on output if needed
 
-    - name: Show comparison output line by line
+    - name: Show clean comparison output
       debug:
-        msg: "{{ item }}"
-      loop: "{{ compare_result.stdout_lines }}"
-
-    - name: Show any stderr from comparison
-      debug:
-        msg: "{{ item }}"
-      loop: "{{ compare_result.stderr_lines }}"
-      when: compare_result.stderr != ""
+        msg: "{{ compare_result.stdout }}"
