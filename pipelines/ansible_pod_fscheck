@@ -20,7 +20,7 @@ pipeline {
                   volumeMounts:
                     - name: ssh-private-key
                       mountPath: /secrets/ssh-private-key
-                      #readOnly: true
+                      readOnly: true
                     - name: jenkins-ssh-dir
                       mountPath: /home/jenkins/.ssh/
 
