@@ -6,49 +6,53 @@ apiVersion: v1
 kind: Pod
 metadata:
   labels:
-    some-label: ansible-agent
+    purpose: ansible-agent
 spec:
   initContainers:
-  - name: set-ssh-key-permissions
-    image: alpine
-    command:
-      - sh
-      - -c
-      - |
-        mkdir -p /home/jenkins/.ssh
-        cp /secrets/ssh-private-key/automation.key /home/jenkins/.ssh/id_rsa
-        chmod 600 /home/jenkins/.ssh/id_rsa
-    volumeMounts:
-      - name: ssh-private-key
-        mountPath: /secrets/ssh-private-key
-        readOnly: true
-      - name: jenkins-ssh-dir
-        mountPath: /home/jenkins/.ssh/
+    - name: set-ssh-key-permissions
+      image: alpine
+      command:
+        - sh
+        - -c
+        - |
+          mkdir -p /home/jenkins/.ssh
+          cp /secrets/ssh-private-key/automation.key /home/jenkins/.ssh/id_rsa
+          chmod 600 /home/jenkins/.ssh/id_rsa
+          ls -l /home/jenkins/.ssh/id_rsa
+      volumeMounts:
+        - name: ssh-private-key
+          mountPath: /secrets/ssh-private-key
+          readOnly: true
+        - name: jenkins-ssh-dir
+          mountPath: /home/jenkins/.ssh
 
   containers:
-  - name: ansible
-    image: alpine/ansible:latest
-    command:
-      - cat  # Keeps the container alive until Jenkins attaches
-    tty: true
-    volumeMounts:
-      - name: ansible-inventory
-        mountPath: /etc/ansible/hosts
-        subPath: hosts
-      - name: jenkins-ssh-dir
-        mountPath: /home/jenkins/.ssh
-      - name: playbooks
-        mountPath: /home/jenkins/playbooks
+    - name: ansible
+      image: alpine/ansible:latest
+      command:
+        - cat
+      tty: true
+      volumeMounts:
+        - name: ansible-inventory
+          mountPath: /etc/ansible/hosts
+          subPath: hosts
+        - name: jenkins-ssh-dir
+          mountPath: /home/jenkins/.ssh
+        - name: playbooks
+          mountPath: /home/jenkins/playbooks
 
   volumes:
     - name: ansible-inventory
       configMap:
         name: ansible-inventory-configmap
+
     - name: ssh-private-key
       secret:
         secretName: ssh-private-key
+
     - name: jenkins-ssh-dir
       emptyDir: {}
+
     - name: playbooks
       configMap:
         name: playbooks
@@ -61,16 +65,16 @@ spec:
     }
 
     stages {
-        stage('Debug Pod Setup') {
+        stage('Verify Environment') {
             steps {
                 container('ansible') {
                     sh '''
-                        echo "Checking SSH key permissions..."
-                        ls -l /home/jenkins/.ssh/id_rsa || echo "Key not found"
-                        echo "Checking inventory file:"
+                        echo "Environment info:"
+                        whoami
+                        env | grep FS_NAME
+                        ls -l /home/jenkins/.ssh || echo "No SSH key found"
+                        ls -l /home/jenkins/playbooks || echo "No playbooks found"
                         cat /etc/ansible/hosts || echo "No inventory"
-                        echo "Listing playbooks:"
-                        ls -l /home/jenkins/playbooks
                     '''
                 }
             }
@@ -80,11 +84,10 @@ spec:
             steps {
                 container('ansible') {
                     sh '''
-                        export FS_NAME=${FS_NAME}
-                        echo "Running ansible-playbook with FS_NAME=${FS_NAME}"
+                        echo "Running Ansible playbook with FS_NAME=${FS_NAME}"
                         ansible-playbook -i /etc/ansible/hosts \
-                            --extra-vars "FS_NAME=${FS_NAME}" \
-                            /home/jenkins/playbooks/diskspace.yaml
+                          --extra-vars "FS_NAME=${FS_NAME}" \
+                          /home/jenkins/playbooks/diskspace.yaml
                     '''
                 }
             }
