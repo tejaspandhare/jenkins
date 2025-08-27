@@ -49,7 +49,7 @@ pipeline {
                   - name: ssh-private-key
                     secret:
                       secretName: ssh-private-key
-                      readOnly: true
+                      #readOnly: true
                   - name: jenkins-ssh-dir
                     emptyDir: {}
                   - name: playbooks
