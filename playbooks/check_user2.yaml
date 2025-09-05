@@ -1,6 +1,7 @@
 ---
 - name: Check if a local user exists on inventory hosts
-  hosts: "{{ hosts.split(';') }}"
+  #hosts: "{{ hosts.split(';') }}"
+  hosts: all
   gather_facts: false
 
   vars:
