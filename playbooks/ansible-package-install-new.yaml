@@ -1,0 +1,65 @@
+---
+- name: Install packages on multiple servers (multi-platform)
+  hosts: "{{ hosts.split(';') }}"
+  gather_facts: true
+  become: true
+
+  vars:
+    pkg_list_raw: "{{ pkg_list | default('') }}"
+    packages_list: >-
+      {{
+        pkg_list_raw.split(';')
+        | map('trim')
+        | select('length')
+        | list
+      }}
+
+  tasks:
+    - name: Debug list of packages to install
+      debug:
+        msg: "Packages to install: {{ packages_list }}"
+
+    - name: Install packages on Ubuntu/Debian
+      ansible.builtin.apt:
+        name: "{{ packages_list }}"
+        state: present
+        update_cache: yes
+      when: ansible_facts['os_family'] == "Debian"
+      register: debian_install_result
+
+    - name: Install packages on RHEL/CentOS
+      ansible.builtin.yum:
+        name: "{{ packages_list }}"
+        state: present
+      when: ansible_facts['os_family'] == "RedHat"
+      register: redhat_install_result
+
+    - name: Install packages on SUSE
+      ansible.builtin.zypper:
+        name: "{{ packages_list }}"
+        state: present
+        update_cache: yes
+      when: ansible_facts['os_family'] == "Suse"
+      register: suse_install_result
+
+    - name: Clean up APT cache (Debian)
+      ansible.builtin.apt:
+        autoclean: yes
+        autoremove: yes
+      when:
+        - ansible_facts['os_family'] == "Debian"
+        - debian_install_result is changed
+
+    - name: Clean YUM cache (RedHat)
+      ansible.builtin.command: yum clean all
+      when:
+        - ansible_facts['os_family'] == "RedHat"
+        - redhat_install_result is changed
+      changed_when: false
+
+    - name: Clean up Zypper cache (SUSE)
+      ansible.builtin.shell: "zypper clean --all"
+      when:
+        - ansible_facts['os_family'] == "Suse"
+        - suse_install_result is changed
+      changed_when: false
