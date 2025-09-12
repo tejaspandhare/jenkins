@@ -14,7 +14,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i "inventory/hosts"  playbooks/python3.8_compile.yml --private-key="$ANSIBLE_PRIVATE_KEY" -e "hosts=${params.SERVER_NAME}"
+                        ansible-playbook -i "inventory/hosts"  playbooks/python3.8_compile_new.yml --private-key="$ANSIBLE_PRIVATE_KEY" -e "hosts=${params.SERVER_NAME}"
                         """
                     
                 }
