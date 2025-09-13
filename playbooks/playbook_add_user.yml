@@ -1,6 +1,7 @@
 ---
 - name: Create user with UID, GID, comment, home directory, and SSH key
-  hosts: all
+  hosts: "{{ hosts.split(';') }}"
+  #hosts: all
   become: true
 
   vars:
