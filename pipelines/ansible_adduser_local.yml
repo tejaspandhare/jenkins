@@ -1,0 +1,24 @@
+
+pipeline {
+    agent any
+    environment {
+     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+     ANSIBLE_FORCE_COLOR = 'true'
+  }
+
+    
+    stages {
+        stage('Cleanup Junk data') {
+            steps {
+                script {
+                    
+                        sh """
+                        
+                        ansible-playbook -i "inventory/hosts"  playbooks/playbook_add_user.yml --private-key="$ANSIBLE_PRIVATE_KEY" -e "hosts=${params.SERVER_NAME}" -e "user_id=${params.USER_ID}" -e "user_gid=${params.USER_GID}" -e "gcos_comment='${params.GCOS_COMMENT}'" -e "public_key='${params.PUBLIC_KEY}'" -e "home_directory=${params.HOME_DIRECTORY}"
+                        """
+                    
+                }
+            }
+        }
+    }
+}
