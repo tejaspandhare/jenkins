@@ -1,35 +1,42 @@
-- name: Create Group, User and Deploy the Public Key
-  hosts: [var_server_name]
-  #become: true
+---
+- name: Create user with UID, GID, comment, home directory, and SSH key
+  hosts: all
+  become: true
 
   vars:
-    group_name:
-    - name: backend
-    - name: devops
-    - name: security
-    - name: ai
-    - name: uxui
-    - name: mobile
-    - name: frontend
-    - name: qa
-  
+    server_name: ""
+    user_id: ""
+    user_gid: ""
+    gcos_comment: ""
+    public_key: ""
+    home_directory: ""
+
   tasks:
 
-# Creating groups
-  - name: Create Groups
-    group:
-      name: "{{ item.name }}"
-    with_items: "{{ group_name }}"
+    - name: Show target server info
+      debug:
+        msg: "Target server: {{ server_name }}, Creating user: {{ user_id }}, Home: {{ home_directory }}"
 
-# Create users and add to group 
-  - name: Add Users
-    user:
-      name: var_add_user
-      groups: [var_group_name]
+    - name: Ensure group exists (if GID is provided)
+      group:
+        name: "{{ user_id }}"
+        gid: "{{ user_gid | default(omit) }}"
+        state: present
+      when: user_gid != ""
 
-# Set authorized key from file
-  - name: Set authorize keys taken from file
-    authorized_key:
-      user: var_add_user
-      state: present
-      key: "{{ lookup('file', './user_public_key.pub') }}"
+    - name: Ensure user exists with custom home, UID, GID, comment
+      user:
+        name: "{{ user_id }}"
+        uid: "{{ user_id | int if user_id != '' else omit }}"
+        group: "{{ user_id if user_gid != '' else omit }}"
+        comment: "{{ gcos_comment }}"
+        home: "{{ home_directory }}"
+        shell: /bin/bash
+        create_home: true
+
+    - name: Set authorized SSH key for the user
+      authorized_key:
+        user: "{{ user_id }}"
+        key: "{{ public_key }}"
+        state: present
+        path: "{{ home_directory }}/.ssh/authorized_keys"
