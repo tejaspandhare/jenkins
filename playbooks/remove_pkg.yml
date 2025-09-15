@@ -1,0 +1,26 @@
+---
+- name: Remove a package from multiple Linux distros
+  hosts: all
+  become: yes
+  vars:
+    package_name: examplepkg
+
+  tasks:
+
+    - name: Remove package on Ubuntu/Debian
+      apt:
+        name: "{{ package_name }}"
+        state: absent
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Remove package on RHEL/CentOS/Fedora
+      yum:
+        name: "{{ package_name }}"
+        state: absent
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Remove package on SUSE
+      zypper:
+        name: "{{ package_name }}"
+        state: absent
+      when: ansible_facts['os_family'] == "Suse"
