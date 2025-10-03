@@ -1,6 +1,6 @@
 ---
 - name: Remove a package from multiple Linux distros
-  hosts: hosts: "{{ hosts.split(';') }}" 
+  hosts: "{{ hosts.split(';') }}" 
   gather_facts: true 
   become: yes
   vars:
