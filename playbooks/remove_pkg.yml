@@ -1,56 +1,28 @@
----
-- name: Install or upgrade packages on multiple servers (multi-platform)
-  hosts: "{{ hosts.split(';') }}"
-  gather_facts: true
-  become: true
+vars:
+  pkg_list_raw: "{{ pkg_list | default('') }}"
+  pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
-  vars:
-    pkg_list_raw: "{{ pkg_list | default('') }}"
-    pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
+tasks:
+  - name: Debug list of packages to install/upgrade
+    debug:
+      msg: "Packages to install/upgrade: {{ pkg_list }}"
 
-  tasks:
-    - name: Debug list of packages to install/upgrade
-      debug:
-        msg: "Packages to install/upgrade: {{ packages_list }}"
+  - name: Install or upgrade packages on Ubuntu/Debian
+    ansible.builtin.apt:
+      name: "{{ pkg_list }}"
+      state: absent
+      update_cache: yes
+    when: ansible_facts['os_family'] == "Debian"
 
-    - name: Install or upgrade packages on Ubuntu/Debian
-      ansible.builtin.apt:
-        name: "{{ packages_list }}"
-        state: absent
-        update_cache: yes
-      when: ansible_facts['os_family'] == "Debian"
+  - name: Install or upgrade packages on RHEL/CentOS
+    ansible.builtin.yum:
+      name: "{{ pkg_list }}"
+      state: absent
+    when: ansible_facts['os_family'] == "RedHat"
 
-    - name: Install or upgrade packages on RHEL/CentOS
-      ansible.builtin.yum:
-        name: "{{ packages_list }}"
-        state: absent
-      when: ansible_facts['os_family'] == "RedHat"
-
-    - name: Install or upgrade packages on SUSE
-      ansible.builtin.zypper:
-        name: "{{ packages_list }}"
-        state: absent
-        update_cache: yes
-      when: ansible_facts['os_family'] == "Suse"
-
-    - name: Clean up APT cache (Debian)
-      ansible.builtin.apt:
-        autoclean: yes
-        autoremove: yes
-      when: ansible_facts['os_family'] == "Debian"
-
-    - name: Clean up YUM cache (RedHat)
-      ansible.builtin.command: "yum clean all"
-      when: ansible_facts['os_family'] == "RedHat"
-      changed_when: false
-
-    - name: Clean up Zypper cache (SUSE)
-      ansible.builtin.shell: "zypper clean --all"
-      when: ansible_facts['os_family'] == "Suse"
-      changed_when: false
-
-    - name: Cleanup Ansible temporary cache (if it exists)
-      ansible.builtin.file:
-        path: /tmp/ansiballz_cache
-        state: absent
-      ignore_errors: true
+  - name: Install or upgrade packages on SUSE
+    ansible.builtin.zypper:
+      name: "{{ pkg_list }}"
+      state: absent
+      update_cache: yes
+    when: ansible_facts['os_family'] == "Suse"
