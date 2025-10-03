@@ -1,5 +1,5 @@
 ---
-- name: Install or upgrade packages on multiple servers (multi-platform)
+- name: Remove packages on multiple servers (multi-platform)
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
@@ -9,24 +9,24 @@
     pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
   tasks:
-    - name: Debug list of packages to install/upgrade
+    - name: Debug list of packages to remove
       debug:
         msg: "Packages to install/upgrade: {{ pkg_list }}"
 
-    - name: Install or upgrade packages on Ubuntu/Debian
+    - name: Remove packages on Ubuntu/Debian
       ansible.builtin.apt:
         name: "{{ pkg_list }}"
         state: absent
         update_cache: yes
       when: ansible_facts['os_family'] == "Debian"
 
-    - name: Install or upgrade packages on RHEL/CentOS
+    - name: Remove packages on RHEL/CentOS
       ansible.builtin.yum:
         name: "{{ pkg_list }}"
         state: absent
       when: ansible_facts['os_family'] == "RedHat"
 
-    - name: Install or upgrade packages on SUSE
+    - name: Remove packages on SUSE
       ansible.builtin.zypper:
         name: "{{ pkg_list }}"
         state: absent
