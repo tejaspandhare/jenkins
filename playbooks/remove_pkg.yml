@@ -1,9 +1,11 @@
 ---
 - name: Remove a package from multiple Linux distros
-  hosts: all
+  hosts: hosts: "{{ hosts.split(';') }}" 
+  gather_facts: true 
   become: yes
   vars:
-    package_name: examplepkg
+    pkg_list_raw: "{{ pkg_list | default('') }}"
+     pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
   tasks:
 
