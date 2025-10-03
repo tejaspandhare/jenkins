@@ -1,19 +1,20 @@
 ---
 - name: Remove a package from multiple Linux distros
-  hosts: "{{ hosts.split(';') }}"  # e.g., --extra-vars "hosts=host1;host2"
+  hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: yes
 
   vars:
     pkg_list_raw: "{{ pkg_list | default('') }}"
-    pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
+    pkg_list: >-
+      {{ pkg_list_raw | regex_replace('\\s+', '') | split(';') if ';' in pkg_list_raw else [pkg_list_raw] }}
 
   tasks:
 
     - name: Fail if no package list is provided
       fail:
         msg: "You must provide at least one package in pkg_list"
-      when: pkg_list | length == 0
+      when: pkg_list | length == 0 or pkg_list[0] == ''
 
     - name: Remove packages on Ubuntu/Debian
       apt:
