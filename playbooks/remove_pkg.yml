@@ -1,28 +1,37 @@
 ---
 - name: Remove a package from multiple Linux distros
-  hosts: "{{ hosts.split(';') }}" 
-  gather_facts: true 
+  hosts: "{{ hosts.split(';') }}"  # e.g., --extra-vars "hosts=host1;host2"
+  gather_facts: true
   become: yes
+
   vars:
     pkg_list_raw: "{{ pkg_list | default('') }}"
     pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
   tasks:
 
-    - name: Remove package on Ubuntu/Debian
+    - name: Fail if no package list is provided
+      fail:
+        msg: "You must provide at least one package in pkg_list"
+      when: pkg_list | length == 0
+
+    - name: Remove packages on Ubuntu/Debian
       apt:
-        name: "{{ package_name }}"
+        name: "{{ item }}"
         state: absent
+      loop: "{{ pkg_list }}"
       when: ansible_facts['os_family'] == "Debian"
 
-    - name: Remove package on RHEL/CentOS/Fedora
+    - name: Remove packages on RHEL/CentOS/Fedora
       yum:
-        name: "{{ package_name }}"
+        name: "{{ item }}"
         state: absent
+      loop: "{{ pkg_list }}"
       when: ansible_facts['os_family'] == "RedHat"
 
-    - name: Remove package on SUSE
+    - name: Remove packages on SUSE
       zypper:
-        name: "{{ package_name }}"
+        name: "{{ item }}"
         state: absent
+      loop: "{{ pkg_list }}"
       when: ansible_facts['os_family'] == "Suse"
