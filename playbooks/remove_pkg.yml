@@ -5,7 +5,7 @@
   become: yes
   vars:
     pkg_list_raw: "{{ pkg_list | default('') }}"
-     pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
+    pkg_list: "{{ pkg_list_raw.split(';') | map('trim') | list }}"
 
   tasks:
 
