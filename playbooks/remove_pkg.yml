@@ -11,7 +11,7 @@
   tasks:
     - name: Debug list of packages to remove
       debug:
-        msg: "Packages to install/upgrade: {{ pkg_list }}"
+        msg: "Packages to uninstall: {{ pkg_list }}"
 
     - name: Remove packages on Ubuntu/Debian
       ansible.builtin.apt:
