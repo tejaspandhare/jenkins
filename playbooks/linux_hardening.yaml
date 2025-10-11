@@ -1,0 +1,75 @@
+---
+- name: Basic Linux OS Hardening
+  hosts: all
+  become: yes
+  vars:
+    audit_rules:
+      - { path: "/etc/passwd", perms: "wa", key: "passwd_changes" }
+      - { path: "/etc/shadow", perms: "wa", key: "shadow_changes" }
+      - { path: "/etc/group", perms: "wa", key: "group_changes" }
+      - { path: "/etc/sudoers", perms: "wa", key: "sudoers_changes" }
+    unused_services:
+      - cups
+      - avahi-daemon
+      - bluetooth
+
+  tasks:
+
+    - name: Ensure sticky bit is set on /tmp
+      file:
+        path: /tmp
+        mode: '1777'
+        state: directory
+
+    - name: Ensure sticky bit is set on /var/tmp
+      file:
+        path: /var/tmp
+        mode: '1777'
+        state: directory
+
+    - name: Install auditd (Ubuntu)
+      apt:
+        name: auditd
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install auditd (RHEL/CentOS)
+      yum:
+        name: audit
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install auditd (SUSE)
+      zypper:
+        name: audit
+        state: present
+      when: ansible_os_family == "Suse"
+
+    - name: Enable and start auditd
+      systemd:
+        name: auditd
+        state: started
+        enabled: yes
+
+    - name: Create audit rule file
+      copy:
+        dest: /etc/audit/rules.d/hardening.rules
+        content: |
+          {% for rule in audit_rules %}
+          -w {{ rule.path }} -p {{ rule.perms }} -k {{ rule.key }}
+          {% endfor %}
+        owner: root
+        group: root
+        mode: '0640'
+
+    - name: Apply audit rules
+      command: augenrules --load
+
+    - name: Disable unused services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop: "{{ unused_services }}"
+      ignore_errors: yes  # Some services may not be installed
+
