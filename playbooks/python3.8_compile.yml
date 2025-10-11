@@ -30,6 +30,7 @@
         name:
           - gcc
           - openssl-devel
+          - libssl-dev
           - bzip2-devel
           - libffi-devel
           - zlib-devel
