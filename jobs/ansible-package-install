@@ -13,7 +13,7 @@ pipeline {
                     
                         sh """
                         
-                        ansible-playbook -i "inventory/hosts"  playbooks/ansible-package-install-new.yaml --private-key="$ANSIBLE_PRIVATE_KEY" --ssh-common-args='-o StrictHostKeyChecking=no' -e "hosts=${params.SERVER_NAME}" -e "packages_list=${params.PKG_INSTALL}"
+                        ansible-playbook -i "inventory/hosts"  playbooks/ansible-package-install-new.yaml --private-key="$ANSIBLE_PRIVATE_KEY" -e "hosts=${params.SERVER_NAME}" -e "packages_list=${params.PKG_INSTALL}"
                         """
                     
                 }
