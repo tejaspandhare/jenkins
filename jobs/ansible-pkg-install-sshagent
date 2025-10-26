@@ -1,0 +1,26 @@
+pipeline {
+    agent any
+
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
+
+    stages {
+        stage('Cleanup Junk data') {
+            steps {
+                // Start ssh-agent and load your Jenkins SSH key (automation-key)
+                sshagent (credentials: ['automation-key']) {
+                    script {
+                        sh """
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                playbooks/ansible-package-install-new.yaml \
+                                -e "hosts=${params.SERVER_NAME}" \
+                                -e "packages_list=${params.PKG_INSTALL}"
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
