@@ -16,7 +16,7 @@ pipeline {
                                 playbooks/remove_pkg.yml \
                                 --private-key="$ANSIBLE_KEY_FILE" \
                                 -e "hosts=${params.SERVER_NAME}" \
-                                -e "packages_list=${params.PKG_INSTALL}"
+                                -e "packages_list=${params.PKG_UNINSTALL}"
                         """
                     }
                 }
