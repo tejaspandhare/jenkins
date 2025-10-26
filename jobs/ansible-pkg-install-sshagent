@@ -8,13 +8,13 @@ pipeline {
     stages {
         stage('Cleanup Junk data') {
             steps {
-                // Start ssh-agent and load your Jenkins SSH key (automation-key)
-                sshagent (credentials: ['automation-key']) {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     script {
                         sh """
                             ansible-playbook \
                                 -i inventory/hosts \
                                 playbooks/ansible-package-install-new.yaml \
+                                --private-key=\$ANSIBLE_KEY_FILE \
                                 -e "hosts=${params.SERVER_NAME}" \
                                 -e "packages_list=${params.PKG_INSTALL}"
                         """
