@@ -12,7 +12,7 @@ pipeline {
                     script {
                         sh """
                             ansible-playbook \
-                                -i inventory/hosts \
+                                -i "inventory/hosts" \
                                 playbooks/remove_pkg.yml \
                                 --private-key="$ANSIBLE_KEY_FILE" \
                                 -e "hosts=${params.SERVER_NAME}" \
