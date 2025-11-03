@@ -1,0 +1,24 @@
+
+pipeline {
+    agent any
+    environment {
+     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
+  }
+
+    
+    stages {
+        stage('Cleanup Junk data') {
+            steps {
+               withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                script {
+                    
+                        sh """
+                        
+                        ansible-playbook -i inventory/hosts  playbooks/maintenance_tasks1.yaml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
+                        """
+                    
+                }
+            }
+        }
+    }
+}
