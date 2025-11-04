@@ -1,22 +1,24 @@
 pipeline {
     agent any
-    environment {
-     ANSIBLE_PRIVATE_KEY=credentials('automation-key') 
-  }
 
-    
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
+
     stages {
         stage('Cleanup Junk data') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                   script {
-                    
+                    script {
                         sh """
-                        
-                        #ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY -e 'hosts=${params.SERVER_NAME}'
-                        ansible-playbook -i inventory/hosts  playbooks/get_system_details.yml --private-key=$ANSIBLE_PRIVATE_KEY --extra-vars "hosts=$SERVER_NAME"
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                playbooks/get_system_details.yml \
+                                --private-key="$ANSIBLE_KEY_FILE" \
+                                -e "hosts=${params.SERVER_NAME}" \
+                                
                         """
-                    
+                    }
                 }
             }
         }
