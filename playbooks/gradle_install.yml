@@ -15,26 +15,17 @@
 
   tasks:
 
-    # ---------------------------------------------------
-    # Install required package
-    # ---------------------------------------------------
     - name: Install unzip
       apt:
         name: unzip
         state: present
         update_cache: yes
 
-    # ---------------------------------------------------
-    # Check if Gradle binary exists
-    # ---------------------------------------------------
     - name: Check if Gradle binary exists
       stat:
         path: "{{ gradle_bin_path }}"
       register: gradle_file_check
 
-    # ---------------------------------------------------
-    # Get installed version if exists
-    # ---------------------------------------------------
     - name: Get installed Gradle version
       command: "{{ gradle_bin_path }} --version"
       register: gradle_installed_version
@@ -52,14 +43,11 @@
         msg: "Installed Gradle version: {{ gradle_installed_version.stdout }}"
       when: gradle_file_check.stat.exists
 
-    - name: Skip installation if correct version is already installed
+    - name: Skip installation if correct version installed
       debug:
-        msg: "Gradle {{ gradle_version }} already installed. Skipping installation."
+        msg: "Gradle {{ gradle_version }} already installed. Skipping."
       when: gradle_file_check.stat.exists and gradle_version_matches
 
-    # ---------------------------------------------------
-    # Download & Extract (only if not installed or wrong version)
-    # ---------------------------------------------------
     - name: Download Gradle ZIP
       get_url:
         url: "{{ gradle_url }}"
@@ -83,9 +71,6 @@
         force: yes
       when: not gradle_file_check.stat.exists or not gradle_version_matches
 
-    # ---------------------------------------------------
-    # Backup /etc/environment before modifying PATH
-    # ---------------------------------------------------
     - name: Check if /etc/environment.bak exists
       stat:
         path: /etc/environment.bak
@@ -99,16 +84,23 @@
       when: not env_backup_check.stat.exists
 
     # ---------------------------------------------------
-    # Ensure PATH includes Gradle
+    # APPEND GRADLE PATH (corrected)
     # ---------------------------------------------------
-    - name: Ensure Gradle path exists in /etc/environment
+    - name: Check if Gradle path already in /etc/environment
+      command: grep -q "/usr/local/gradle/bin" /etc/environment
+      register: gradle_path_present
+      failed_when: false
+      changed_when: false
+
+    - name: Append Gradle path to /etc/environment
       lineinfile:
         path: /etc/environment
-        regexp: '^PATH='
-        line: 'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/gradle/bin"'
+        insertafter: EOF
+        line: 'PATH="$PATH:/usr/local/gradle/bin"'
+      when: gradle_path_present.rc != 0
 
     # ---------------------------------------------------
-    # Backup existing system gradle if exists
+    # Optional backup of system gradle
     # ---------------------------------------------------
     - name: Backup system gradle if exists
       shell: mv /usr/bin/gradle /usr/bin/gradle_backup
@@ -116,9 +108,6 @@
         removes: /usr/bin/gradle
       ignore_errors: yes
 
-    # ---------------------------------------------------
-    # Final Verification
-    # ---------------------------------------------------
     - name: Verify Gradle version after installation
       command: "{{ gradle_bin_path }} --version"
       register: final_gradle_version
@@ -131,6 +120,6 @@
       command: which gradle
       register: which_gradle
 
-    - name: Show path of gradle in use
+    - name: Show gradle path
       debug:
         msg: "Gradle binary used: {{ which_gradle.stdout }}"
