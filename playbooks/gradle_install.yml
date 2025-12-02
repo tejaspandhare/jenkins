@@ -25,27 +25,47 @@
         update_cache: yes
 
     # ---------------------------------------------------
-    # Check if Gradle is already installed
+    # Check if Gradle exists
     # ---------------------------------------------------
-    - name: Check if Gradle is already installed
+    - name: Check if Gradle binary exists
       stat:
         path: "{{ gradle_bin_path }}"
-      register: gradle_check
+      register: gradle_file_check
 
-    - name: Show message if Gradle exists
+    # ---------------------------------------------------
+    # Get installed version (if exists)
+    # ---------------------------------------------------
+    - name: Get installed Gradle version
+      command: "{{ gradle_bin_path }} --version"
+      register: gradle_installed_version
+      failed_when: false
+      changed_when: false
+      when: gradle_file_check.stat.exists
+
+    - name: Determine if installed version matches expected
+      set_fact:
+        gradle_version_matches: "{{ gradle_installed_version.stdout is search('Gradle ' + gradle_version) }}"
+      when: gradle_file_check.stat.exists
+
+    - name: Show current installed version
       debug:
-        msg: "Gradle {{ gradle_version }} already installed at {{ gradle_bin_path }}. Skipping installation."
-      when: gradle_check.stat.exists
+        msg: "Installed Gradle version: {{ gradle_installed_version.stdout }}"
+      when: gradle_file_check.stat.exists
+
+    - name: Skip installation if the correct version is already installed
+      debug:
+        msg: "Gradle {{ gradle_version }} already installed. Skipping installation."
+      when: gradle_file_check.stat.exists and gradle_version_matches
 
     # ---------------------------------------------------
-    # Download & Extract Gradle
+    # Download & Extract Gradle when needed
     # ---------------------------------------------------
-    - name: Download Gradle binary ZIP
+    - name: Download Gradle ZIP
       get_url:
         url: "{{ gradle_url }}"
         dest: "/tmp/{{ gradle_zip }}"
         mode: '0644'
-      when: not gradle_check.stat.exists
+      when: not gradle_file_check.stat.exists or not gradle_version_matches
 
     - name: Extract Gradle
       unarchive:
@@ -53,21 +73,28 @@
         dest: "{{ install_dir }}"
         remote_src: yes
         creates: "{{ gradle_extract_dir }}"
-      when: not gradle_check.stat.exists
+      when: not gradle_file_check.stat.exists or not gradle_version_matches
 
-    # ---------------------------------------------------
-    # Create symlink
-    # ---------------------------------------------------
     - name: Create Gradle symlink
       file:
         src: "{{ gradle_extract_dir }}"
         dest: "{{ gradle_symlink }}"
         state: link
         force: yes
-      when: not gradle_check.stat.exists
+      when: not gradle_file_check.stat.exists or not gradle_version_matches
 
     # ---------------------------------------------------
-    # Ensure PATH contains Gradle
+    # Backup /etc/environment before modifying
+    # ---------------------------------------------------
+    - name: Backup /etc/environment if not backed up already
+      copy:
+        src: /etc/environment
+        dest: /etc/environment.bak
+        remote_src: yes
+      when: not lookup('ansible.builtin.stat', '/etc/environment.bak').stat.exists
+
+    # ---------------------------------------------------
+    # Ensure PATH includes Gradle
     # ---------------------------------------------------
     - name: Ensure Gradle path exists in /etc/environment
       lineinfile:
@@ -85,20 +112,20 @@
       ignore_errors: yes
 
     # ---------------------------------------------------
-    # Verification
+    # Final Verification
     # ---------------------------------------------------
-    - name: Check installed Gradle version
-      command: "{{ gradle_bin_path }} -version"
-      register: gradle_version_output
+    - name: Verify Gradle version after install
+      command: "{{ gradle_bin_path }} --version"
+      register: final_gradle_version
 
-    - name: Show Gradle version
+    - name: Show final installed Gradle version
       debug:
-        msg: "Gradle installed: {{ gradle_version_output.stdout }}"
+        msg: "{{ final_gradle_version.stdout }}"
 
     - name: Which gradle
       command: which gradle
       register: which_gradle
 
-    - name: Show which gradle path
+    - name: Show gradle path
       debug:
         msg: "Gradle binary used: {{ which_gradle.stdout }}"
