@@ -49,7 +49,7 @@
 
     - name: Show installed Gradle version
       debug:
-        msg: "Installed Gradle version: {{ gradle_installed_version.stdout }}"
+        msg: "{{ gradle_installed_version.stdout_lines }}"
       when: gradle_file_check.stat.exists
 
     - name: Skip installation if correct version already installed
@@ -132,8 +132,7 @@
 
     - name: Display Gradle version exactly as terminal
       debug:
-        msg: |
-          {{ final_gradle_version.stdout }}
+        msg: "{{ final_gradle_version.stdout_lines }}"
 
     - name: Show actual gradle binary path
       debug:
