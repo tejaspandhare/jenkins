@@ -16,7 +16,7 @@
   tasks:
 
     # ---------------------------------------------------
-    # Install required package
+    # Install unzip
     # ---------------------------------------------------
     - name: Install unzip
       apt:
@@ -58,7 +58,7 @@
       when: gradle_file_check.stat.exists and gradle_version_matches
 
     # ---------------------------------------------------
-    # Download and install Gradle when needed
+    # Download and install Gradle if needed
     # ---------------------------------------------------
     - name: Download Gradle ZIP
       get_url:
@@ -99,7 +99,7 @@
       when: not env_backup_check.stat.exists
 
     # ---------------------------------------------------
-    # Append Gradle path to existing PATH= line (NO overwrite)
+    # Update PATH in /etc/environment (append Gradle only)
     # ---------------------------------------------------
     - name: Check if Gradle path already in PATH
       command: grep -q "/usr/local/gradle/bin" /etc/environment
@@ -130,14 +130,15 @@
       command: "{{ gradle_bin_path }} --version"
       register: final_gradle_version
 
-    - name: Show final installed Gradle version
+    - name: Show final installed Gradle version (exact terminal output)
       debug:
-        msg: "{{ final_gradle_version.stdout }}"
+        msg: |
+          {{ final_gradle_version.stdout }}
 
-    - name: Which gradle is used
+    - name: Show actual gradle path in use
       command: which gradle
       register: which_gradle
 
-    - name: Show actual gradle path in use
+    - name: Show gradle binary path
       debug:
         msg: "Gradle binary used: {{ which_gradle.stdout }}"
