@@ -124,6 +124,17 @@
       ignore_errors: yes
 
     # ---------------------------------------------------
+    # Reload /etc/environment for this session
+    # ---------------------------------------------------
+    - name: Reload /etc/environment for this session
+      shell: |
+        set -o allexport
+        source /etc/environment
+        set +o allexport
+      args:
+        executable: /bin/bash
+
+    # ---------------------------------------------------
     # Final verification using absolute path
     # ---------------------------------------------------
     - name: Show final installed Gradle version (exact terminal output)
@@ -133,6 +144,18 @@
     - name: Display Gradle version exactly as terminal
       debug:
         msg: "{{ final_gradle_version.stdout_lines }}"
+
+    # ---------------------------------------------------
+    # Verify Gradle works via PATH after reload
+    # ---------------------------------------------------
+    - name: Check Gradle version via PATH
+      shell: gradle --version
+      register: gradle_via_path
+      failed_when: false
+
+    - name: Display Gradle version using PATH
+      debug:
+        msg: "{{ gradle_via_path.stdout_lines }}"
 
     - name: Show actual gradle binary path
       debug:
