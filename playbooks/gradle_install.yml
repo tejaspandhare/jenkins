@@ -15,17 +15,26 @@
 
   tasks:
 
+    # ---------------------------------------------------
+    # Install required package
+    # ---------------------------------------------------
     - name: Install unzip
       apt:
         name: unzip
         state: present
         update_cache: yes
 
+    # ---------------------------------------------------
+    # Check if Gradle binary exists
+    # ---------------------------------------------------
     - name: Check if Gradle binary exists
       stat:
         path: "{{ gradle_bin_path }}"
       register: gradle_file_check
 
+    # ---------------------------------------------------
+    # Determine installed version if binary exists
+    # ---------------------------------------------------
     - name: Get installed Gradle version
       command: "{{ gradle_bin_path }} --version"
       register: gradle_installed_version
@@ -33,7 +42,7 @@
       changed_when: false
       when: gradle_file_check.stat.exists
 
-    - name: Determine if installed Gradle version matches expected
+    - name: Check if installed version matches expected
       set_fact:
         gradle_version_matches: "{{ gradle_installed_version.stdout is search('Gradle ' + gradle_version) }}"
       when: gradle_file_check.stat.exists
@@ -43,11 +52,14 @@
         msg: "Installed Gradle version: {{ gradle_installed_version.stdout }}"
       when: gradle_file_check.stat.exists
 
-    - name: Skip installation if correct version installed
+    - name: Skip installation if correct version already installed
       debug:
-        msg: "Gradle {{ gradle_version }} already installed. Skipping."
+        msg: "Gradle {{ gradle_version }} already installed. Skipping installation."
       when: gradle_file_check.stat.exists and gradle_version_matches
 
+    # ---------------------------------------------------
+    # Download and install Gradle when needed
+    # ---------------------------------------------------
     - name: Download Gradle ZIP
       get_url:
         url: "{{ gradle_url }}"
@@ -71,6 +83,9 @@
         force: yes
       when: not gradle_file_check.stat.exists or not gradle_version_matches
 
+    # ---------------------------------------------------
+    # Backup /etc/environment safely
+    # ---------------------------------------------------
     - name: Check if /etc/environment.bak exists
       stat:
         path: /etc/environment.bak
@@ -84,23 +99,23 @@
       when: not env_backup_check.stat.exists
 
     # ---------------------------------------------------
-    # APPEND GRADLE PATH (corrected)
+    # Append Gradle path to existing PATH= line (NO overwrite)
     # ---------------------------------------------------
-    - name: Check if Gradle path already in /etc/environment
+    - name: Check if Gradle path already in PATH
       command: grep -q "/usr/local/gradle/bin" /etc/environment
       register: gradle_path_present
       failed_when: false
       changed_when: false
 
-    - name: Append Gradle path to /etc/environment
-      lineinfile:
+    - name: Append /usr/local/gradle/bin to PATH in /etc/environment
+      replace:
         path: /etc/environment
-        insertafter: EOF
-        line: 'PATH="$PATH:/usr/local/gradle/bin"'
+        regexp: '^PATH="([^"]*)"'
+        replace: 'PATH="\1:/usr/local/gradle/bin"'
       when: gradle_path_present.rc != 0
 
     # ---------------------------------------------------
-    # Optional backup of system gradle
+    # Backup system gradle if exists
     # ---------------------------------------------------
     - name: Backup system gradle if exists
       shell: mv /usr/bin/gradle /usr/bin/gradle_backup
@@ -108,7 +123,10 @@
         removes: /usr/bin/gradle
       ignore_errors: yes
 
-    - name: Verify Gradle version after installation
+    # ---------------------------------------------------
+    # Final verification
+    # ---------------------------------------------------
+    - name: Verify final installed Gradle version
       command: "{{ gradle_bin_path }} --version"
       register: final_gradle_version
 
@@ -120,6 +138,6 @@
       command: which gradle
       register: which_gradle
 
-    - name: Show gradle path
+    - name: Show actual gradle path in use
       debug:
         msg: "Gradle binary used: {{ which_gradle.stdout }}"
