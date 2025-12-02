@@ -124,21 +124,29 @@
       ignore_errors: yes
 
     # ---------------------------------------------------
+    # Add Gradle to PATH for current playbook session
+    # ---------------------------------------------------
+    - name: Temporarily update PATH for current playbook
+      set_fact:
+        ansible_env:
+          PATH: "{{ ansible_env.PATH }}:/usr/local/gradle/bin"
+
+    # ---------------------------------------------------
     # Final verification
     # ---------------------------------------------------
-    - name: Verify final installed Gradle version
-      command: "{{ gradle_bin_path }} --version"
+    - name: Show final installed Gradle version (exact terminal output)
+      command: gradle --version
       register: final_gradle_version
 
-    - name: Show final installed Gradle version (exact terminal output)
+    - name: Display Gradle version exactly as terminal
       debug:
         msg: |
           {{ final_gradle_version.stdout }}
 
-    - name: Show actual gradle path in use
+    - name: Show actual gradle binary path in use
       command: which gradle
       register: which_gradle
 
-    - name: Show gradle binary path
+    - name: Display gradle binary path
       debug:
         msg: "Gradle binary used: {{ which_gradle.stdout }}"
