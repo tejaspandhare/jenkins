@@ -36,7 +36,7 @@
     # Determine installed version if binary exists
     # ---------------------------------------------------
     - name: Get installed Gradle version
-      command: "{{ gradle_bin_path }} --version"
+      shell: "{{ gradle_bin_path }} --version"
       register: gradle_installed_version
       failed_when: false
       changed_when: false
@@ -102,7 +102,7 @@
     # Update PATH in /etc/environment (append Gradle only)
     # ---------------------------------------------------
     - name: Check if Gradle path already in PATH
-      command: grep -q "/usr/local/gradle/bin" /etc/environment
+      shell: grep -q "/usr/local/gradle/bin" /etc/environment
       register: gradle_path_present
       failed_when: false
       changed_when: false
@@ -132,10 +132,10 @@
           PATH: "{{ ansible_env.PATH }}:/usr/local/gradle/bin"
 
     # ---------------------------------------------------
-    # Final verification
+    # Final verification using shell
     # ---------------------------------------------------
     - name: Show final installed Gradle version (exact terminal output)
-      command: gradle --version
+      shell: gradle --version
       register: final_gradle_version
 
     - name: Display Gradle version exactly as terminal
@@ -144,7 +144,7 @@
           {{ final_gradle_version.stdout }}
 
     - name: Show actual gradle binary path in use
-      command: which gradle
+      shell: which gradle
       register: which_gradle
 
     - name: Display gradle binary path
