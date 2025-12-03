@@ -1,6 +1,7 @@
 ---
 - name: Install Gradle 7.4.2 on Ubuntu
-  hosts: "{{ hosts.split(';') }}"
+  #hosts: "{{ hosts.split(';') }}"
+  hosts: all
   become: yes
   gather_facts: yes
 
