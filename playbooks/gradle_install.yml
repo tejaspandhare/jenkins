@@ -1,10 +1,21 @@
 ---
-- name: Install Gradle 7.4.2 on Ubuntu
+- name: Install Java 21 and Gradle 7.4.2 on Ubuntu
   hosts: "{{ hosts.split(';') }}"
   become: yes
   gather_facts: yes
 
   vars:
+    # -------------------------------
+    # Java
+    # -------------------------------
+    java_major_version: "21"
+    java_packages:
+      - openjdk-21-jdk
+      - openjdk-21-jre
+
+    # -------------------------------
+    # Gradle
+    # -------------------------------
     gradle_version: "7.4.2"
     gradle_zip: "gradle-{{ gradle_version }}-bin.zip"
     gradle_url: "https://services.gradle.org/distributions/{{ gradle_zip }}"
@@ -15,36 +26,74 @@
 
   tasks:
 
-    # ---------------------------------------------------
-    # Install unzip
-    # ---------------------------------------------------
+    # ===================================================
+    # Java 21 check
+    # ===================================================
+    - name: Check if Java is installed
+      command: java -version
+      register: java_check
+      failed_when: false
+      changed_when: false
+
+    - name: Detect installed Java major version
+      set_fact:
+        java_version_matches: "{{ java_check.stderr is regex_search('\"{{ java_major_version }}') }}"
+      when: java_check.rc == 0
+
+    - name: Show detected Java version
+      debug:
+        msg: "{{ java_check.stderr_lines }}"
+      when: java_check.rc == 0
+
+    # ===================================================
+    # Install Java 21 if missing or wrong version
+    # ===================================================
+    - block:
+        - name: Update apt cache
+          apt:
+            update_cache: yes
+
+        - name: Install OpenJDK 21 JDK and JRE
+          apt:
+            name: "{{ java_packages }}"
+            state: present
+
+        - name: Verify Java installation
+          command: java -version
+          register: java_installed
+          changed_when: false
+
+        - name: Show installed Java version
+          debug:
+            msg: "{{ java_installed.stderr_lines }}"
+      when: java_check.rc != 0 or not java_version_matches
+
+    # ===================================================
+    # Install unzip (required for Gradle)
+    # ===================================================
     - name: Install unzip
       apt:
         name: unzip
         state: present
-        update_cache: yes
 
-    # ---------------------------------------------------
-    # Check if Gradle binary exists
-    # ---------------------------------------------------
+    # ===================================================
+    # Gradle check
+    # ===================================================
     - name: Check if Gradle binary exists
       stat:
         path: "{{ gradle_bin_path }}"
       register: gradle_file_check
 
-    # ---------------------------------------------------
-    # Determine installed version if binary exists
-    # ---------------------------------------------------
     - name: Get installed Gradle version
-      shell: "{{ gradle_bin_path }} --version"
+      command: "{{ gradle_bin_path }} --version"
       register: gradle_installed_version
       failed_when: false
       changed_when: false
       when: gradle_file_check.stat.exists
 
-    - name: Check if installed version matches expected
+    - name: Detect Gradle version match
       set_fact:
-        gradle_version_matches: "{{ gradle_installed_version.stdout is search('Gradle ' + gradle_version) }}"
+        gradle_version_matches: "{{ gradle_installed_version.stdout is regex_search('Gradle\\s+{{ gradle_version }}') }}"
       when: gradle_file_check.stat.exists
 
     - name: Show installed Gradle version
@@ -52,111 +101,59 @@
         msg: "{{ gradle_installed_version.stdout_lines }}"
       when: gradle_file_check.stat.exists
 
-    - name: Skip installation if correct version already installed
-      debug:
-        msg: "Gradle {{ gradle_version }} already installed. Skipping installation."
-      when: gradle_file_check.stat.exists and gradle_version_matches
+    # ===================================================
+    # Install / Upgrade Gradle if needed
+    # ===================================================
+    - block:
+        - name: Download Gradle ZIP
+          get_url:
+            url: "{{ gradle_url }}"
+            dest: "/tmp/{{ gradle_zip }}"
+            mode: '0644'
 
-    # ---------------------------------------------------
-    # Download and install Gradle if needed
-    # ---------------------------------------------------
-    - name: Download Gradle ZIP
-      get_url:
-        url: "{{ gradle_url }}"
-        dest: "/tmp/{{ gradle_zip }}"
-        mode: '0644'
+        - name: Extract Gradle
+          unarchive:
+            src: "/tmp/{{ gradle_zip }}"
+            dest: "{{ install_dir }}"
+            remote_src: yes
+
+        - name: Create Gradle symlink
+          file:
+            src: "{{ gradle_extract_dir }}"
+            dest: "{{ gradle_symlink }}"
+            state: link
+            force: yes
       when: not gradle_file_check.stat.exists or not gradle_version_matches
 
-    - name: Extract Gradle
-      unarchive:
-        src: "/tmp/{{ gradle_zip }}"
-        dest: "{{ install_dir }}"
-        remote_src: yes
-        creates: "{{ gradle_extract_dir }}"
-      when: not gradle_file_check.stat.exists or not gradle_version_matches
-
-    - name: Create Gradle symlink
-      file:
-        src: "{{ gradle_extract_dir }}"
-        dest: "{{ gradle_symlink }}"
-        state: link
-        force: yes
-      when: not gradle_file_check.stat.exists or not gradle_version_matches
-
-    # ---------------------------------------------------
-    # Backup /etc/environment safely
-    # ---------------------------------------------------
-    - name: Check if /etc/environment.bak exists
-      stat:
-        path: /etc/environment.bak
-      register: env_backup_check
-
-    - name: Backup /etc/environment if not already backed up
+    # ===================================================
+    # Add Gradle to PATH (system-wide)
+    # ===================================================
+    - name: Configure Gradle environment variables
       copy:
-        src: /etc/environment
-        dest: /etc/environment.bak
-        remote_src: yes
-      when: not env_backup_check.stat.exists
+        dest: /etc/profile.d/gradle.sh
+        mode: '0644'
+        content: |
+          export GRADLE_HOME={{ gradle_symlink }}
+          export PATH=$PATH:$GRADLE_HOME/bin
 
-    # ---------------------------------------------------
-    # Update PATH in /etc/environment (append Gradle only)
-    # ---------------------------------------------------
-    - name: Check if Gradle path already in PATH
-      shell: grep -q "/usr/local/gradle/bin" /etc/environment
-      register: gradle_path_present
-      failed_when: false
+    # ===================================================
+    # Final verification
+    # ===================================================
+    - name: Show Gradle version using absolute path
+      command: "{{ gradle_bin_path }} --version"
+      register: final_gradle_version
       changed_when: false
 
-    - name: Append /usr/local/gradle/bin to PATH in /etc/environment
-      replace:
-        path: /etc/environment
-        regexp: '^PATH="([^"]*)"'
-        replace: 'PATH="\1:/usr/local/gradle/bin"'
-      when: gradle_path_present.rc != 0
-
-    # ---------------------------------------------------
-    # Backup system gradle if exists
-    # ---------------------------------------------------
-    - name: Backup system gradle if exists
-      shell: mv /usr/bin/gradle /usr/bin/gradle_backup
-      args:
-        removes: /usr/bin/gradle
-      ignore_errors: yes
-
-    # ---------------------------------------------------
-    # Reload /etc/environment for this session
-    # ---------------------------------------------------
-    - name: Reload /etc/environment for this session
-      shell: |
-        set -o allexport
-        source /etc/environment
-        set +o allexport
-      args:
-        executable: /bin/bash
-
-    # ---------------------------------------------------
-    # Final verification using absolute path
-    # ---------------------------------------------------
-    - name: Show final installed Gradle version (exact terminal output)
-      shell: "{{ gradle_bin_path }} --version"
-      register: final_gradle_version
-
-    - name: Display Gradle version exactly as terminal
+    - name: Display Gradle version
       debug:
         msg: "{{ final_gradle_version.stdout_lines }}"
 
-    # ---------------------------------------------------
-    # Verify Gradle works via PATH after reload
-    # ---------------------------------------------------
-    - name: Check Gradle version via PATH
-      shell: gradle --version
+    - name: Check Gradle via PATH
+      command: gradle --version
       register: gradle_via_path
       failed_when: false
+      changed_when: false
 
-    - name: Display Gradle version using PATH
+    - name: Display Gradle version via PATH
       debug:
         msg: "{{ gradle_via_path.stdout_lines }}"
-
-    - name: Show actual gradle binary path
-      debug:
-        msg: "Gradle binary used: {{ gradle_bin_path }}"
