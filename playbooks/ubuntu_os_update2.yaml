@@ -1,5 +1,5 @@
 ---
-- name: Perform Maintenance Tasks
+- name: Perform Maintenance Tasks (NO KERNEL LOGIC)
   hosts: "{{ hosts.split(';') }}"
   become: true
   gather_facts: true
@@ -8,14 +8,27 @@
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
     exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | reject('equalto','') | list }}"
 
-  tasks:
+  pre_tasks:
 
-    # ===================
-    # VERSION MARKER
-    # ===================
-    - name: Playbook version marker
+    # ------------------------------------------------
+    # HARD GUARANTEE: FAIL if old kernel logic exists
+    # ------------------------------------------------
+    - name: Fail if old kernel variables are present
+      ansible.builtin.fail:
+        msg: >
+          OLD KERNEL LOGIC DETECTED.
+          Variables like latest_kernel_install or kernel_version_before
+          must NOT exist in this playbook run.
+      when:
+        - latest_kernel_install is defined
+          or kernel_version_before is defined
+          or reboot_required is defined
+
+    - name: Playbook identity marker
       ansible.builtin.debug:
-        msg: "PLAYBOOK VERSION: 2026-01-UBUNTU-REBOOT-REQUIRED-ONLY"
+        msg: "RUNNING PLAYBOOK: 2026-01-CLEAN-NO-KERNEL-LOGIC"
+
+  tasks:
 
     # ===================
     # SNAP CLEANUP
@@ -75,7 +88,7 @@
         update_cache: no
 
     # ===================
-    # REBOOT LOGIC (ONLY THIS)
+    # REBOOT LOGIC (ONLY VALID METHOD)
     # ===================
     - name: Check if reboot is required (Ubuntu native)
       ansible.builtin.stat:
