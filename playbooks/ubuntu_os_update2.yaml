@@ -1,8 +1,8 @@
 ---
 - name: Perform Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"
-  gather_facts: true
   become: true
+  gather_facts: true
 
   vars:
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
@@ -10,10 +10,16 @@
 
   tasks:
 
-    # -------------------
-    # Snap cleanup
-    # -------------------
+    # ===================
+    # VERSION MARKER
+    # ===================
+    - name: Playbook version marker
+      ansible.builtin.debug:
+        msg: "PLAYBOOK VERSION: 2026-01-UBUNTU-REBOOT-REQUIRED-ONLY"
 
+    # ===================
+    # SNAP CLEANUP
+    # ===================
     - name: List all snaps
       ansible.builtin.command: snap list --all
       register: snap_list_output
@@ -36,11 +42,10 @@
       ignore_errors: true
       changed_when: true
 
-    # -------------------
-    # System cleanup
-    # -------------------
-
-    - name: Vacuum journalctl logs to 20M
+    # ===================
+    # SYSTEM CLEANUP
+    # ===================
+    - name: Vacuum journal logs to 20M
       ansible.builtin.command: journalctl --vacuum-size=20M
       changed_when: true
 
@@ -50,10 +55,9 @@
         DEBIAN_FRONTEND: noninteractive
       changed_when: false
 
-    # -------------------
-    # APT maintenance
-    # -------------------
-
+    # ===================
+    # APT MAINTENANCE
+    # ===================
     - name: Update APT cache
       ansible.builtin.apt:
         update_cache: yes
@@ -65,37 +69,32 @@
       ignore_errors: true
       changed_when: true
 
-    - name: Perform OS dist-upgrade
+    - name: Perform dist-upgrade
       ansible.builtin.apt:
         upgrade: dist
         update_cache: no
-      register: apt_upgrade_result
 
-    # -------------------
-    # Reboot handling (CORRECT WAY)
-    # -------------------
-
+    # ===================
+    # REBOOT LOGIC (ONLY THIS)
+    # ===================
     - name: Check if reboot is required (Ubuntu native)
       ansible.builtin.stat:
         path: /var/run/reboot-required
       register: reboot_flag
 
-    - name: Debug reboot status
+    - name: Debug reboot-required status
       ansible.builtin.debug:
-        msg:
-          - "Reboot required file exists: {{ reboot_flag.stat.exists }}"
+        msg: "Reboot required file exists: {{ reboot_flag.stat.exists }}"
 
     - name: Reboot system if required
       ansible.builtin.reboot:
         reboot_timeout: 600
       when: reboot_flag.stat.exists
-      ignore_errors: true
       changed_when: true
 
-    # -------------------
-    # Jenkins / Ansible temp cleanup
-    # -------------------
-
+    # ===================
+    # JENKINS / ANSIBLE TMP CLEANUP
+    # ===================
     - name: Find ansiballz_cache directories
       ansible.builtin.find:
         paths: /var/jenkins_home/.ansible/tmp
@@ -104,10 +103,6 @@
         file_type: directory
       register: ansiballz_dirs
 
-    - name: Debug found ansiballz_cache directories
-      ansible.builtin.debug:
-        var: ansiballz_dirs.files | map(attribute='path') | list
-
     - name: Remove ansiballz_cache directories
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -115,12 +110,6 @@
       loop: "{{ ansiballz_dirs.files }}"
       ignore_errors: true
 
-    - name: Remove ansible-local-* temp directories
-      ansible.builtin.file:
-        path: "/var/jenkins_home/.ansible/tmp"
-        state: directory
-        mode: "0755"
-
-    - name: Cleanup ansible-local temp folders
+    - name: Remove ansible-local temp directories
       ansible.builtin.command: rm -rf /var/jenkins_home/.ansible/tmp/ansible-local-*
       ignore_errors: true
