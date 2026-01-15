@@ -1,0 +1,26 @@
+pipeline {
+    agent any
+
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
+
+    stages {
+        stage('Cleanup Junk data') {
+            steps {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    script {
+                        sh """
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                playbooks/ubuntu_os_update.yaml \
+                                --private-key="$ANSIBLE_KEY_FILE" \
+                                -e "hosts=${params.SERVER_NAME}" \
+                                
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
