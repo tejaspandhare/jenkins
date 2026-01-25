@@ -1,5 +1,5 @@
 - name: Perform Maintenance Tasks
-  hosts: "{{ target_hosts }}"
+  hosts: "{{ hosts.split(';') }}"
   gather_facts: true
 
   vars:
