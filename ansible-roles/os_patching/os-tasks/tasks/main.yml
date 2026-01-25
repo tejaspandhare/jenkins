@@ -25,7 +25,7 @@
       changed_when: true
 
     - name: Perform apt update for Debian-based systems
-      ansible.builtin.shell: "apt update"
+      ansible.builtin.shell: "apt update && apt dist-upgrade -y"
       when: ansible_os_family == "Debian"
       changed_when: true
 
