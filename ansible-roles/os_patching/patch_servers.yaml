@@ -1,10 +1,20 @@
 - name: Perform Maintenance Tasks
-  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: true  # Ensure facts are gathered to check OS version
+  hosts: "{{ target_hosts }}"
+  gather_facts: true
 
   vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
+    # Semicolon-separated hosts passed in via extra-vars or inventory
+    target_hosts: "{{ target_hosts | default('all') }}"
+
+    # Read EXCLUDE_PKGS from environment, safely
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
+
+    # Convert to a clean list
+    exclude_packages_list: >-
+      {{ EXCLUDE_PKGS.split(';')
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
 
   roles:
     - os-tasks
