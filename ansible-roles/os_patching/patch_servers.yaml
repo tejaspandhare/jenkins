@@ -1,15 +1,9 @@
 - name: Perform Maintenance Tasks
-  hosts: "{{ hosts.split(';') }}"
+  hosts: "{{ hosts.split(';') | join(':') }}"
   gather_facts: true
 
   vars:
-    # Semicolon-separated hosts passed in via extra-vars or inventory
-    target_hosts: "{{ target_hosts | default('all') }}"
-
-    # Read EXCLUDE_PKGS from environment, safely
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
-
-    # Convert to a clean list
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS.split(';')
          | map('trim')
