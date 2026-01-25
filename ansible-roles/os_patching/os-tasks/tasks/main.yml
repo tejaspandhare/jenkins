@@ -16,7 +16,7 @@
       changed_when: true
 
     - name: Vacuum journalctl logs to limit size to 20M
-      ansible.builtin.shell: "journalctl --vacuum-size=20M"
+      ansible.builtin.shell: "journalctl --vacuum-size=10M"
       changed_when: true
 
     - name: Fix broken packages for Debian-based systems
