@@ -1,6 +1,6 @@
 ---
 - name: User Audit Report - Single Playbook
-  hosts: all
+  hosts: "{{ hosts.split(';') }}"
   become: yes
   gather_facts: no
 
