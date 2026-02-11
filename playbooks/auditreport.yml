@@ -4,199 +4,208 @@
   become: yes
   gather_facts: yes
 
+  vars:
+    valid_users: []
+    final_users: []
+    report_data: []
+
   tasks:
 
-    # ==============================
-    # SYSTEM INFORMATION
-    # ==============================
+  ########################################################
+  # SYSTEM INFORMATION
+  ########################################################
 
-    - name: Collect hardware info
-      shell: |
-        echo "MAKE=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null)"
-        echo "MODEL=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null)"
-      register: hwinfo
-      changed_when: false
+  - name: Collect hardware Make
+    command: cat /sys/devices/virtual/dmi/id/sys_vendor
+    register: sys_vendor
+    ignore_errors: yes
+    changed_when: false
 
-    - name: Set system info facts
-      set_fact:
-        system_info:
-          host: "{{ inventory_hostname }}"
-          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-          kernel: "{{ ansible_kernel }}"
-          cpu: "{{ ansible_processor_vcpus }}"
-          ram: "{{ ansible_memtotal_mb }} MB"
-          make: "{{ hwinfo.stdout_lines[0].split('=')[1] | default('N/A') }}"
-          model: "{{ hwinfo.stdout_lines[1].split('=')[1] | default('N/A') }}"
+  - name: Collect hardware Model
+    command: cat /sys/devices/virtual/dmi/id/product_name
+    register: sys_model
+    ignore_errors: yes
+    changed_when: false
 
-    - name: Collect local disk info (exclude tmpfs/run/devtmpfs/overlay)
-      set_fact:
-        disk_info: >-
-          {{
-            ansible_mounts
-            | rejectattr('fstype', 'in', ['tmpfs','devtmpfs','overlay'])
-            | rejectattr('mount', 'search', '^/run')
-            | map(attribute='mount')
-            | list
-          }}
+  - name: Set system info
+    set_fact:
+      system_info:
+        host: "{{ inventory_hostname }}"
+        os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+        kernel: "{{ ansible_kernel }}"
+        cpu: "{{ ansible_processor_vcpus }}"
+        ram: "{{ ansible_memtotal_mb }} MB"
+        make: "{{ sys_vendor.stdout | default('N/A') }}"
+        model: "{{ sys_model.stdout | default('N/A') }}"
 
-    # ==============================
-    # USER INFORMATION
-    # ==============================
+  ########################################################
+  # DISK INFO (Exclude tmpfs/run/overlay)
+  ########################################################
 
-    - name: Get passwd entries
-      getent:
-        database: passwd
+  - name: Build disk info list
+    set_fact:
+      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB)' ] }}"
+    loop: "{{ ansible_mounts }}"
+    when:
+      - item.fstype not in ['tmpfs','devtmpfs','overlay']
+      - not item.mount.startswith('/run')
 
-    - name: Get group entries
-      getent:
-        database: group
+  ########################################################
+  # USER FILTERING (SAFE METHOD)
+  ########################################################
 
-    - name: Determine sudo group users
-      set_fact:
-        sudo_group_users: >-
-          {{
-            (getent_group['sudo'][2].split(',') if 'sudo' in getent_group else []) +
-            (getent_group['wheel'][2].split(',') if 'wheel' in getent_group else [])
-          }}
+  - name: Get passwd entries
+    getent:
+      database: passwd
 
-    - name: Filter real local users (UID >=1000)
-      set_fact:
-        valid_users: >-
-          {{
-            getent_passwd
-            | dict2items
-            | selectattr('value.2', 'int')
-            | selectattr('value.2', '>=', 1000)
-            | map(attribute='key')
-            | list
-          }}
+  - name: Get group entries
+    getent:
+      database: group
 
-    - name: Keep only sudo users
-      set_fact:
-        final_users: "{{ valid_users | intersect(sudo_group_users) }}"
+  - name: Build valid local users list (UID >=1000)
+    set_fact:
+      valid_users: "{{ valid_users + [ item.key ] }}"
+    loop: "{{ getent_passwd | dict2items }}"
+    when:
+      - item.value[2] | int >= 1000
+      - item.key != "nobody"
 
-    - name: Collect user details
-      shell: |
-        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
-        GROUPS=$(id -nG {{ item }})
-        PASSLAST=$(chage -l {{ item }} | grep "Last password change")
-        PASSMAX=$(chage -l {{ item }} | grep "Maximum")
-        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
-      loop: "{{ final_users }}"
-      register: user_data
-      changed_when: false
+  - name: Build sudo group users list
+    set_fact:
+      sudo_group_users: >-
+        {{
+          (getent_group['sudo'][2].split(',') if 'sudo' in getent_group else []) +
+          (getent_group['wheel'][2].split(',') if 'wheel' in getent_group else [])
+        }}
 
-    - name: Store report data
-      set_fact:
-        report_data: "{{ user_data.results | map(attribute='stdout') | list }}"
+  - name: Keep only sudo users
+    set_fact:
+      final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
-    # ==============================
-    # GENERATE REPORTS (Run Once)
-    # ==============================
+  ########################################################
+  # COLLECT USER DETAILS
+  ########################################################
 
-    - name: Generate TXT report
-      run_once: true
-      delegate_to: localhost
-      copy:
-        dest: system_report.txt
-        content: |
-          ================= FULL SYSTEM AUDIT REPORT =================
+  - name: Collect user details
+    shell: |
+      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
+      GROUPS=$(id -nG {{ item }})
+      PASSLAST=$(chage -l {{ item }} | grep "Last password change")
+      PASSMAX=$(chage -l {{ item }} | grep "Maximum")
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
+    loop: "{{ final_users }}"
+    register: user_output
+    changed_when: false
 
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          ------------------------------------------------------------
-          Host: {{ sys.host }}
-          OS: {{ sys.os }}
-          Kernel: {{ sys.kernel }}
-          CPU Cores: {{ sys.cpu }}
-          RAM: {{ sys.ram }}
-          Make: {{ sys.make }}
-          Model: {{ sys.model }}
-          Filesystems:
-          {% for mount in hostvars[host].ansible_mounts
-               if mount.fstype not in ['tmpfs','devtmpfs','overlay']
-               and not mount.mount.startswith('/run') %}
-            - {{ mount.mount }} :
-              {{ (mount.size_total/1024/1024/1024)|round(2) }} GB total
-          {% endfor %}
+  - name: Store user report data
+    set_fact:
+      report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
-          SUDO USERS:
-          {% for line in hostvars[host].report_data | default([]) %}
-          {% set cols = line.split('|') %}
-            User: {{ cols[1] }}
-            Last Login: {{ cols[2] }}
-            Groups: {{ cols[3] }}
-            {{ cols[4] }}
-            {{ cols[5] }}
-          {% endfor %}
+  ########################################################
+  # GENERATE REPORTS (RUN ONCE ON JENKINS POD)
+  ########################################################
 
-          ============================================================
+  - name: Generate TXT report
+    run_once: true
+    delegate_to: localhost
+    copy:
+      dest: system_report.txt
+      content: |
+        ================= FULL SYSTEM AUDIT REPORT =================
 
-          {% endfor %}
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        ------------------------------------------------------------
+        Host: {{ sys.host }}
+        OS: {{ sys.os }}
+        Kernel: {{ sys.kernel }}
+        CPU Cores: {{ sys.cpu }}
+        RAM: {{ sys.ram }}
+        Make: {{ sys.make }}
+        Model: {{ sys.model }}
 
-    - name: Generate CSV report
-      run_once: true
-      delegate_to: localhost
-      copy:
-        dest: system_report.csv
-        content: |
-          Host,OS,Kernel,CPU,RAM,Make,Model
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram }},{{ sys.make }},{{ sys.model }}
-          {% endfor %}
+        Filesystems:
+        {% for disk in hostvars[host].disk_info | default([]) %}
+          - {{ disk }}
+        {% endfor %}
 
-    - name: Generate HTML report
-      run_once: true
-      delegate_to: localhost
-      copy:
-        dest: system_report.html
-        content: |
-          <html>
-          <head>
-          <title>Full System Audit Report</title>
-          <style>
-          table {border-collapse: collapse; width: 100%;}
-          th, td {border:1px solid black; padding:8px;}
-          th {background:#f2f2f2;}
-          </style>
-          </head>
-          <body>
-          <h2>Full System Audit Report</h2>
+        SUDO USERS:
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+          User: {{ cols[1] }}
+          Last Login: {{ cols[2] }}
+          Groups: {{ cols[3] }}
+          {{ cols[4] }}
+          {{ cols[5] }}
+        {% endfor %}
 
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          <h3>{{ sys.host }}</h3>
-          <ul>
-            <li>OS: {{ sys.os }}</li>
-            <li>Kernel: {{ sys.kernel }}</li>
-            <li>CPU: {{ sys.cpu }}</li>
-            <li>RAM: {{ sys.ram }}</li>
-            <li>Make: {{ sys.make }}</li>
-            <li>Model: {{ sys.model }}</li>
-          </ul>
+        ============================================================
 
-          <h4>Sudo Users</h4>
-          <table>
-          <tr>
-            <th>User</th>
-            <th>Last Login</th>
-            <th>Groups</th>
-            <th>Password Info</th>
-          </tr>
+        {% endfor %}
 
-          {% for line in hostvars[host].report_data | default([]) %}
-          {% set cols = line.split('|') %}
-          <tr>
-            <td>{{ cols[1] }}</td>
-            <td>{{ cols[2] }}</td>
-            <td>{{ cols[3] }}</td>
-            <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
-          </tr>
-          {% endfor %}
-          </table>
-          <hr>
-          {% endfor %}
+  - name: Generate CSV report
+    run_once: true
+    delegate_to: localhost
+    copy:
+      dest: system_report.csv
+      content: |
+        Host,OS,Kernel,CPU,RAM,Make,Model
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram }},{{ sys.make }},{{ sys.model }}
+        {% endfor %}
 
-          </body>
-          </html>
+  - name: Generate HTML report
+    run_once: true
+    delegate_to: localhost
+    copy:
+      dest: system_report.html
+      content: |
+        <html>
+        <head>
+        <title>Full System Audit Report</title>
+        <style>
+        table {border-collapse: collapse; width: 100%;}
+        th, td {border:1px solid black; padding:8px;}
+        th {background:#f2f2f2;}
+        </style>
+        </head>
+        <body>
+        <h2>Full System Audit Report</h2>
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        <h3>{{ sys.host }}</h3>
+        <ul>
+          <li>OS: {{ sys.os }}</li>
+          <li>Kernel: {{ sys.kernel }}</li>
+          <li>CPU: {{ sys.cpu }}</li>
+          <li>RAM: {{ sys.ram }}</li>
+          <li>Make: {{ sys.make }}</li>
+          <li>Model: {{ sys.model }}</li>
+        </ul>
+
+        <h4>Sudo Users</h4>
+        <table>
+        <tr>
+          <th>User</th>
+          <th>Last Login</th>
+          <th>Groups</th>
+          <th>Password Info</th>
+        </tr>
+
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        <tr>
+          <td>{{ cols[1] }}</td>
+          <td>{{ cols[2] }}</td>
+          <td>{{ cols[3] }}</td>
+          <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
+        </tr>
+        {% endfor %}
+        </table>
+        <hr>
+        {% endfor %}
+
+        </body>
+        </html>
