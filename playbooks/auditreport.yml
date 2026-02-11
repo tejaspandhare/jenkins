@@ -1,13 +1,47 @@
 ---
-- name: User Audit Report - Single Playbook
+- name: Full System + Sudo User Audit Report
   hosts: "{{ hosts.split(';') }}"
   become: yes
-  gather_facts: no
-
-  vars:
-    report_data: []
+  gather_facts: yes
 
   tasks:
+
+    # ==============================
+    # SYSTEM INFORMATION
+    # ==============================
+
+    - name: Collect hardware info
+      shell: |
+        echo "MAKE=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null)"
+        echo "MODEL=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null)"
+      register: hwinfo
+      changed_when: false
+
+    - name: Set system info facts
+      set_fact:
+        system_info:
+          host: "{{ inventory_hostname }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel: "{{ ansible_kernel }}"
+          cpu: "{{ ansible_processor_vcpus }}"
+          ram: "{{ ansible_memtotal_mb }} MB"
+          make: "{{ hwinfo.stdout_lines[0].split('=')[1] | default('N/A') }}"
+          model: "{{ hwinfo.stdout_lines[1].split('=')[1] | default('N/A') }}"
+
+    - name: Collect local disk info (exclude tmpfs/run/devtmpfs/overlay)
+      set_fact:
+        disk_info: >-
+          {{
+            ansible_mounts
+            | rejectattr('fstype', 'in', ['tmpfs','devtmpfs','overlay'])
+            | rejectattr('mount', 'search', '^/run')
+            | map(attribute='mount')
+            | list
+          }}
+
+    # ==============================
+    # USER INFORMATION
+    # ==============================
 
     - name: Get passwd entries
       getent:
@@ -17,7 +51,7 @@
       getent:
         database: group
 
-    - name: Determine sudo group (sudo or wheel)
+    - name: Determine sudo group users
       set_fact:
         sudo_group_users: >-
           {{
@@ -49,28 +83,16 @@
         PASSMAX=$(chage -l {{ item }} | grep "Maximum")
         echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
       loop: "{{ final_users }}"
-      register: collected_data
+      register: user_data
+      changed_when: false
 
-    - name: Store collected data per host
+    - name: Store report data
       set_fact:
-        report_data: "{{ collected_data.results | map(attribute='stdout') | list }}"
+        report_data: "{{ user_data.results | map(attribute='stdout') | list }}"
 
-    # =============================
-    # Generate Reports (Run Once)
-    # =============================
-
-    - name: Generate CSV report
-      run_once: true
-      delegate_to: localhost
-      copy:
-        dest: system_report.csv
-        content: |
-          Host,User,LastLogin,Groups,LastPasswordChange,MaxPasswordDays
-          {% for host in ansible_play_hosts %}
-          {% for line in hostvars[host].report_data | default([]) %}
-          {{ line | replace('|', ',') }}
-          {% endfor %}
-          {% endfor %}
+    # ==============================
+    # GENERATE REPORTS (Run Once)
+    # ==============================
 
     - name: Generate TXT report
       run_once: true
@@ -78,19 +100,50 @@
       copy:
         dest: system_report.txt
         content: |
-          ================= USER AUDIT REPORT =================
+          ================= FULL SYSTEM AUDIT REPORT =================
 
           {% for host in ansible_play_hosts %}
+          {% set sys = hostvars[host].system_info %}
+          ------------------------------------------------------------
+          Host: {{ sys.host }}
+          OS: {{ sys.os }}
+          Kernel: {{ sys.kernel }}
+          CPU Cores: {{ sys.cpu }}
+          RAM: {{ sys.ram }}
+          Make: {{ sys.make }}
+          Model: {{ sys.model }}
+          Filesystems:
+          {% for mount in hostvars[host].ansible_mounts
+               if mount.fstype not in ['tmpfs','devtmpfs','overlay']
+               and not mount.mount.startswith('/run') %}
+            - {{ mount.mount }} :
+              {{ (mount.size_total/1024/1024/1024)|round(2) }} GB total
+          {% endfor %}
+
+          SUDO USERS:
           {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
-          ------------------------------------------------------
-          Host: {{ cols[0] }}
-          User: {{ cols[1] }}
-          Last Login: {{ cols[2] }}
-          Groups: {{ cols[3] }}
-          {{ cols[4] }}
-          {{ cols[5] }}
+            User: {{ cols[1] }}
+            Last Login: {{ cols[2] }}
+            Groups: {{ cols[3] }}
+            {{ cols[4] }}
+            {{ cols[5] }}
           {% endfor %}
+
+          ============================================================
+
+          {% endfor %}
+
+    - name: Generate CSV report
+      run_once: true
+      delegate_to: localhost
+      copy:
+        dest: system_report.csv
+        content: |
+          Host,OS,Kernel,CPU,RAM,Make,Model
+          {% for host in ansible_play_hosts %}
+          {% set sys = hostvars[host].system_info %}
+          {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram }},{{ sys.make }},{{ sys.model }}
           {% endfor %}
 
     - name: Generate HTML report
@@ -101,7 +154,7 @@
         content: |
           <html>
           <head>
-          <title>User Audit Report</title>
+          <title>Full System Audit Report</title>
           <style>
           table {border-collapse: collapse; width: 100%;}
           th, td {border:1px solid black; padding:8px;}
@@ -109,29 +162,41 @@
           </style>
           </head>
           <body>
-          <h2>User Audit Report</h2>
+          <h2>Full System Audit Report</h2>
+
+          {% for host in ansible_play_hosts %}
+          {% set sys = hostvars[host].system_info %}
+          <h3>{{ sys.host }}</h3>
+          <ul>
+            <li>OS: {{ sys.os }}</li>
+            <li>Kernel: {{ sys.kernel }}</li>
+            <li>CPU: {{ sys.cpu }}</li>
+            <li>RAM: {{ sys.ram }}</li>
+            <li>Make: {{ sys.make }}</li>
+            <li>Model: {{ sys.model }}</li>
+          </ul>
+
+          <h4>Sudo Users</h4>
           <table>
           <tr>
-            <th>Host</th>
             <th>User</th>
             <th>Last Login</th>
             <th>Groups</th>
-            <th>Last Password Change</th>
-            <th>Max Password Days</th>
+            <th>Password Info</th>
           </tr>
-          {% for host in ansible_play_hosts %}
+
           {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
           <tr>
-            <td>{{ cols[0] }}</td>
             <td>{{ cols[1] }}</td>
             <td>{{ cols[2] }}</td>
             <td>{{ cols[3] }}</td>
-            <td>{{ cols[4] }}</td>
-            <td>{{ cols[5] }}</td>
+            <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
           </tr>
           {% endfor %}
-          {% endfor %}
           </table>
+          <hr>
+          {% endfor %}
+
           </body>
           </html>
