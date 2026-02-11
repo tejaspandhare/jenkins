@@ -1,0 +1,137 @@
+---
+- name: User Audit Report - Single Playbook
+  hosts: all
+  become: yes
+  gather_facts: no
+
+  vars:
+    report_data: []
+
+  tasks:
+
+    - name: Get passwd entries
+      getent:
+        database: passwd
+
+    - name: Get group entries
+      getent:
+        database: group
+
+    - name: Determine sudo group (sudo or wheel)
+      set_fact:
+        sudo_group_users: >-
+          {{
+            (getent_group['sudo'][2].split(',') if 'sudo' in getent_group else []) +
+            (getent_group['wheel'][2].split(',') if 'wheel' in getent_group else [])
+          }}
+
+    - name: Filter real local users (UID >=1000)
+      set_fact:
+        valid_users: >-
+          {{
+            getent_passwd
+            | dict2items
+            | selectattr('value.2', 'int')
+            | selectattr('value.2', '>=', 1000)
+            | map(attribute='key')
+            | list
+          }}
+
+    - name: Keep only sudo users
+      set_fact:
+        final_users: "{{ valid_users | intersect(sudo_group_users) }}"
+
+    - name: Collect user details
+      shell: |
+        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
+        GROUPS=$(id -nG {{ item }})
+        PASSLAST=$(chage -l {{ item }} | grep "Last password change")
+        PASSMAX=$(chage -l {{ item }} | grep "Maximum")
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
+      loop: "{{ final_users }}"
+      register: collected_data
+
+    - name: Store collected data per host
+      set_fact:
+        report_data: "{{ collected_data.results | map(attribute='stdout') | list }}"
+
+    # =============================
+    # Generate Reports (Run Once)
+    # =============================
+
+    - name: Generate CSV report
+      run_once: true
+      delegate_to: localhost
+      copy:
+        dest: system_report.csv
+        content: |
+          Host,User,LastLogin,Groups,LastPasswordChange,MaxPasswordDays
+          {% for host in ansible_play_hosts %}
+          {% for line in hostvars[host].report_data | default([]) %}
+          {{ line | replace('|', ',') }}
+          {% endfor %}
+          {% endfor %}
+
+    - name: Generate TXT report
+      run_once: true
+      delegate_to: localhost
+      copy:
+        dest: system_report.txt
+        content: |
+          ================= USER AUDIT REPORT =================
+
+          {% for host in ansible_play_hosts %}
+          {% for line in hostvars[host].report_data | default([]) %}
+          {% set cols = line.split('|') %}
+          ------------------------------------------------------
+          Host: {{ cols[0] }}
+          User: {{ cols[1] }}
+          Last Login: {{ cols[2] }}
+          Groups: {{ cols[3] }}
+          {{ cols[4] }}
+          {{ cols[5] }}
+          {% endfor %}
+          {% endfor %}
+
+    - name: Generate HTML report
+      run_once: true
+      delegate_to: localhost
+      copy:
+        dest: system_report.html
+        content: |
+          <html>
+          <head>
+          <title>User Audit Report</title>
+          <style>
+          table {border-collapse: collapse; width: 100%;}
+          th, td {border:1px solid black; padding:8px;}
+          th {background:#f2f2f2;}
+          </style>
+          </head>
+          <body>
+          <h2>User Audit Report</h2>
+          <table>
+          <tr>
+            <th>Host</th>
+            <th>User</th>
+            <th>Last Login</th>
+            <th>Groups</th>
+            <th>Last Password Change</th>
+            <th>Max Password Days</th>
+          </tr>
+          {% for host in ansible_play_hosts %}
+          {% for line in hostvars[host].report_data | default([]) %}
+          {% set cols = line.split('|') %}
+          <tr>
+            <td>{{ cols[0] }}</td>
+            <td>{{ cols[1] }}</td>
+            <td>{{ cols[2] }}</td>
+            <td>{{ cols[3] }}</td>
+            <td>{{ cols[4] }}</td>
+            <td>{{ cols[5] }}</td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+          </table>
+          </body>
+          </html>
