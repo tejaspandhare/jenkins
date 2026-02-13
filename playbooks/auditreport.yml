@@ -102,6 +102,34 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
+  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+  ########################################################
+
+  - name: Remove old TXT report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      state: absent
+
+  - name: Remove old CSV report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      state: absent
+
+  - name: Remove old HTML report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.html"
+      state: absent
+
+  ########################################################
   # GENERATE REPORTS (ON JENKINS WORKSPACE)
   ########################################################
 
