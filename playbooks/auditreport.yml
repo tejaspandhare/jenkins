@@ -39,7 +39,7 @@
         model: "{{ sys_model.stdout | default('N/A') }}"
 
   ########################################################
-  # DISK INFO (Exclude tmpfs/run/overlay)
+  # DISK INFO
   ########################################################
 
   - name: Build disk info list
@@ -102,7 +102,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # GENERATE REPORTS (RUN ONCE ON JENKINS POD)
+  # GENERATE REPORTS (ON JENKINS WORKSPACE)
   ########################################################
 
   - name: Generate TXT report
@@ -110,7 +110,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: system_report.txt
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
         ================= FULL SYSTEM AUDIT REPORT =================
 
@@ -149,7 +149,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: system_report.csv
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
         Host,OS,Kernel,CPU,RAM,Make,Model
         {% for host in ansible_play_hosts %}
@@ -162,7 +162,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: system_report.html
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.html"
       content: |
         <html>
         <head>
