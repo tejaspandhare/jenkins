@@ -51,7 +51,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (SAFE METHOD)
+  # USER FILTERING
   ########################################################
 
   - name: Get passwd entries
@@ -108,6 +108,7 @@
   - name: Generate TXT report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: system_report.txt
       content: |
@@ -146,6 +147,7 @@
   - name: Generate CSV report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: system_report.csv
       content: |
@@ -158,6 +160,7 @@
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: system_report.html
       content: |
