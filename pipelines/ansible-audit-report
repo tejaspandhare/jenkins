@@ -27,7 +27,7 @@ pipeline {
     post {
         always {
             sh 'ls -lah'   // debug: confirm files exist
-            archiveArtifacts artifacts: 'system_report.*', allowEmptyArchive: false
+            archiveArtifacts artifacts: 'playbooks/system_report.*', allowEmptyArchive: false
         }
     }
 }
