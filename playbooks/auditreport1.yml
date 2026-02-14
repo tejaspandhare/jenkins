@@ -15,7 +15,7 @@
   # SYSTEM INFORMATION
   ########################################################
 
-  - name: Get last patch date (Ubuntu/Debian)
+  - name: Get last patch date (Debian/Ubuntu)
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null || echo 'N/A'"
     register: last_patch
     changed_when: false
@@ -55,42 +55,26 @@
   ########################################################
 
   - name: Read /etc/passwd
-    ansible.builtin.slurp:
+    slurp:
       src: /etc/passwd
     register: passwd_file
     changed_when: false
 
-  - name: Parse passwd entries
+  - name: Parse passwd entries (backward-compatible)
     set_fact:
-      getent_passwd: >-
-        {{
-          dict(
-            passwd_file.content | b64decode | split('\n') | reject('equalto','') | list |
-            map('split', ':') |
-            map('combine', [
-              {'key': item[0], 'x': item[1], 'uid': item[2], 'gid': item[3], 'comment': item[4], 'home': item[5], 'shell': item[6]} for item in _
-            ])
-          )
-        }}
+      getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
+    loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
 
   - name: Read /etc/group
-    ansible.builtin.slurp:
+    slurp:
       src: /etc/group
     register: group_file
     changed_when: false
 
-  - name: Parse group entries
+  - name: Parse group entries (backward-compatible)
     set_fact:
-      getent_group: >-
-        {{
-          dict(
-            group_file.content | b64decode | split('\n') | reject('equalto','') | list |
-            map('split', ':') |
-            map('combine', [
-              {'key': item[0], 'x': item[1], 'gid': item[2], 'members': item[3]} for item in _
-            ])
-          )
-        }}
+      getent_group: "{{ getent_group | default({}) | combine({ item.0: {'gid': item.2, 'members': item.3} }) }}"
+    loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
 
   - name: Build valid local users list (UID >=1000)
     set_fact:
@@ -139,7 +123,6 @@
   - name: Remove old TXT report
     run_once: true
     delegate_to: localhost
-    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       state: absent
@@ -147,7 +130,6 @@
   - name: Remove old CSV report
     run_once: true
     delegate_to: localhost
-    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       state: absent
@@ -155,7 +137,6 @@
   - name: Remove old HTML report
     run_once: true
     delegate_to: localhost
-    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       state: absent
@@ -167,7 +148,6 @@
   - name: Generate TXT report
     run_once: true
     delegate_to: localhost
-    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
@@ -208,7 +188,6 @@
   - name: Generate CSV report
     run_once: true
     delegate_to: localhost
-    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
@@ -221,7 +200,6 @@
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
-    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       content: |
