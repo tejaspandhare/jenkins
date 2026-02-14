@@ -1,33 +1,115 @@
-stage('Run Enterprise Audit') {
-    steps {
-        withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-            script {
+pipeline {
+    agent any
 
-                def hosts = params.SERVER_NAME.replace(';', ',')
+    options {
+        timestamps()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
 
-                def rc = sh(
-                    script: """
-                        echo "Running Ansible Audit on: ${hosts}"
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
 
-                        ansible-playbook \
-                            -i inventory/hosts \
-                            playbooks/auditreport1.yml \
-                            --private-key="\$ANSIBLE_KEY_FILE" \
-                            -e "hosts=${hosts}"
-                    """,
-                    returnStatus: true
-                )
+    parameters {
+        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
+    }
 
-                echo "Ansible Exit Code: ${rc}"
+    stages {
 
-                if (rc == 0) {
-                    echo "Audit completed successfully."
-                } else if (rc == 2) {
-                    unstable("Audit completed with changes.")
-                } else {
-                    error("Audit failed with exit code ${rc}")
+        stage('Checkout Repository') {
+            steps {
+                echo "\u001B[1;36m========== CHECKOUT STAGE ==========\u001B[0m"
+                checkout scm
+            }
+        }
+
+        stage('Run Enterprise Audit') {
+            steps {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    script {
+                        sh """
+                            echo -e "\\033[1;36m==================================================\\033[0m"
+                            echo -e "\\033[1;36m      🚀 ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
+                            echo -e "\\033[1;36m==================================================\\033[0m"
+
+                            echo -e "\\033[1;34mTarget Servers:\\033[0m ${params.SERVER_NAME}"
+                            echo ""
+
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                playbooks/auditreport1.yml \
+                                --private-key="\$ANSIBLE_KEY_FILE" \
+                                -e "hosts=${params.SERVER_NAME}"
+
+                            RC=\$?
+
+                            echo ""
+                            echo -e "\\033[1;33mAnsible Exit Code: \$RC\\033[0m"
+                            echo ""
+
+                            if [ \$RC -eq 0 ]; then
+                                echo -e "\\033[1;32m✔ SUCCESS: No changes required.\\033[0m"
+                                exit 0
+
+                            elif [ \$RC -eq 2 ]; then
+                                echo -e "\\033[1;35m⚠ SUCCESS WITH CHANGES: Systems were updated.\\033[0m"
+                                exit 0
+
+                            else
+                                echo -e "\\033[1;31m✖ FAILURE: Audit encountered errors.\\033[0m"
+                                exit \$RC
+                            fi
+                        """
+                    }
                 }
             }
+        }
+
+        stage('Verify Generated Reports') {
+            steps {
+                sh '''
+                    echo -e "\033[1;36m========== VERIFYING GENERATED REPORTS ==========\033[0m"
+                    ls -lah *.html *.txt *.csv || true
+                '''
+            }
+        }
+
+        stage('Publish HTML Report') {
+            when {
+                expression { fileExists('enterprise_security_audit.html') }
+            }
+            steps {
+                echo "\u001B[1;36m========== PUBLISHING HTML REPORT ==========\u001B[0m"
+                publishHTML(target: [
+                    reportDir: '.',
+                    reportFiles: 'enterprise_security_audit.html',
+                    reportName: 'Enterprise Security Audit Report',
+                    keepAll: true,
+                    alwaysLinkToLastBuild: true,
+                    allowMissing: false
+                ])
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo "\u001B[1;32m✔ BUILD SUCCESS - Audit completed.\u001B[0m"
+        }
+
+        unstable {
+            echo "\u001B[1;33m⚠ BUILD UNSTABLE - Check warnings.\u001B[0m"
+        }
+
+        failure {
+            echo "\u001B[1;31m✖ BUILD FAILED - Review logs.\u001B[0m"
+        }
+
+        always {
+            echo "\u001B[1;36mArchiving reports...\u001B[0m"
+            archiveArtifacts artifacts: '*.html, *.txt, *.csv', allowEmptyArchive: true
         }
     }
 }
