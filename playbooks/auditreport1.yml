@@ -9,11 +9,11 @@
     final_users: []
     report_data: []
 
-  tasks:
-
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
+
+  tasks:
 
   - name: Get last patch date (Ubuntu/Debian)
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null || echo 'N/A'"
@@ -51,23 +51,57 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING
+  # USER FILTERING (SAFE)
   ########################################################
+
+  - name: Read /etc/passwd
+    ansible.builtin.slurp:
+      src: /etc/passwd
+    register: passwd_file
+    changed_when: false
+
+  - name: Parse passwd entries
+    set_fact:
+      getent_passwd: >-
+        {{
+          dict(
+            passwd_file.content | b64decode | splitlines() |
+            map('split', ':') | map('zip', ['key','x','uid','gid','comment','home','shell']) |
+            map('items2dict')
+          )
+        }}
+
+  - name: Read /etc/group
+    ansible.builtin.slurp:
+      src: /etc/group
+    register: group_file
+    changed_when: false
+
+  - name: Parse group entries
+    set_fact:
+      getent_group: >-
+        {{
+          dict(
+            group_file.content | b64decode | splitlines() |
+            map('split', ':') | map('zip', ['key','x','gid','members']) |
+            map('items2dict')
+          )
+        }}
 
   - name: Build valid local users list (UID >=1000)
     set_fact:
       valid_users: "{{ valid_users + [ item.key ] }}"
     loop: "{{ getent_passwd | dict2items }}"
     when:
-      - item.value[2] | int >= 1000
+      - item.value.uid | int >= 1000
       - item.key != "nobody"
 
   - name: Build sudo group users list
     set_fact:
       sudo_group_users: >-
         {{
-          (getent_group['sudo'][2].split(',') if 'sudo' in getent_group else []) +
-          (getent_group['wheel'][2].split(',') if 'wheel' in getent_group else [])
+          (getent_group['sudo'].members.split(',') if 'sudo' in getent_group else []) +
+          (getent_group['wheel'].members.split(',') if 'wheel' in getent_group else [])
         }}
 
   - name: Keep only sudo users
