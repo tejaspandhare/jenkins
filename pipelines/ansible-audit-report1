@@ -1,0 +1,23 @@
+stage('Cleanup Junk data') {
+    steps {
+        withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+            script {
+                sh """
+                    ansible-playbook \
+                        -i inventory/hosts \
+                        playbooks/auditreport1.yml \
+                        --private-key="$ANSIBLE_KEY_FILE" \
+                        -e "hosts=${params.SERVER_NAME}" \
+                        -e "packages_list=${params.PKG_INSTALL}"
+
+                    RC=\$?
+                    if [ \$RC -eq 0 ] || [ \$RC -eq 2 ]; then
+                        exit 0
+                    else
+                        exit \$RC
+                    fi
+                """
+            }
+        }
+    }
+}
