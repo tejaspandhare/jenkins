@@ -51,7 +51,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (BACKWARD-COMPATIBLE)
+  # USER FILTERING
   ########################################################
 
   - name: Read /etc/passwd
@@ -60,7 +60,7 @@
     register: passwd_file
     changed_when: false
 
-  - name: Parse passwd entries (backward-compatible)
+  - name: Parse passwd entries
     set_fact:
       getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
     loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
@@ -71,7 +71,7 @@
     register: group_file
     changed_when: false
 
-  - name: Parse group entries (backward-compatible)
+  - name: Parse group entries
     set_fact:
       getent_group: "{{ getent_group | default({}) | combine({ item.0: {'gid': item.2, 'members': item.3} }) }}"
     loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
@@ -117,12 +117,13 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS
+  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
   ########################################################
 
   - name: Remove old TXT report
     run_once: true
     delegate_to: localhost
+    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       state: absent
@@ -130,6 +131,7 @@
   - name: Remove old CSV report
     run_once: true
     delegate_to: localhost
+    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       state: absent
@@ -137,6 +139,7 @@
   - name: Remove old HTML report
     run_once: true
     delegate_to: localhost
+    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       state: absent
@@ -148,6 +151,7 @@
   - name: Generate TXT report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
@@ -188,6 +192,7 @@
   - name: Generate CSV report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
@@ -200,6 +205,7 @@
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       content: |
