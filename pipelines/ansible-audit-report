@@ -13,7 +13,7 @@ pipeline {
                         sh """
                             ansible-playbook \
                                 -i inventory/hosts \
-                                playbooks/auditreport.yml \
+                                playbooks/auditreport1.yml \
                                 --private-key="$ANSIBLE_KEY_FILE" \
                                 -e "hosts=${params.SERVER_NAME}" \
                                 -e "packages_list=${params.PKG_INSTALL}"
