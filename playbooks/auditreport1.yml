@@ -9,11 +9,11 @@
     final_users: []
     report_data: []
 
+  tasks:
+
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
-
-  tasks:
 
   - name: Get last patch date (Ubuntu/Debian)
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null || echo 'N/A'"
@@ -35,7 +35,7 @@
           {% else %}
             N/A
           {% endif %}
-        uptime_days: "{{ (ansible_uptime_seconds // 86400) | default('N/A') }}"
+        uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
         last_patch: "{{ last_patch.stdout }}"
 
   ########################################################
@@ -44,14 +44,14 @@
 
   - name: Build disk info list with usage %
     set_fact:
-      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ item.percent | default('N/A') ~ ')' ] }}"
+      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ ')' ] }}"
     loop: "{{ ansible_mounts }}"
     when:
       - item.fstype not in ['tmpfs','devtmpfs','overlay']
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (SAFE)
+  # USER FILTERING (BACKWARD-COMPATIBLE)
   ########################################################
 
   - name: Read /etc/passwd
@@ -65,9 +65,11 @@
       getent_passwd: >-
         {{
           dict(
-            passwd_file.content | b64decode | splitlines() |
-            map('split', ':') | map('zip', ['key','x','uid','gid','comment','home','shell']) |
-            map('items2dict')
+            passwd_file.content | b64decode | split('\n') | reject('equalto','') | list |
+            map('split', ':') |
+            map('combine', [
+              {'key': item[0], 'x': item[1], 'uid': item[2], 'gid': item[3], 'comment': item[4], 'home': item[5], 'shell': item[6]} for item in _
+            ])
           )
         }}
 
@@ -82,9 +84,11 @@
       getent_group: >-
         {{
           dict(
-            group_file.content | b64decode | splitlines() |
-            map('split', ':') | map('zip', ['key','x','gid','members']) |
-            map('items2dict')
+            group_file.content | b64decode | split('\n') | reject('equalto','') | list |
+            map('split', ':') |
+            map('combine', [
+              {'key': item[0], 'x': item[1], 'gid': item[2], 'members': item[3]} for item in _
+            ])
           )
         }}
 
