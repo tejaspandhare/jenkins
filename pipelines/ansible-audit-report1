@@ -12,7 +12,7 @@ pipeline {
     }
 
     parameters {
-        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ;')
+        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
         
     }
 
