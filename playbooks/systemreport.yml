@@ -1,0 +1,218 @@
+---
+- name: Enterprise Full Linux Audit Report
+  hosts: "{{ hosts.split(';') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    valid_users: []
+    final_users: []
+    report_data: []
+
+  tasks:
+
+  ########################################################
+  # SYSTEM INFORMATION
+  ########################################################
+
+  - name: Get last patch date (Debian/RHEL/SLES)
+    shell: |
+      if [ -f /var/lib/dpkg/status ]; then
+        stat -c %y /var/lib/dpkg/status
+      elif [ -f /var/lib/rpm/Packages ]; then
+        stat -c %y /var/lib/rpm/Packages
+      else
+        echo "N/A"
+      fi
+    register: last_patch
+    changed_when: false
+
+  - name: Set system info
+    set_fact:
+      system_info:
+        host: "{{ inventory_hostname }}"
+        os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+        kernel: "{{ ansible_kernel }}"
+        machine_type: "{{ ansible_virtualization_type | default('physical') }}"
+        cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
+        ram_total: "{{ ansible_memtotal_mb }} MB"
+        ram_used: "{{ ansible_memtotal_mb - ansible_memavailable_mb }} MB"
+        uptime_days: "{{ ansible_uptime_seconds // 86400 }}"
+        last_patch: "{{ last_patch.stdout }}"
+
+  ########################################################
+  # DISK INFO
+  ########################################################
+
+  - name: Build disk info list
+    set_fact:
+      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ item.percent ~ '%)' ] }}"
+    loop: "{{ ansible_mounts }}"
+    when:
+      - item.fstype not in ['tmpfs','devtmpfs','overlay']
+      - not item.mount.startswith('/run')
+
+  ########################################################
+  # LOCAL USER PARSING
+  ########################################################
+
+  - name: Read /etc/passwd
+    slurp:
+      src: /etc/passwd
+    register: passwd_file
+    changed_when: false
+
+  - name: Parse passwd
+    set_fact:
+      getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2|int} }) }}"
+    loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split',':') | list }}"
+
+  - name: Build valid users (UID >=1000)
+    set_fact:
+      valid_users: "{{ valid_users + [ item.key ] }}"
+    loop: "{{ getent_passwd | dict2items }}"
+    when:
+      - item.value.uid >= 1000
+      - item.key != "nobody"
+
+  ########################################################
+  # GROUP PARSING
+  ########################################################
+
+  - name: Read /etc/group
+    slurp:
+      src: /etc/group
+    register: group_file
+    changed_when: false
+
+  - name: Parse group file
+    set_fact:
+      getent_group: "{{ getent_group | default({}) | combine({ item.0: {'members': item.3} }) }}"
+    loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split',':') | list }}"
+
+  ########################################################
+  # SUDO GROUP USERS (sudo + wheel)
+  ########################################################
+
+  - name: Collect sudo/wheel group users
+    set_fact:
+      sudo_group_users: >-
+        {{
+          (getent_group['sudo'].members.split(',') if 'sudo' in getent_group else []) +
+          (getent_group['wheel'].members.split(',') if 'wheel' in getent_group else [])
+        }}
+
+  ########################################################
+  # PARSE SUDOERS + SUDOERS.D
+  ########################################################
+
+  - name: Read /etc/sudoers
+    slurp:
+      src: /etc/sudoers
+    register: sudoers_main
+    ignore_errors: yes
+    changed_when: false
+
+  - name: Find sudoers.d files
+    find:
+      paths: /etc/sudoers.d
+      file_type: file
+    register: sudoers_d
+    ignore_errors: yes
+    changed_when: false
+
+  - name: Read sudoers.d files
+    slurp:
+      src: "{{ item.path }}"
+    loop: "{{ sudoers_d.files | default([]) }}"
+    register: sudoers_d_content
+    ignore_errors: yes
+    changed_when: false
+
+  - name: Combine all sudoers content
+    set_fact:
+      all_sudoers: >-
+        {{
+          (
+            [sudoers_main.content | default('') | b64decode] +
+            (sudoers_d_content.results | default([]) | map(attribute='content') | map('b64decode') | list)
+          ) | join('\n')
+        }}
+
+  - name: Extract sudo users (direct)
+    set_fact:
+      sudoers_direct_users: >-
+        {{
+          all_sudoers.split('\n')
+          | reject('match','^#')
+          | reject('match','^Defaults')
+          | reject('match','^User_Alias')
+          | reject('match','^Cmnd_Alias')
+          | reject('match','^Runas_Alias')
+          | reject('match','^%')
+          | select('match','^[A-Za-z0-9._-]+')
+          | map('regex_replace',' .*','')
+          | list
+        }}
+
+  - name: Extract sudo groups from sudoers
+    set_fact:
+      sudoers_groups: >-
+        {{
+          all_sudoers.split('\n')
+          | reject('match','^#')
+          | select('match','^%')
+          | map('regex_replace','^%','')
+          | map('regex_replace',' .*','')
+          | list
+        }}
+
+  - name: Resolve sudoers group members
+    set_fact:
+      sudoers_group_users: >-
+        {{
+          sudoers_groups
+          | map('extract', getent_group)
+          | select('defined')
+          | map(attribute='members')
+          | select('defined')
+          | map('split',',')
+          | flatten
+          | list
+        }}
+
+  ########################################################
+  # FINAL SUDO USER LIST
+  ########################################################
+
+  - name: Build final sudo user list
+    set_fact:
+      final_users: >-
+        {{
+          valid_users
+          | intersect(
+              (sudo_group_users | default([])) +
+              (sudoers_direct_users | default([])) +
+              (sudoers_group_users | default([]))
+            )
+          | unique
+        }}
+
+  ########################################################
+  # COLLECT USER DETAILS
+  ########################################################
+
+  - name: Collect sudo user details
+    shell: |
+      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
+      GROUPS=$(id -nG {{ item }})
+      PASSINFO=$(chage -l {{ item }} | grep "Last password change")
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSINFO"
+    loop: "{{ final_users }}"
+    register: user_output
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Store user report
+    set_fact:
+      report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
