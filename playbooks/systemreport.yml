@@ -57,33 +57,52 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO DETECTION (HYBRID - DIRECT + GROUP)
+  # SUDO DETECTION (DIRECT + GROUP + NOPASSWD)
   ########################################################
 
-  - name: Extract direct sudo user entries (exclude groups)
+  - name: Detect direct sudo users from /etc/sudoers + /etc/sudoers.d
+    become: yes
     shell: |
-      awk '
-        /^[^#]/ && $1 !~ /^%/ {
-          print $1
-        }
-      ' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
+      files="/etc/sudoers"
+      if [ -d /etc/sudoers.d ]; then
+        files="$files /etc/sudoers.d/*"
+      fi
+      for f in $files; do
+        if [ -r "$f" ]; then
+          awk '
+            /^[^#]/ && $1 !~ /^%/ {
+              print $1
+            }
+          ' "$f"
+        fi
+      done | sort -u
     register: direct_sudo
     changed_when: false
     ignore_errors: yes
 
-  - name: Extract sudo groups from sudoers
+  - name: Detect sudo groups from sudoers
+    become: yes
     shell: |
-      awk '
-        /^[^#]/ && $1 ~ /^%/ {
-          gsub("^%","",$1);
-          print $1
-        }
-      ' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
+      files="/etc/sudoers"
+      if [ -d /etc/sudoers.d ]; then
+        files="$files /etc/sudoers.d/*"
+      fi
+      for f in $files; do
+        if [ -r "$f" ]; then
+          awk '
+            /^[^#]/ && $1 ~ /^%/ {
+              gsub("^%","",$1);
+              print $1
+            }
+          ' "$f"
+        fi
+      done | sort -u
     register: sudo_groups
     changed_when: false
     ignore_errors: yes
 
-  - name: Get group members for detected sudo groups
+  - name: Get members of sudo groups
+    become: yes
     shell: |
       for grp in {{ sudo_groups.stdout_lines | default([]) | join(' ') }}; do
         getent group "$grp" | awk -F: '{print $4}'
@@ -92,23 +111,13 @@
     changed_when: false
     ignore_errors: yes
 
-  - name: Normalize group members
-    set_fact:
-      group_sudo_users: >-
-        {{
-          (group_members_raw.stdout.split(',') if group_members_raw.stdout else [])
-          | map('trim')
-          | reject('equalto','')
-          | list
-        }}
-
   - name: Build final sudo user list
     set_fact:
       final_users: >-
         {{
           (
             (direct_sudo.stdout_lines | default([])) +
-            (group_sudo_users | default([]))
+            (group_members_raw.stdout.split(',') if group_members_raw.stdout else [])
           )
           | map('trim')
           | reject('equalto','')
@@ -154,7 +163,7 @@
       state: absent
 
   ########################################################
-  # GENERATE REPORT
+  # GENERATE TXT REPORT
   ########################################################
 
   - name: Generate TXT report
