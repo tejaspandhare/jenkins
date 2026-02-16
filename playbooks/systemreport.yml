@@ -1,5 +1,5 @@
 ---
-- name: Enterprise Full Linux Audit Report v3
+- name: Enterprise Full Linux Audit Report v4
   hosts: "{{ hosts.split(';') }}"
   gather_facts: yes
   become: yes
@@ -39,8 +39,8 @@
         kernel: "{{ ansible_kernel | default('N/A') }}"
         machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ ram_info.stdout.split('|')[0] | default('N/A') }} MB"
-        ram_used: "{{ ram_info.stdout.split('|')[1] | default('N/A') }} MB"
+        ram_total: "{{ ram_info.stdout|trim().split('|')[0]|default('N/A') }} MB"
+        ram_used:  "{{ ram_info.stdout|trim().split('|')[1]|default('N/A') }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | default(0) | int) // 86400 }}"
         last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
@@ -73,7 +73,7 @@
 
   - name: Detect users with NOPASSWD in /etc/sudoers.d
     shell: |
-      grep -rh 'NOPASSWD' /etc/sudoers.d/ | awk '{print $1}'
+      sudo awk '$1 ~ /^[a-zA-Z0-9._-]+$/ && $0 ~ /NOPASSWD/ {print $1}' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
     register: nopasswd_users
     changed_when: false
     ignore_errors: yes
@@ -89,11 +89,8 @@
   - name: Collect detailed sudo user information
     shell: |
       USERNAME="{{ item }}"
-      if grep -rh "^$USERNAME" /etc/sudoers /etc/sudoers.d/ | grep -q NOPASSWD; then
-        SUDOTYPE="NOPASSWD"
-      else
-        SUDOTYPE="PASSWORD_REQUIRED"
-      fi
+      SUDOTYPE=$(sudo awk '$1=="'"$USERNAME"'" && $0 ~ /NOPASSWD/ {print "NOPASSWD"}' /etc/sudoers /etc/sudoers.d/* | head -1)
+      SUDOTYPE=${SUDOTYPE:-PASSWORD_REQUIRED}
       LASTLOGIN=$(lastlog -u "$USERNAME" 2>/dev/null | tail -1 | awk '{$1=$2=$3=""; print $0}')
       GROUPS=$(id -nG "$USERNAME" 2>/dev/null)
       PASSINFO=$(chage -l "$USERNAME" 2>/dev/null | grep "Last password change")
