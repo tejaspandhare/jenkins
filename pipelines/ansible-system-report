@@ -30,7 +30,7 @@ pipeline {
                     script {
                         sh """
                             echo -e "\\033[1;36m==================================================\\033[0m"
-                            echo -e "\\033[1;36m      🚀 ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
+                            echo -e "\\033[1;36m      ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
                             echo -e "\\033[1;36m==================================================\\033[0m"
 
                             echo -e "\\033[1;34mTarget Servers:\\033[0m ${params.SERVER_NAME}"
