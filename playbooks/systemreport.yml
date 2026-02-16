@@ -1,5 +1,5 @@
 ---
-- name: Enterprise Full Linux Audit Report v7
+- name: Enterprise Full Linux Audit Report - Production
   hosts: "{{ hosts.split(';') }}"
   gather_facts: yes
   become: yes
@@ -25,7 +25,7 @@
     register: last_patch
     changed_when: false
 
-  - name: Get RAM usage safely
+  - name: Get RAM usage
     shell: |
       free -m | awk 'NR==2 {print $2 "|" $3}'
     register: ram_info
@@ -57,53 +57,59 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO USERS DETECTION (JENKINS + YAML SAFE)
+  # SUDO DETECTION (HYBRID - DIRECT + GROUP)
   ########################################################
 
-  - name: Get sudo group members
-    shell: |
-      getent group sudo | awk -F: '{print $4}'
-    register: sudo_group_raw
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Get wheel group members
-    shell: |
-      getent group wheel | awk -F: '{print $4}'
-    register: wheel_group_raw
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Normalize sudo and wheel members
-    set_fact:
-      sudo_group_members: >-
-        {{
-          (
-            (sudo_group_raw.stdout.split(',') if sudo_group_raw.stdout else []) +
-            (wheel_group_raw.stdout.split(',') if wheel_group_raw.stdout else [])
-          )
-          | map('trim')
-          | reject('equalto','')
-          | unique
-          | list
-        }}
-
-  - name: Detect explicitly defined NOPASSWD users
+  - name: Extract direct sudo user entries (exclude groups)
     shell: |
       awk '
-        /^[^#]/ && $0 ~ /NOPASSWD/ {
-          if ($1 !~ /^%/) print $1
+        /^[^#]/ && $1 !~ /^%/ {
+          print $1
         }
       ' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
-    register: nopasswd_users
+    register: direct_sudo
     changed_when: false
     ignore_errors: yes
+
+  - name: Extract sudo groups from sudoers
+    shell: |
+      awk '
+        /^[^#]/ && $1 ~ /^%/ {
+          gsub("^%","",$1);
+          print $1
+        }
+      ' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
+    register: sudo_groups
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Get group members for detected sudo groups
+    shell: |
+      for grp in {{ sudo_groups.stdout_lines | default([]) | join(' ') }}; do
+        getent group "$grp" | awk -F: '{print $4}'
+      done
+    register: group_members_raw
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Normalize group members
+    set_fact:
+      group_sudo_users: >-
+        {{
+          (group_members_raw.stdout.split(',') if group_members_raw.stdout else [])
+          | map('trim')
+          | reject('equalto','')
+          | list
+        }}
 
   - name: Build final sudo user list
     set_fact:
       final_users: >-
         {{
-          (sudo_group_members + (nopasswd_users.stdout_lines | default([])))
+          (
+            (direct_sudo.stdout_lines | default([])) +
+            (group_sudo_users | default([]))
+          )
           | map('trim')
           | reject('equalto','')
           | unique
@@ -117,7 +123,7 @@
   - name: Collect detailed sudo user information
     shell: |
       USERNAME="{{ item }}"
-      if sudo -l -U "$USERNAME" 2>/dev/null | grep -q NOPASSWD; then
+      if grep -E "^[^#]*\b${USERNAME}\b.*NOPASSWD" /etc/sudoers /etc/sudoers.d/* 2>/dev/null | grep -v '^%'; then
         SUDOTYPE="NOPASSWD"
       else
         SUDOTYPE="PASSWORD_REQUIRED"
@@ -148,7 +154,7 @@
       state: absent
 
   ########################################################
-  # GENERATE TXT REPORT
+  # GENERATE REPORT
   ########################################################
 
   - name: Generate TXT report
@@ -158,12 +164,12 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
       content: |
-        ================= ENTERPRISE SYSTEM AUDIT REPORT =================
+        ================= FULL SYSTEM AUDIT REPORT =================
 
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
 
-        ------------------------------------------------------------------
+        ------------------------------------------------------------
         Host: {{ sys.host }}
         OS: {{ sys.os }}
         Kernel: {{ sys.kernel }}
@@ -194,6 +200,6 @@
         {% endfor %}
         {% endif %}
 
-        ==================================================================
+        ============================================================
 
         {% endfor %}
