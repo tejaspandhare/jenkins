@@ -70,9 +70,7 @@
       for f in $files; do
         if [ -r "$f" ]; then
           awk '
-            /^[^#]/ && $1 !~ /^%/ {
-              print $1
-            }
+            /^[^#]/ && $1 !~ /^%/ && $1 !~ /^(Defaults|@includedir)$/ { print $1 }
           ' "$f"
         fi
       done | sort -u
@@ -111,7 +109,7 @@
     changed_when: false
     ignore_errors: yes
 
-  - name: Build final sudo user list
+  - name: Build final sudo user list (exclude root and wheel)
     set_fact:
       final_users: >-
         {{
@@ -121,6 +119,7 @@
           )
           | map('trim')
           | reject('equalto','')
+          | reject('in', ['root','wheel'])
           | unique
           | list
         }}
@@ -160,55 +159,3 @@
     become: false
     file:
       path: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
-      state: absent
-
-  ########################################################
-  # GENERATE TXT REPORT
-  ########################################################
-
-  - name: Generate TXT report
-    run_once: true
-    delegate_to: localhost
-    become: false
-    copy:
-      dest: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
-      content: |
-        ================= FULL SYSTEM AUDIT REPORT =================
-
-        {% for host in ansible_play_hosts %}
-        {% set sys = hostvars[host].system_info %}
-
-        ------------------------------------------------------------
-        Host: {{ sys.host }}
-        OS: {{ sys.os }}
-        Kernel: {{ sys.kernel }}
-        Machine Type: {{ sys.machine_type }}
-        CPU Cores: {{ sys.cpu }}
-        RAM Total: {{ sys.ram_total }}
-        RAM Used: {{ sys.ram_used }}
-        Uptime (days): {{ sys.uptime_days }}
-        Last Patch: {{ sys.last_patch }}
-
-        Filesystems:
-        {% for disk in hostvars[host].disk_info | default([]) %}
-          - {{ disk }}
-        {% endfor %}
-
-        SUDO USERS:
-        {% if hostvars[host].report_data | length == 0 %}
-          No sudo users found
-        {% else %}
-        {% for line in hostvars[host].report_data %}
-        {% set cols = line.split('|') %}
-          User: {{ cols[1] }}
-          Sudo Type: {{ cols[2] }}
-          Last Login: {{ cols[3] }}
-          Groups: {{ cols[4] }}
-          {{ cols[5] }}
-          ----------------------------------------------------
-        {% endfor %}
-        {% endif %}
-
-        ============================================================
-
-        {% endfor %}
