@@ -39,8 +39,8 @@
         kernel: "{{ ansible_kernel | default('N/A') }}"
         machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ ram_info.stdout|trim().split('|')[0]|default('N/A') }} MB"
-        ram_used:  "{{ ram_info.stdout|trim().split('|')[1]|default('N/A') }} MB"
+        ram_total: "{{ (ram_info.stdout | trim | split('|'))[0] | default('N/A') }} MB"
+        ram_used:  "{{ (ram_info.stdout | trim | split('|'))[1] | default('N/A') }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | default(0) | int) // 86400 }}"
         last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
