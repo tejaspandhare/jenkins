@@ -1,5 +1,5 @@
 ---
-- name: Enterprise Full Linux Audit Report v4
+- name: Enterprise Full Linux Audit Report v5
   hosts: "{{ hosts.split(';') }}"
   gather_facts: yes
   become: yes
@@ -26,8 +26,7 @@
     changed_when: false
 
   - name: Get RAM usage safely
-    shell: |
-      free -m | awk 'NR==2 {print $2 "|" $3}'
+    shell: free -m | awk 'NR==2 {print $2 "|" $3}'
     register: ram_info
     changed_when: false
 
@@ -39,8 +38,8 @@
         kernel: "{{ ansible_kernel | default('N/A') }}"
         machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ (ram_info.stdout | trim | split('|'))[0] | default('N/A') }} MB"
-        ram_used:  "{{ (ram_info.stdout | trim | split('|'))[1] | default('N/A') }} MB"
+        ram_total: "{{ (ram_info.stdout.split('|') | first | default('N/A')) }} MB"
+        ram_used: "{{ (ram_info.stdout.split('|') | last | default('N/A')) }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | default(0) | int) // 86400 }}"
         last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
@@ -57,30 +56,53 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO USERS DETECTION (INCLUDING /etc/sudoers.d)
+  # SUDO USERS DETECTION (FIXED)
   ########################################################
 
-  - name: Get all real login users (UID >=1000)
-    shell: getent passwd | awk -F':' '$3 >= 1000 && $7 !~ /(nologin|false)/ {print $1}'
-    register: login_users
-    changed_when: false
+  - name: Get sudo group info (Debian/Ubuntu)
+    getent:
+      database: group
+      key: sudo
+    register: sudo_group
+    ignore_errors: yes
 
-  - name: Get sudo/wheel group members
-    shell: |
-      getent group sudo wheel | awk -F: '{print $4}' | tr ',' '\n'
-    register: sudo_group_users
-    changed_when: false
+  - name: Get wheel group info (RHEL/CentOS)
+    getent:
+      database: group
+      key: wheel
+    register: wheel_group
+    ignore_errors: yes
 
-  - name: Detect users with NOPASSWD in /etc/sudoers.d
+  - name: Extract sudo/wheel group members
+    set_fact:
+      sudo_group_members: >-
+        {{
+          (
+            (sudo_group.ansible_facts.getent_group.sudo[2] | default([])) +
+            (wheel_group.ansible_facts.getent_group.wheel[2] | default([]))
+          ) | unique | reject('equalto','') | list
+        }}
+
+  - name: Detect explicitly defined NOPASSWD users
     shell: |
-      sudo awk '$1 ~ /^[a-zA-Z0-9._-]+$/ && $0 ~ /NOPASSWD/ {print $1}' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
+      awk '
+        /^[^#]/ && $0 ~ /NOPASSWD/ {
+          if ($1 !~ /^%/) print $1
+        }
+      ' /etc/sudoers /etc/sudoers.d/* 2>/dev/null
     register: nopasswd_users
     changed_when: false
     ignore_errors: yes
 
   - name: Build final sudo user list
     set_fact:
-      final_users: "{{ (login_users.stdout_lines | intersect(sudo_group_users.stdout_lines)) + (nopasswd_users.stdout_lines | default([])) | unique }}"
+      final_users: >-
+        {{
+          (sudo_group_members + (nopasswd_users.stdout_lines | default([])))
+          | unique
+          | reject('equalto','')
+          | list
+        }}
 
   ########################################################
   # COLLECT SUDO USER DETAILS
@@ -89,8 +111,7 @@
   - name: Collect detailed sudo user information
     shell: |
       USERNAME="{{ item }}"
-      SUDOTYPE=$(sudo awk '$1=="'"$USERNAME"'" && $0 ~ /NOPASSWD/ {print "NOPASSWD"}' /etc/sudoers /etc/sudoers.d/* | head -1)
-      SUDOTYPE=${SUDOTYPE:-PASSWORD_REQUIRED}
+      SUDOTYPE=$(sudo -l -U "$USERNAME" 2>/dev/null | grep -q NOPASSWD && echo "NOPASSWD" || echo "PASSWORD_REQUIRED")
       LASTLOGIN=$(lastlog -u "$USERNAME" 2>/dev/null | tail -1 | awk '{$1=$2=$3=""; print $0}')
       GROUPS=$(id -nG "$USERNAME" 2>/dev/null)
       PASSINFO=$(chage -l "$USERNAME" 2>/dev/null | grep "Last password change")
@@ -105,7 +126,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS
+  # CLEAN OLD REPORT
   ########################################################
 
   - name: Remove old TXT report
@@ -113,7 +134,7 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.txt"
+      path: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
       state: absent
 
   ########################################################
@@ -125,7 +146,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.txt"
+      dest: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
       content: |
         ================= ENTERPRISE SYSTEM AUDIT REPORT =================
 
