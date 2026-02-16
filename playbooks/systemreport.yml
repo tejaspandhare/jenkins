@@ -1,5 +1,5 @@
 ---
-- name: Enterprise Full Linux Audit Report v6
+- name: Enterprise Full Linux Audit Report v7
   hosts: "{{ hosts.split(';') }}"
   gather_facts: yes
   become: yes
@@ -26,7 +26,8 @@
     changed_when: false
 
   - name: Get RAM usage safely
-    shell: free -m | awk 'NR==2 {print $2 "|" $3}'
+    shell: |
+      free -m | awk 'NR==2 {print $2 "|" $3}'
     register: ram_info
     changed_when: false
 
@@ -56,17 +57,19 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO USERS DETECTION (JENKINS SAFE)
+  # SUDO USERS DETECTION (JENKINS + YAML SAFE)
   ########################################################
 
   - name: Get sudo group members
-    shell: getent group sudo | awk -F: '{print $4}'
+    shell: |
+      getent group sudo | awk -F: '{print $4}'
     register: sudo_group_raw
     changed_when: false
     ignore_errors: yes
 
   - name: Get wheel group members
-    shell: getent group wheel | awk -F: '{print $4}'
+    shell: |
+      getent group wheel | awk -F: '{print $4}'
     register: wheel_group_raw
     changed_when: false
     ignore_errors: yes
