@@ -15,7 +15,7 @@
   # SYSTEM INFORMATION
   ########################################################
 
-  - name: Get last patch date (Debian/RHEL/SLES)
+  - name: Get last patch date (All major distros)
     shell: |
       if [ -f /var/lib/dpkg/status ]; then
         stat -c %y /var/lib/dpkg/status
@@ -27,18 +27,28 @@
     register: last_patch
     changed_when: false
 
-  - name: Set system info
+  - name: Calculate RAM safely
+    set_fact:
+      ram_total_safe: "{{ ansible_memtotal_mb | default(0) | int }}"
+      ram_available_safe: "{{ ansible_memavailable_mb | default(0) | int }}"
+
+  - name: Set system info safely
     set_fact:
       system_info:
         host: "{{ inventory_hostname }}"
-        os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-        kernel: "{{ ansible_kernel }}"
+        os: "{{ ansible_distribution | default('N/A') }} {{ ansible_distribution_version | default('') }}"
+        kernel: "{{ ansible_kernel | default('N/A') }}"
         machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ ansible_memtotal_mb }} MB"
-        ram_used: "{{ ansible_memtotal_mb - ansible_memavailable_mb }} MB"
-        uptime_days: "{{ ansible_uptime_seconds // 86400 }}"
-        last_patch: "{{ last_patch.stdout }}"
+        ram_total: "{{ ram_total_safe }} MB"
+        ram_used: >-
+          {% if ram_available_safe > 0 %}
+          {{ ram_total_safe - ram_available_safe }} MB
+          {% else %}
+          N/A
+          {% endif %}
+        uptime_days: "{{ (ansible_uptime_seconds | default(0) | int) // 86400 }}"
+        last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
   ########################################################
   # DISK INFO
@@ -46,8 +56,8 @@
 
   - name: Build disk info list
     set_fact:
-      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ item.percent ~ '%)' ] }}"
-    loop: "{{ ansible_mounts }}"
+      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ '%)' ] }}"
+    loop: "{{ ansible_mounts | default([]) }}"
     when:
       - item.fstype not in ['tmpfs','devtmpfs','overlay']
       - not item.mount.startswith('/run')
@@ -91,7 +101,7 @@
     loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split',':') | list }}"
 
   ########################################################
-  # SUDO GROUP USERS (sudo + wheel)
+  # SUDO GROUP USERS
   ########################################################
 
   - name: Collect sudo/wheel group users
@@ -129,7 +139,7 @@
     ignore_errors: yes
     changed_when: false
 
-  - name: Combine all sudoers content
+  - name: Combine sudoers content
     set_fact:
       all_sudoers: >-
         {{
@@ -139,7 +149,7 @@
           ) | join('\n')
         }}
 
-  - name: Extract sudo users (direct)
+  - name: Extract direct sudo users
     set_fact:
       sudoers_direct_users: >-
         {{
@@ -155,7 +165,7 @@
           | list
         }}
 
-  - name: Extract sudo groups from sudoers
+  - name: Extract sudo groups
     set_fact:
       sudoers_groups: >-
         {{
@@ -182,7 +192,7 @@
         }}
 
   ########################################################
-  # FINAL SUDO USER LIST
+  # FINAL SUDO USERS
   ########################################################
 
   - name: Build final sudo user list
@@ -204,9 +214,9 @@
 
   - name: Collect sudo user details
     shell: |
-      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
-      GROUPS=$(id -nG {{ item }})
-      PASSINFO=$(chage -l {{ item }} | grep "Last password change")
+      LASTLOGIN=$(lastlog -u {{ item }} 2>/dev/null | tail -1 | awk '{$1=$2=$3=""; print $0}')
+      GROUPS=$(id -nG {{ item }} 2>/dev/null)
+      PASSINFO=$(chage -l {{ item }} 2>/dev/null | grep "Last password change")
       echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSINFO"
     loop: "{{ final_users }}"
     register: user_output
