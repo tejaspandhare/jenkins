@@ -60,13 +60,13 @@
   # BULLETPROOF SUDO DETECTION
   ########################################################
 
-  - name: Get all local users from passwd
+  - name: Get all local users
     shell: |
       awk -F: '{print $1}' /etc/passwd
     register: all_users
     changed_when: false
 
-  - name: Detect users that actually have sudo access
+  - name: Detect users with sudo access
     shell: |
       sudo -l -U {{ item }} 2>/dev/null | grep -q "may run the following"
       if [ $? -eq 0 ]; then
@@ -107,32 +107,59 @@
       GROUPS=$(id -nG "$USERNAME" 2>/dev/null)
       PASSINFO=$(chage -l "$USERNAME" 2>/dev/null | grep "Last password change")
 
-      echo "{{ inventory_hostname }}|$USERNAME|$SUDOTYPE|$LASTLOGIN|$GROUPS|$PASSINFO"
+      echo "$USERNAME|$SUDOTYPE|$LASTLOGIN|$GROUPS|$PASSINFO"
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
     ignore_errors: yes
 
-  - name: Store report data
+  - name: Store sudo report data
     set_fact:
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # DEBUG (REMOVE LATER IF NEEDED)
+  # GENERATE FINAL REPORT (TXT)
   ########################################################
 
-  - name: Debug sudo users
-    debug:
-      var: final_users
-
-  ########################################################
-  # CLEAN OLD REPORT
-  ########################################################
-
-  - name: Remove old TXT report
-    run_once: true
+  - name: Create system report file
     delegate_to: localhost
-    become: false
+    run_once: true
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') | default('./') }}/system_report.txt"
+      content: |
+        ------------------------------------------------------------
+        Host: {{ system_info.host }}
+        OS: {{ system_info.os }}
+        Kernel: {{ system_info.kernel }}
+        Machine Type: {{ system_info.machine_type }}
+        CPU Cores: {{ system_info.cpu }}
+        RAM Total: {{ system_info.ram_total }}
+        RAM Used: {{ system_info.ram_used }}
+
+        Uptime (days): {{ system_info.uptime_days }}
+        Last Patch: {{ system_info.last_patch }}
+
+        Filesystems:
+        {% for disk in disk_info | default([]) %}
+          - {{ disk }}
+        {% endfor %}
+
+        SUDO USERS:
+        {% if report_data | length == 0 %}
+          No sudo users found
+        {% else %}
+        {% for line in report_data %}
+          {{ line }}
+        {% endfor %}
+        {% endif %}
+
+  ########################################################
+  # CLEAN OLD ENTERPRISE FILE IF EXISTS
+  ########################################################
+
+  - name: Remove old enterprise report
+    delegate_to: localhost
+    run_once: true
     file:
       path: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
       state: absent
