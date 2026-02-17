@@ -57,52 +57,22 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO DETECTION (DIRECT + GROUP + NOPASSWD)
+  # BULLETPROOF SUDO DETECTION
   ########################################################
 
-  - name: Detect direct sudo users
-    shell: |
-      files="/etc/sudoers"
-      if [ -d /etc/sudoers.d ]; then
-        files="$files /etc/sudoers.d/*"
-      fi
-      for f in $files; do
-        [ -r "$f" ] || continue
-        awk '
-          /^[^#]/ &&
-          $1 !~ /^%/ &&
-          $1 !~ /^(Defaults|@includedir)$/ { print $1 }
-        ' "$f"
-      done | sort -u
-    register: direct_sudo
+  - name: Get all local users from passwd
+    shell: awk -F: '{print $1}' /etc/passwd
+    register: all_users
     changed_when: false
-    ignore_errors: yes
 
-  - name: Detect sudo groups
+  - name: Detect users that actually have sudo access
     shell: |
-      files="/etc/sudoers"
-      if [ -d /etc/sudoers.d ]; then
-        files="$files /etc/sudoers.d/*"
+      sudo -l -U {{ item }} 2>/dev/null | grep -q "may run the following"
+      if [ $? -eq 0 ]; then
+        echo "{{ item }}"
       fi
-      for f in $files; do
-        [ -r "$f" ] || continue
-        awk '
-          /^[^#]/ && $1 ~ /^%/ {
-            gsub("^%","",$1);
-            print $1
-          }
-        ' "$f"
-      done | sort -u
-    register: sudo_groups
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Get sudo group members properly
-    shell: |
-      for grp in {{ sudo_groups.stdout_lines | default([]) | join(' ') }}; do
-        getent group "$grp" | awk -F: '{print $4}' | tr ',' '\n'
-      done
-    register: sudo_group_members
+    loop: "{{ all_users.stdout_lines }}"
+    register: sudo_check
     changed_when: false
     ignore_errors: yes
 
@@ -110,11 +80,8 @@
     set_fact:
       final_users: >-
         {{
-          (
-            (direct_sudo.stdout_lines | default([])) +
-            (sudo_group_members.stdout_lines | default([]))
-          )
-          | map('trim')
+          sudo_check.results
+          | map(attribute='stdout')
           | reject('equalto','')
           | reject('equalto','root')
           | unique
@@ -129,7 +96,7 @@
     shell: |
       USERNAME="{{ item }}"
 
-      if grep -E "^[^#]*\b${USERNAME}\b.*NOPASSWD" /etc/sudoers /etc/sudoers.d/* 2>/dev/null | grep -v '^%'; then
+      if sudo -l -U "$USERNAME" 2>/dev/null | grep -q "NOPASSWD"; then
         SUDOTYPE="NOPASSWD"
       else
         SUDOTYPE="PASSWORD_REQUIRED"
@@ -150,10 +117,11 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # DEBUG (Optional - remove in production)
+  # SHOW DEBUG (remove in prod if needed)
   ########################################################
 
-  - debug:
+  - name: Debug sudo users
+    debug:
       var: final_users
 
   ########################################################
