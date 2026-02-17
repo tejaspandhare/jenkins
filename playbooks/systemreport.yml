@@ -15,20 +15,12 @@
   ########################################################
 
   - name: Get last patch date
-    shell: |
-      if [ -f /var/lib/dpkg/status ]; then
-        stat -c %y /var/lib/dpkg/status
-      elif [ -f /var/lib/rpm/Packages ]; then
-        stat -c %y /var/lib/rpm/Packages
-      else
-        echo "N/A"
-      fi
+    shell: "if [ -f /var/lib/dpkg/status ]; then stat -c %y /var/lib/dpkg/status; elif [ -f /var/lib/rpm/Packages ]; then stat -c %y /var/lib/rpm/Packages; else echo 'N/A'; fi"
     register: last_patch
     changed_when: false
 
   - name: Get RAM usage
-    shell: |
-      free -m | awk 'NR==2 {print $2 "|" $3}'
+    shell: "free -m | awk 'NR==2 {print $2 \"|\" $3}'"
     register: ram_info
     changed_when: false
 
@@ -62,16 +54,12 @@
   ########################################################
 
   - name: Get all local users
-    shell: awk -F: '{print $1}' /etc/passwd
+    shell: "awk -F: '{print $1}' /etc/passwd"
     register: all_users
     changed_when: false
 
   - name: Detect users with sudo access
-    shell: |
-      sudo -l -U {{ item }} 2>/dev/null | grep -q "may run the following"
-      if [ $? -eq 0 ]; then
-        echo "{{ item }}"
-      fi
+    shell: "sudo -l -U {{ item }} 2>/dev/null | grep -q 'may run the following'; if [ $? -eq 0 ]; then echo '{{ item }}'; fi"
     loop: "{{ all_users.stdout_lines }}"
     register: sudo_check
     changed_when: false
@@ -115,7 +103,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # CREATE REPORT FILE (SAFE FOR JENKINS)
+  # CREATE REPORT FILE (JENKINS SAFE)
   ########################################################
 
   - name: Create system report file
