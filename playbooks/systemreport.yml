@@ -134,11 +134,11 @@
 
         Sudo Users:
         {% if report_data | length == 0 %}
-        No sudo users found
+            No sudo users found
         {% else %}
-User    Last Login           Groups                  Password Info
-{% for line in report_data %}
-{% set parts = line.split('|') %}
-{{ parts[0] }}    {{ parts[2] }}    {{ parts[3] }}    {{ parts[4] }}
-{% endfor %}
+            User    Last Login           Groups                  Password Info
+            {% for line in report_data %}
+                {% set parts = line.split('|') %}
+                {{ parts[0] }}    {{ parts[2] }}    {{ parts[3] }}    {{ parts[4] }}
+            {% endfor %}
         {% endif %}
