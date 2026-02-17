@@ -119,15 +119,15 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # GENERATE FINAL REPORT ON JENKINS WORKSPACE
+  # GENERATE FINAL REPORT (SAFE FOR JENKINS / LOCALHOST)
   ########################################################
 
-  - name: Create system report file
+  - name: Create system report file (write to /tmp)
     delegate_to: localhost
     run_once: true
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') | default('./') }}/system_report.txt"
+      dest: "/tmp/system_report_{{ inventory_hostname }}.txt"
       content: |
         ------------------------------------------------------------
         Host: {{ system_info.host }}
@@ -156,13 +156,13 @@
         {% endif %}
 
   ########################################################
-  # CLEAN OLD ENTERPRISE REPORT IF EXISTS
+  # OPTIONAL: REMOVE OLD ENTERPRISE REPORT
   ########################################################
 
-  - name: Remove old enterprise report
+  - name: Remove old enterprise report (localhost)
     delegate_to: localhost
     run_once: true
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
+      path: "/tmp/enterprise_system_report_{{ inventory_hostname }}.txt"
       state: absent
