@@ -6,6 +6,7 @@
 
   vars:
     report_data: []
+    disk_info: []
 
   tasks:
 
@@ -50,14 +51,14 @@
 
   - name: Build disk info list
     set_fact:
-      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ '%)' ] }}"
+      disk_info: "{{ disk_info + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ '%)' ] }}"
     loop: "{{ ansible_mounts | default([]) }}"
     when:
       - item.fstype not in ['tmpfs','devtmpfs','overlay']
       - not item.mount.startswith('/run')
 
   ########################################################
-  # BULLETPROOF SUDO DETECTION
+  # SUDO DETECTION (BULLETPROOF)
   ########################################################
 
   - name: Get all local users
@@ -118,12 +119,13 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # GENERATE FINAL REPORT (TXT)
+  # GENERATE FINAL REPORT ON JENKINS WORKSPACE
   ########################################################
 
   - name: Create system report file
     delegate_to: localhost
     run_once: true
+    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') | default('./') }}/system_report.txt"
       content: |
@@ -140,7 +142,7 @@
         Last Patch: {{ system_info.last_patch }}
 
         Filesystems:
-        {% for disk in disk_info | default([]) %}
+        {% for disk in disk_info %}
           - {{ disk }}
         {% endfor %}
 
@@ -154,12 +156,13 @@
         {% endif %}
 
   ########################################################
-  # CLEAN OLD ENTERPRISE FILE IF EXISTS
+  # CLEAN OLD ENTERPRISE REPORT IF EXISTS
   ########################################################
 
   - name: Remove old enterprise report
     delegate_to: localhost
     run_once: true
+    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') | default('./') }}/enterprise_system_report.txt"
       state: absent
