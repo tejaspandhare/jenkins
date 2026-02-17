@@ -61,7 +61,8 @@
   ########################################################
 
   - name: Get all local users from passwd
-    shell: awk -F: '{print $1}' /etc/passwd
+    shell: |
+      awk -F: '{print $1}' /etc/passwd
     register: all_users
     changed_when: false
 
@@ -117,7 +118,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # SHOW DEBUG (remove in prod if needed)
+  # DEBUG (REMOVE LATER IF NEEDED)
   ########################################################
 
   - name: Debug sudo users
