@@ -58,12 +58,11 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # SUDO DETECTION (BULLETPROOF)
+  # SUDO DETECTION
   ########################################################
 
   - name: Get all local users
-    shell: |
-      awk -F: '{print $1}' /etc/passwd
+    shell: awk -F: '{print $1}' /etc/passwd
     register: all_users
     changed_when: false
 
@@ -91,23 +90,20 @@
         }}
 
   ########################################################
-  # COLLECT SUDO USER DETAILS
+  # COLLECT DETAILED SUDO USER INFORMATION
   ########################################################
 
-  - name: Collect detailed sudo user information
+  - name: Collect sudo user details
     shell: |
       USERNAME="{{ item }}"
-
       if sudo -l -U "$USERNAME" 2>/dev/null | grep -q "NOPASSWD"; then
         SUDOTYPE="NOPASSWD"
       else
         SUDOTYPE="PASSWORD_REQUIRED"
       fi
-
       LASTLOGIN=$(lastlog -u "$USERNAME" 2>/dev/null | tail -1 | awk '{$1=$2=$3=""; print $0}')
       GROUPS=$(id -nG "$USERNAME" 2>/dev/null)
       PASSINFO=$(chage -l "$USERNAME" 2>/dev/null | grep "Last password change")
-
       echo "$USERNAME|$SUDOTYPE|$LASTLOGIN|$GROUPS|$PASSINFO"
     loop: "{{ final_users }}"
     register: user_output
@@ -119,50 +115,42 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
 
   ########################################################
-  # GENERATE FINAL REPORT (SAFE FOR JENKINS / LOCALHOST)
+  # CREATE REPORT FILE (SAFE FOR JENKINS)
   ########################################################
 
-  - name: Create system report file (write to /tmp)
+  - name: Create system report file
     delegate_to: localhost
     run_once: true
     become: false
     copy:
       dest: "/tmp/system_report_{{ inventory_hostname }}.txt"
       content: |
-        ------------------------------------------------------------
+        ============================================================
+        Full System Audit Report
         Host: {{ system_info.host }}
+        ============================================================
+
         OS: {{ system_info.os }}
         Kernel: {{ system_info.kernel }}
         Machine Type: {{ system_info.machine_type }}
         CPU Cores: {{ system_info.cpu }}
         RAM Total: {{ system_info.ram_total }}
         RAM Used: {{ system_info.ram_used }}
-
         Uptime (days): {{ system_info.uptime_days }}
         Last Patch: {{ system_info.last_patch }}
 
         Filesystems:
         {% for disk in disk_info %}
-          - {{ disk }}
+        - {{ disk }}
         {% endfor %}
 
-        SUDO USERS:
+        Sudo Users:
         {% if report_data | length == 0 %}
-          No sudo users found
+        No sudo users found
         {% else %}
-        {% for line in report_data %}
-          {{ line }}
-        {% endfor %}
+User    Last Login           Groups                  Password Info
+{% for line in report_data %}
+{% set parts = line.split('|') %}
+{{ parts[0] }}    {{ parts[2] }}    {{ parts[3] }}    {{ parts[4] }}
+{% endfor %}
         {% endif %}
-
-  ########################################################
-  # OPTIONAL: REMOVE OLD ENTERPRISE REPORT
-  ########################################################
-
-  - name: Remove old enterprise report (localhost)
-    delegate_to: localhost
-    run_once: true
-    become: false
-    file:
-      path: "/tmp/enterprise_system_report_{{ inventory_hostname }}.txt"
-      state: absent
