@@ -7,81 +7,51 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
-    environment {
-        ANSIBLE_FORCE_COLOR = 'true'
-    }
-
     parameters {
         string(
             name: 'SERVER_NAME',
-            description: 'Target servers separated by comma (e.g. lb1,lb2,kmaster1)'
+            description: 'Target servers separated by comma (e.g. lb1,lb2)'
         )
     }
 
     stages {
 
-        stage('Checkout Repository') {
+        stage('Checkout') {
             steps {
-                echo "\u001B[1;36m========== CHECKOUT STAGE ==========\u001B[0m"
                 checkout scm
             }
         }
 
-        stage('Run Enterprise Audit') {
+        stage('Run Audit') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     sh """
-                        echo -e "\\033[1;36m==================================================\\033[0m"
-                        echo -e "\\033[1;36m     🚀 ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
-                        echo -e "\\033[1;36m==================================================\\033[0m"
-
-                        echo -e "\\033[1;34mTarget Servers:\\033[0m ${params.SERVER_NAME}"
-                        echo ""
-
                         ansible-playbook \
-                            -i inventory/hosts \
-                            playbooks/auditreport.yml \
-                            --private-key="\$ANSIBLE_KEY_FILE" \
-                            --limit "${params.SERVER_NAME}"
-
-                        RC=\$?
-
-                        echo ""
-                        echo -e "\\033[1;33mAnsible Exit Code: \$RC\\033[0m"
-                        echo ""
-
-                        if [ \$RC -eq 0 ]; then
-                            echo -e "\\033[1;32m✔ SUCCESS: Audit completed.\\033[0m"
-                            exit 0
-                        elif [ \$RC -eq 2 ]; then
-                            echo -e "\\033[1;35m⚠ SUCCESS WITH CHANGES: Systems updated.\\033[0m"
-                            exit 0
-                        else
-                            echo -e "\\033[1;31m✖ FAILURE: Audit encountered errors.\\033[0m"
-                            exit \$RC
-                        fi
+                          -i inventory/hosts \
+                          playbooks/systemreport.yml \
+                          --private-key="\$ANSIBLE_KEY_FILE" \
+                          --limit "${params.SERVER_NAME}"
                     """
                 }
             }
         }
 
-        stage('Verify Generated Reports') {
+        stage('Verify Reports') {
             steps {
                 sh '''
-                    echo -e "\033[1;36m========== VERIFYING GENERATED REPORTS ==========\033[0m"
-                    ls -lah system_report.* || true
+                    echo "========== REPORT FILES =========="
+                    ls -lah reports/ || true
                 '''
             }
         }
 
-        stage('Publish HTML Report') {
+        stage('Publish HTML') {
             when {
-                expression { fileExists('system_report.html') }
+                expression { fileExists('reports/system_report.html') }
             }
             steps {
-                echo "\u001B[1;36m========== PUBLISHING HTML REPORT ==========\u001B[0m"
                 publishHTML(target: [
-                    reportDir: '.',
+                    reportDir: 'reports',
                     reportFiles: 'system_report.html',
                     reportName: 'Enterprise Security Audit Report',
                     keepAll: true,
@@ -93,22 +63,8 @@ pipeline {
     }
 
     post {
-
-        success {
-            echo "\u001B[1;32m✔ BUILD SUCCESS - Audit completed.\u001B[0m"
-        }
-
-        unstable {
-            echo "\u001B[1;33m⚠ BUILD UNSTABLE - Check warnings.\u001B[0m"
-        }
-
-        failure {
-            echo "\u001B[1;31m✖ BUILD FAILED - Review logs.\u001B[0m"
-        }
-
         always {
-            echo "\u001B[1;36mArchiving reports...\u001B[0m"
-            archiveArtifacts artifacts: 'system_report.html,system_report.txt,system_report.csv', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'reports/*', allowEmptyArchive: true
         }
     }
 }
