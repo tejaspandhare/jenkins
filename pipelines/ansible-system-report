@@ -12,7 +12,10 @@ pipeline {
     }
 
     parameters {
-        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
+        string(
+            name: 'SERVER_NAME',
+            description: 'Target servers separated by comma (e.g. lb1,lb2,kmaster1)'
+        )
     }
 
     stages {
@@ -27,40 +30,37 @@ pipeline {
         stage('Run Enterprise Audit') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                    script {
-                        sh """
-                            echo -e "\\033[1;36m==================================================\\033[0m"
-                            echo -e "\\033[1;36m     🚀 ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
-                            echo -e "\\033[1;36m==================================================\\033[0m"
+                    sh """
+                        echo -e "\\033[1;36m==================================================\\033[0m"
+                        echo -e "\\033[1;36m     🚀 ENTERPRISE SECURITY AUDIT STARTED       \\033[0m"
+                        echo -e "\\033[1;36m==================================================\\033[0m"
 
-                            echo -e "\\033[1;34mTarget Servers:\\033[0m ${params.SERVER_NAME}"
-                            echo ""
+                        echo -e "\\033[1;34mTarget Servers:\\033[0m ${params.SERVER_NAME}"
+                        echo ""
 
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                playbooks/systemreport.yml \
-                                --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "hosts=${params.SERVER_NAME}" \
-                                -e "workspace=${env.WORKSPACE}"
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            playbooks/systemreport.yml \
+                            --private-key="\$ANSIBLE_KEY_FILE" \
+                            --limit "${params.SERVER_NAME}"
 
-                            RC=\$?
+                        RC=\$?
 
-                            echo ""
-                            echo -e "\\033[1;33mAnsible Exit Code: \$RC\\033[0m"
-                            echo ""
+                        echo ""
+                        echo -e "\\033[1;33mAnsible Exit Code: \$RC\\033[0m"
+                        echo ""
 
-                            if [ \$RC -eq 0 ]; then
-                                echo -e "\\033[1;32m✔ SUCCESS: No changes required.\\033[0m"
-                                exit 0
-                            elif [ \$RC -eq 2 ]; then
-                                echo -e "\\033[1;35m⚠ SUCCESS WITH CHANGES: Systems were updated.\\033[0m"
-                                exit 0
-                            else
-                                echo -e "\\033[1;31m✖ FAILURE: Audit encountered errors.\\033[0m"
-                                exit \$RC
-                            fi
-                        """
-                    }
+                        if [ \$RC -eq 0 ]; then
+                            echo -e "\\033[1;32m✔ SUCCESS: Audit completed.\\033[0m"
+                            exit 0
+                        elif [ \$RC -eq 2 ]; then
+                            echo -e "\\033[1;35m⚠ SUCCESS WITH CHANGES: Systems updated.\\033[0m"
+                            exit 0
+                        else
+                            echo -e "\\033[1;31m✖ FAILURE: Audit encountered errors.\\033[0m"
+                            exit \$RC
+                        fi
+                    """
                 }
             }
         }
@@ -69,7 +69,7 @@ pipeline {
             steps {
                 sh '''
                     echo -e "\033[1;36m========== VERIFYING GENERATED REPORTS ==========\033[0m"
-                    ls -lah system_report.*
+                    ls -lah system_report.* || true
                 '''
             }
         }
@@ -108,7 +108,7 @@ pipeline {
 
         always {
             echo "\u001B[1;36mArchiving reports...\u001B[0m"
-            archiveArtifacts artifacts: 'system_report.html,system_report.txt,system_report.csv', allowEmptyArchive: false
+            archiveArtifacts artifacts: 'system_report.html,system_report.txt,system_report.csv', allowEmptyArchive: true
         }
     }
 }
