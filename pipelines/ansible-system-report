@@ -40,7 +40,7 @@ pipeline {
 
                         ansible-playbook \
                             -i inventory/hosts \
-                            playbooks/systemreport.yml \
+                            playbooks/auditreport.yml \
                             --private-key="\$ANSIBLE_KEY_FILE" \
                             --limit "${params.SERVER_NAME}"
 
