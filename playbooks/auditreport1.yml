@@ -16,7 +16,7 @@
   ########################################################
 
   - name: Get last patch date (Debian/Ubuntu)
-    shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null || echo 'N/A'"
+    shell: "stat -c %y /var/lib/dpkg/status |awk '{print $1}' 2>/dev/null || echo 'N/A'"
     register: last_patch
     changed_when: false
 
