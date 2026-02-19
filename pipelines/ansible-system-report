@@ -40,7 +40,8 @@ pipeline {
                                 -i inventory/hosts \
                                 playbooks/systemreport.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "hosts=${params.SERVER_NAME}"
+                                -e "hosts=${params.SERVER_NAME}" \
+                                -e "workspace=${env.WORKSPACE}"
 
                             RC=\$?
 
@@ -51,11 +52,9 @@ pipeline {
                             if [ \$RC -eq 0 ]; then
                                 echo -e "\\033[1;32m✔ SUCCESS: No changes required.\\033[0m"
                                 exit 0
-
                             elif [ \$RC -eq 2 ]; then
                                 echo -e "\\033[1;35m⚠ SUCCESS WITH CHANGES: Systems were updated.\\033[0m"
                                 exit 0
-
                             else
                                 echo -e "\\033[1;31m✖ FAILURE: Audit encountered errors.\\033[0m"
                                 exit \$RC
@@ -70,20 +69,20 @@ pipeline {
             steps {
                 sh '''
                     echo -e "\033[1;36m========== VERIFYING GENERATED REPORTS ==========\033[0m"
-                    ls -lah *.html *.txt *.csv || true
+                    ls -lah system_report.*
                 '''
             }
         }
 
         stage('Publish HTML Report') {
             when {
-                expression { fileExists('enterprise_security_audit.html') }
+                expression { fileExists('system_report.html') }
             }
             steps {
                 echo "\u001B[1;36m========== PUBLISHING HTML REPORT ==========\u001B[0m"
                 publishHTML(target: [
                     reportDir: '.',
-                    reportFiles: 'enterprise_security_audit.html',
+                    reportFiles: 'system_report.html',
                     reportName: 'Enterprise Security Audit Report',
                     keepAll: true,
                     alwaysLinkToLastBuild: true,
@@ -109,7 +108,7 @@ pipeline {
 
         always {
             echo "\u001B[1;36mArchiving reports...\u001B[0m"
-            archiveArtifacts artifacts: '*.html, *.txt, *.csv', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'system_report.html,system_report.txt,system_report.csv', allowEmptyArchive: false
         }
     }
 }
