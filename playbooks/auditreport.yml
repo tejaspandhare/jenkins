@@ -10,11 +10,11 @@
     report_data: []
     disk_info: []
 
+  tasks:
+
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
-
-  tasks:
 
   - name: Collect hardware vendor
     command: cat /sys/devices/virtual/dmi/id/sys_vendor
@@ -28,7 +28,7 @@
     ignore_errors: yes
     changed_when: false
 
-  - name: Set system information fact
+  - name: Set system information
     set_fact:
       system_info:
         host: "{{ inventory_hostname }}"
@@ -98,13 +98,15 @@
     register: user_output
     changed_when: false
     failed_when: false
+    when: final_users | length > 0
 
   - name: Store user report data
     set_fact:
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
+    when: final_users | length > 0
 
   ########################################################
-  # CLEAN OLD REPORTS (ON JENKINS CONTROLLER)
+  # GENERATE REPORTS (LOCAL CONTROLLER)
   ########################################################
 
   - name: Remove old TXT report
@@ -112,7 +114,7 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ workspace }}/system_report.txt"
+      path: "system_report.txt"
       state: absent
 
   - name: Remove old CSV report
@@ -120,7 +122,7 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ workspace }}/system_report.csv"
+      path: "system_report.csv"
       state: absent
 
   - name: Remove old HTML report
@@ -128,11 +130,11 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ workspace }}/system_report.html"
+      path: "system_report.html"
       state: absent
 
   ########################################################
-  # GENERATE TXT REPORT
+  # TXT REPORT
   ########################################################
 
   - name: Generate TXT report
@@ -140,7 +142,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ workspace }}/system_report.txt"
+      dest: "system_report.txt"
       content: |
         ================= FULL SYSTEM AUDIT REPORT =================
 
@@ -168,6 +170,8 @@
           Groups: {{ cols[3] }}
           {{ cols[4] }}
           {{ cols[5] }}
+        {% else %}
+          No sudo users found.
         {% endfor %}
 
         ============================================================
@@ -175,7 +179,7 @@
         {% endfor %}
 
   ########################################################
-  # GENERATE CSV REPORT
+  # CSV REPORT
   ########################################################
 
   - name: Generate CSV report
@@ -183,7 +187,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ workspace }}/system_report.csv"
+      dest: "system_report.csv"
       content: |
         Host,OS,Kernel,CPU,RAM,Make,Model
         {% for host in ansible_play_hosts %}
@@ -192,7 +196,7 @@
         {% endfor %}
 
   ########################################################
-  # GENERATE HTML REPORT
+  # HTML REPORT
   ########################################################
 
   - name: Generate HTML report
@@ -200,7 +204,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ workspace }}/system_report.html"
+      dest: "system_report.html"
       content: |
         <html>
         <head>
@@ -244,6 +248,10 @@
           <td>{{ cols[2] }}</td>
           <td>{{ cols[3] }}</td>
           <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4">No sudo users found.</td>
         </tr>
         {% endfor %}
         </table>
