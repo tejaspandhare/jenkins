@@ -1,6 +1,6 @@
 ---
 - name: Full System + Sudo User Audit Report
-  hosts: "{{ hosts.split(';') }}"
+  hosts: all
   become: yes
   gather_facts: yes
 
@@ -106,88 +106,47 @@
     when: final_users | length > 0
 
   ########################################################
-  # GENERATE REPORTS (LOCAL CONTROLLER)
+  # REPORT GENERATION (LOCAL)
   ########################################################
 
-  - name: Remove old TXT report
+  - name: Remove old reports
     run_once: true
     delegate_to: localhost
     become: false
     file:
-      path: "system_report.txt"
+      path: "{{ item }}"
       state: absent
-
-  - name: Remove old CSV report
-    run_once: true
-    delegate_to: localhost
-    become: false
-    file:
-      path: "system_report.csv"
-      state: absent
-
-  - name: Remove old HTML report
-    run_once: true
-    delegate_to: localhost
-    become: false
-    file:
-      path: "system_report.html"
-      state: absent
-
-  ########################################################
-  # TXT REPORT
-  ########################################################
+    loop:
+      - system_report.txt
+      - system_report.csv
+      - system_report.html
 
   - name: Generate TXT report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "system_report.txt"
+      dest: system_report.txt
       content: |
         ================= FULL SYSTEM AUDIT REPORT =================
-
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        ------------------------------------------------------------
         Host: {{ sys.host }}
         OS: {{ sys.os }}
         Kernel: {{ sys.kernel }}
-        CPU Cores: {{ sys.cpu }}
+        CPU: {{ sys.cpu }}
         RAM: {{ sys.ram }}
         Make: {{ sys.make }}
         Model: {{ sys.model }}
-
-        Filesystems:
-        {% for disk in hostvars[host].disk_info | default([]) %}
-          - {{ disk }}
+        ------------------------------------------------------------
         {% endfor %}
-
-        SUDO USERS:
-        {% for line in hostvars[host].report_data | default([]) %}
-        {% set cols = line.split('|') %}
-          User: {{ cols[1] }}
-          Last Login: {{ cols[2] }}
-          Groups: {{ cols[3] }}
-          {{ cols[4] }}
-          {{ cols[5] }}
-        {% else %}
-          No sudo users found.
-        {% endfor %}
-
-        ============================================================
-
-        {% endfor %}
-
-  ########################################################
-  # CSV REPORT
-  ########################################################
 
   - name: Generate CSV report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "system_report.csv"
+      dest: system_report.csv
       content: |
         Host,OS,Kernel,CPU,RAM,Make,Model
         {% for host in ansible_play_hosts %}
@@ -195,68 +154,28 @@
         {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram }},{{ sys.make }},{{ sys.model }}
         {% endfor %}
 
-  ########################################################
-  # HTML REPORT
-  ########################################################
-
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "system_report.html"
+      dest: system_report.html
       content: |
         <html>
-        <head>
-        <title>Full System Audit Report</title>
-        <style>
-        body {font-family: Arial, sans-serif;}
-        table {border-collapse: collapse; width: 100%;}
-        th, td {border:1px solid #ccc; padding:8px;}
-        th {background:#f2f2f2;}
-        h3 {color:#2c3e50;}
-        </style>
-        </head>
         <body>
         <h2>Full System Audit Report</h2>
-
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
         <h3>{{ sys.host }}</h3>
         <ul>
-          <li><strong>OS:</strong> {{ sys.os }}</li>
-          <li><strong>Kernel:</strong> {{ sys.kernel }}</li>
-          <li><strong>CPU:</strong> {{ sys.cpu }}</li>
-          <li><strong>RAM:</strong> {{ sys.ram }}</li>
-          <li><strong>Make:</strong> {{ sys.make }}</li>
-          <li><strong>Model:</strong> {{ sys.model }}</li>
+          <li>OS: {{ sys.os }}</li>
+          <li>Kernel: {{ sys.kernel }}</li>
+          <li>CPU: {{ sys.cpu }}</li>
+          <li>RAM: {{ sys.ram }}</li>
+          <li>Make: {{ sys.make }}</li>
+          <li>Model: {{ sys.model }}</li>
         </ul>
-
-        <h4>Sudo Users</h4>
-        <table>
-        <tr>
-          <th>User</th>
-          <th>Last Login</th>
-          <th>Groups</th>
-          <th>Password Info</th>
-        </tr>
-
-        {% for line in hostvars[host].report_data | default([]) %}
-        {% set cols = line.split('|') %}
-        <tr>
-          <td>{{ cols[1] }}</td>
-          <td>{{ cols[2] }}</td>
-          <td>{{ cols[3] }}</td>
-          <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="4">No sudo users found.</td>
-        </tr>
-        {% endfor %}
-        </table>
         <hr>
         {% endfor %}
-
         </body>
         </html>
