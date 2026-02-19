@@ -15,7 +15,7 @@
   ########################################################
 
   - name: Get last patch date
-    shell: "if [ -f /var/lib/dpkg/status ]; then stat -c %y /var/lib/dpkg/status; elif [ -f /var/lib/rpm/Packages ]; then stat -c %y /var/lib/rpm/Packages; else echo 'N/A'; fi"
+    shell: "if [ -f /var/lib/dpkg/status ]; then stat -c %y /var/lib/dpkg/status |awk '{print $1}'; elif [ -f /var/lib/rpm/Packages ]; then stat -c %y /var/lib/rpm/Packages |awk '{print $1}'; else echo 'N/A'; fi"
     register: last_patch
     changed_when: false
 
