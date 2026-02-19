@@ -1,144 +1,70 @@
----
-- name: Enterprise Full Linux Audit Report - Production
-  hosts: "{{ hosts.split(';') }}"
-  gather_facts: yes
-  become: yes
+pipeline {
+    agent any
 
-  vars:
-    report_data: []
-    disk_info: []
+    options {
+        timestamps()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
 
-  tasks:
+    parameters {
+        string(
+            name: 'SERVER_NAME',
+            description: 'Target servers separated by comma (e.g. lb1,lb2)'
+        )
+    }
 
-  ########################################################
-  # SYSTEM INFORMATION
-  ########################################################
+    stages {
 
-  - name: Get last patch date
-    shell: "if [ -f /var/lib/dpkg/status ]; then stat -c %y /var/lib/dpkg/status |awk '{print $1}'; elif [ -f /var/lib/rpm/Packages ]; then stat -c %y /var/lib/rpm/Packages |awk '{print $1}'; else echo 'N/A'; fi"
-    register: last_patch
-    changed_when: false
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
 
-  - name: Get RAM usage
-    shell: "free -m | awk 'NR==2 {print $2 \"|\" $3}'"
-    register: ram_info
-    changed_when: false
+        stage('Run Audit') {
+            steps {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    sh """
+                        ansible-playbook \
+                          -i inventory/hosts \
+                          playbooks/systemreport.yml \
+                          --private-key="\$ANSIBLE_KEY_FILE" \
+                          --limit "${params.SERVER_NAME}"
+                    """
+                }
+            }
+        }
 
-  - name: Set system info
-    set_fact:
-      system_info:
-        host: "{{ inventory_hostname }}"
-        os: "{{ ansible_distribution | default('N/A') }} {{ ansible_distribution_version | default('') }}"
-        kernel: "{{ ansible_kernel | default('N/A') }}"
-        machine_type: "{{ ansible_virtualization_type | default('physical') }}"
-        cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ (ram_info.stdout.split('|')[0] if '|' in ram_info.stdout else 'N/A') }} MB"
-        ram_used: "{{ (ram_info.stdout.split('|')[1] if '|' in ram_info.stdout else 'N/A') }} MB"
-        uptime_days: "{{ (ansible_uptime_seconds | default(0) | int) // 86400 }}"
-        last_patch: "{{ last_patch.stdout | default('N/A') }}"
+        stage('Verify Reports') {
+            steps {
+                sh '''
+                    echo "========== REPORT FILES =========="
+                    ls -lah reports/ || true
+                '''
+            }
+        }
 
-  ########################################################
-  # DISK INFORMATION
-  ########################################################
+        stage('Publish HTML') {
+            when {
+                expression { fileExists('reports/system_report.html') }
+            }
+            steps {
+                publishHTML(target: [
+                    reportDir: 'reports',
+                    reportFiles: 'system_report.html',
+                    reportName: 'Enterprise Security Audit Report',
+                    keepAll: true,
+                    alwaysLinkToLastBuild: true,
+                    allowMissing: false
+                ])
+            }
+        }
+    }
 
-  - name: Build disk info list
-    set_fact:
-      disk_info: "{{ disk_info + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ '%)' ] }}"
-    loop: "{{ ansible_mounts | default([]) }}"
-    when:
-      - item.fstype not in ['tmpfs','devtmpfs','overlay']
-      - not item.mount.startswith('/run')
-
-  ########################################################
-  # SUDO DETECTION
-  ########################################################
-
-  - name: Get all local users
-    shell: "awk -F: '{print $1}' /etc/passwd"
-    register: all_users
-    changed_when: false
-
-  - name: Detect users with sudo access
-    shell: "sudo -l -U {{ item }} 2>/dev/null | grep -q 'may run the following'; if [ $? -eq 0 ]; then echo '{{ item }}'; fi"
-    loop: "{{ all_users.stdout_lines }}"
-    register: sudo_check
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Build final sudo user list (exclude root)
-    set_fact:
-      final_users: >-
-        {{
-          sudo_check.results
-          | map(attribute='stdout')
-          | reject('equalto','')
-          | reject('equalto','root')
-          | unique
-          | list
-        }}
-
-  ########################################################
-  # COLLECT DETAILED SUDO USER INFORMATION
-  ########################################################
-
-  - name: Collect sudo user details
-    shell: |
-      USERNAME="{{ item }}"
-      if sudo -l -U "$USERNAME" 2>/dev/null | grep -q "NOPASSWD"; then
-        SUDOTYPE="NOPASSWD"
-      else
-        SUDOTYPE="PASSWORD_REQUIRED"
-      fi
-      LASTLOGIN=$(lastlog -u "$USERNAME" 2>/dev/null | tail -1 | awk '{$1=$2=$3=""; print $0}')
-      GROUPS=$(id -nG "$USERNAME" 2>/dev/null)
-      PASSINFO=$(chage -l "$USERNAME" 2>/dev/null | grep "Last password change")
-      echo "$USERNAME|$SUDOTYPE|$LASTLOGIN|$GROUPS|$PASSINFO"
-    loop: "{{ final_users }}"
-    register: user_output
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Store sudo report data
-    set_fact:
-      report_data: "{{ user_output.results | map(attribute='stdout') | reject('equalto','') | list }}"
-
-  ########################################################
-  # CREATE REPORT FILE (JENKINS SAFE)
-  ########################################################
-
-  - name: Create system report file
-    delegate_to: localhost
-    run_once: true
-    become: false
-    copy:
-      dest: "/tmp/system_report_{{ inventory_hostname }}.txt"
-      content: |
-        ============================================================
-        Full System Audit Report
-        Host: {{ system_info.host }}
-        ============================================================
-
-        OS: {{ system_info.os }}
-        Kernel: {{ system_info.kernel }}
-        Machine Type: {{ system_info.machine_type }}
-        CPU Cores: {{ system_info.cpu }}
-        RAM Total: {{ system_info.ram_total }}
-        RAM Used: {{ system_info.ram_used }}
-        Uptime (days): {{ system_info.uptime_days }}
-        Last Patch: {{ system_info.last_patch }}
-
-        Filesystems:
-        {% for disk in disk_info %}
-        - {{ disk }}
-        {% endfor %}
-
-        Sudo Users:
-        {% if report_data | length == 0 %}
-            No sudo users found
-        {% else %}
-            User    Last Login           Groups                  Password Info
-            {% for line in report_data %}
-                {% set parts = line.split('|') %}
-                {{ parts[0] }}    {{ parts[2] }}    {{ parts[3] }}    {{ parts[4] }}
-            {% endfor %}
-        {% endif %}
+    post {
+        always {
+            archiveArtifacts artifacts: 'reports/*', allowEmptyArchive: true
+        }
+    }
+}
