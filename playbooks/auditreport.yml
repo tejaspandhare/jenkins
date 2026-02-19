@@ -8,26 +8,27 @@
     valid_users: []
     final_users: []
     report_data: []
-
-  tasks:
+    disk_info: []
 
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
 
-  - name: Collect hardware Make
+  tasks:
+
+  - name: Collect hardware vendor
     command: cat /sys/devices/virtual/dmi/id/sys_vendor
     register: sys_vendor
     ignore_errors: yes
     changed_when: false
 
-  - name: Collect hardware Model
+  - name: Collect hardware model
     command: cat /sys/devices/virtual/dmi/id/product_name
     register: sys_model
     ignore_errors: yes
     changed_when: false
 
-  - name: Set system info
+  - name: Set system information fact
     set_fact:
       system_info:
         host: "{{ inventory_hostname }}"
@@ -39,19 +40,19 @@
         model: "{{ sys_model.stdout | default('N/A') }}"
 
   ########################################################
-  # DISK INFO
+  # DISK INFORMATION
   ########################################################
 
-  - name: Build disk info list
+  - name: Build disk information list
     set_fact:
-      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB)' ] }}"
+      disk_info: "{{ disk_info + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB)' ] }}"
     loop: "{{ ansible_mounts }}"
     when:
       - item.fstype not in ['tmpfs','devtmpfs','overlay']
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING
+  # USER DISCOVERY
   ########################################################
 
   - name: Get passwd entries
@@ -62,7 +63,7 @@
     getent:
       database: group
 
-  - name: Build valid local users list (UID >=1000)
+  - name: Build valid local users list (UID >= 1000)
     set_fact:
       valid_users: "{{ valid_users + [ item.key ] }}"
     loop: "{{ getent_passwd | dict2items }}"
@@ -70,7 +71,7 @@
       - item.value[2] | int >= 1000
       - item.key != "nobody"
 
-  - name: Build sudo group users list
+  - name: Build sudo/wheel group users list
     set_fact:
       sudo_group_users: >-
         {{
@@ -78,7 +79,7 @@
           (getent_group['wheel'][2].split(',') if 'wheel' in getent_group else [])
         }}
 
-  - name: Keep only sudo users
+  - name: Keep only sudo-enabled users
     set_fact:
       final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
@@ -86,7 +87,7 @@
   # COLLECT USER DETAILS
   ########################################################
 
-  - name: Collect user details
+  - name: Collect sudo user details
     shell: |
       LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
       GROUPS=$(id -nG {{ item }})
@@ -96,13 +97,14 @@
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
+    failed_when: false
 
   - name: Store user report data
     set_fact:
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+  # CLEAN OLD REPORTS (ON JENKINS CONTROLLER)
   ########################################################
 
   - name: Remove old TXT report
@@ -110,7 +112,7 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      path: "{{ workspace }}/system_report.txt"
       state: absent
 
   - name: Remove old CSV report
@@ -118,7 +120,7 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      path: "{{ workspace }}/system_report.csv"
       state: absent
 
   - name: Remove old HTML report
@@ -126,11 +128,11 @@
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/system_report.html"
+      path: "{{ workspace }}/system_report.html"
       state: absent
 
   ########################################################
-  # GENERATE REPORTS (ON JENKINS WORKSPACE)
+  # GENERATE TXT REPORT
   ########################################################
 
   - name: Generate TXT report
@@ -138,7 +140,7 @@
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      dest: "{{ workspace }}/system_report.txt"
       content: |
         ================= FULL SYSTEM AUDIT REPORT =================
 
@@ -172,12 +174,16 @@
 
         {% endfor %}
 
+  ########################################################
+  # GENERATE CSV REPORT
+  ########################################################
+
   - name: Generate CSV report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      dest: "{{ workspace }}/system_report.csv"
       content: |
         Host,OS,Kernel,CPU,RAM,Make,Model
         {% for host in ansible_play_hosts %}
@@ -185,20 +191,26 @@
         {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram }},{{ sys.make }},{{ sys.model }}
         {% endfor %}
 
+  ########################################################
+  # GENERATE HTML REPORT
+  ########################################################
+
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/system_report.html"
+      dest: "{{ workspace }}/system_report.html"
       content: |
         <html>
         <head>
         <title>Full System Audit Report</title>
         <style>
+        body {font-family: Arial, sans-serif;}
         table {border-collapse: collapse; width: 100%;}
-        th, td {border:1px solid black; padding:8px;}
+        th, td {border:1px solid #ccc; padding:8px;}
         th {background:#f2f2f2;}
+        h3 {color:#2c3e50;}
         </style>
         </head>
         <body>
@@ -208,12 +220,12 @@
         {% set sys = hostvars[host].system_info %}
         <h3>{{ sys.host }}</h3>
         <ul>
-          <li>OS: {{ sys.os }}</li>
-          <li>Kernel: {{ sys.kernel }}</li>
-          <li>CPU: {{ sys.cpu }}</li>
-          <li>RAM: {{ sys.ram }}</li>
-          <li>Make: {{ sys.make }}</li>
-          <li>Model: {{ sys.model }}</li>
+          <li><strong>OS:</strong> {{ sys.os }}</li>
+          <li><strong>Kernel:</strong> {{ sys.kernel }}</li>
+          <li><strong>CPU:</strong> {{ sys.cpu }}</li>
+          <li><strong>RAM:</strong> {{ sys.ram }}</li>
+          <li><strong>Make:</strong> {{ sys.make }}</li>
+          <li><strong>Model:</strong> {{ sys.model }}</li>
         </ul>
 
         <h4>Sudo Users</h4>
