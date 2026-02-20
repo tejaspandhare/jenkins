@@ -19,8 +19,9 @@
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
     register: last_patch
     changed_when: false
+    ignore_errors: yes
 
-  - name: Get full kernel version (uname -rv)
+  - name: Get kernel full version
     shell: "uname -rv"
     register: kernel_full
     changed_when: false
@@ -55,7 +56,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING
+  # USER FILTERING (UNIVERSAL LOGIN USERS)
   ########################################################
 
   - name: Read /etc/passwd
@@ -76,17 +77,21 @@
           getent_passwd
           | dict2items
           | selectattr('value.shell', 'defined')
-          | rejectattr('value.shell', 'in', ['/usr/sbin/nologin','/sbin/nologin','/bin/false','/usr/bin/false'])
+          | rejectattr('value.shell', 'in',
+              ['/usr/sbin/nologin',
+               '/sbin/nologin',
+               '/bin/false',
+               '/usr/bin/false'])
           | map(attribute='key')
           | reject('equalto','nobody')
           | list
         }}
 
   ########################################################
-  # DETECT REAL SUDO USERS
+  # DETECT REAL SUDO USERS (ALL DISTROS SAFE)
   ########################################################
 
-  - name: Remove root from sudo check (we will add it later)
+  - name: Remove root from sudo check (will add later)
     set_fact:
       valid_users: "{{ valid_users | difference(['root']) }}"
 
@@ -118,7 +123,8 @@
   - name: Collect sudo user details
     shell: |
       LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' || echo "Never")
-      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN"
+      GROUPS=$(id -nG {{ item }})
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
@@ -129,7 +135,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS
+  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
   ########################################################
 
   - name: Remove old reports
@@ -145,7 +151,7 @@
       - enterprise_system_report.html
 
   ########################################################
-  # GENERATE REPORTS
+  # GENERATE TXT REPORT
   ########################################################
 
   - name: Generate TXT report
@@ -155,7 +161,7 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
-        ================== FULL SYSTEM AUDIT REPORT ==================
+        ================= FULL SYSTEM AUDIT REPORT =================
 
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
@@ -178,16 +184,18 @@
         LOGIN HISTORY:
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% if cols[2] != "Never" %}
+        {% if cols[2].strip() != "Never" %}
         User {{ cols[1] }}: Last Login: {{ cols[2] }}
-        {% else %}
-        User {{ cols[1] }}: Last Login: Never
         {% endif %}
         {% endfor %}
 
         ============================================================
 
         {% endfor %}
+
+  ########################################################
+  # GENERATE CSV REPORT
+  ########################################################
 
   - name: Generate CSV report
     run_once: true
@@ -199,9 +207,17 @@
         Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        {% set sudo_users = hostvars[host].report_data | map('split','|') | map('nth',1) | join(';') %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }}
+        {% set sudo_users_list = [] %}
+        {% for line in hostvars[host].report_data | default([]) %}
+          {% set cols = line.split('|') %}
+          {% set _ = sudo_users_list.append(cols[1]) %}
         {% endfor %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users_list | join(';') }}
+        {% endfor %}
+
+  ########################################################
+  # GENERATE HTML REPORT
+  ########################################################
 
   - name: Generate HTML report
     run_once: true
@@ -247,10 +263,8 @@
         <ul>
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% if cols[2] != "Never" %}
+        {% if cols[2].strip() != "Never" %}
         <li>User {{ cols[1] }}: Last Login: {{ cols[2] }}</li>
-        {% else %}
-        <li>User {{ cols[1] }}: Last Login: Never</li>
         {% endif %}
         {% endfor %}
         </ul>
