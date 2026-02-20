@@ -14,7 +14,7 @@ pipeline {
     parameters {
         string(
             name: 'SERVER_NAME',
-            description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1',
+            description: 'Target server(s) separated by comma. Example: server1,server2',
             trim: true
         )
     }
@@ -37,7 +37,7 @@ pipeline {
             }
         }
 
-        stage('Run Enterprise Audit') {
+        stage('Run Full System Audit') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     script {
@@ -46,9 +46,9 @@ pipeline {
 
                             ansible-playbook \
                                 -i inventory/hosts \
-                                playbooks/systemreport.yml \
+                                playbooks/auditreport1.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
-                                --limit "${params.SERVER_NAME}"
+                                -e "target_hosts=${params.SERVER_NAME}"
 
                             RC=\$?
                             echo "Ansible Exit Code: \$RC"
@@ -84,7 +84,7 @@ pipeline {
                 publishHTML(target: [
                     reportDir: '.',
                     reportFiles: 'enterprise_system_report.html',
-                    reportName: 'Enterprise Security Audit Report',
+                    reportName: 'Full System Audit Report',
                     keepAll: true,
                     alwaysLinkToLastBuild: true,
                     allowMissing: false
