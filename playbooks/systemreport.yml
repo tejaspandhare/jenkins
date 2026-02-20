@@ -65,10 +65,6 @@
       getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
     loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
 
-  ########################################################
-  # BUILD VALID LOGIN USERS (NO UID ASSUMPTION)
-  ########################################################
-
   - name: Build valid local login users list
     set_fact:
       valid_users: >-
@@ -107,9 +103,8 @@
         {{
           (
             sudo_check.results
-            | selectattr('stdout', 'defined')
             | map(attribute='stdout')
-            | select('length')
+            | reject('equalto','')
             | list
           )
           + ['root']
