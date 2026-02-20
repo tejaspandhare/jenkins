@@ -2,7 +2,7 @@
 - name: Full System + Sudo User Enterprise Audit Report
   hosts: "{{ hosts | default('localhost') | split(',') }}"
   gather_facts: yes
-  become: yes
+  #become: yes
 
   vars:
     valid_users: []
