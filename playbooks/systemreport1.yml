@@ -44,19 +44,7 @@
         last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
   ########################################################
-  # DISK INFO
-  ########################################################
-
-  - name: Build disk info list with usage %
-    set_fact:
-      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ ')' ] }}"
-    loop: "{{ ansible_mounts }}"
-    when:
-      - item.fstype not in ['tmpfs','devtmpfs','overlay']
-      - not item.mount.startswith('/run')
-
-  ########################################################
-  # USER FILTERING (UNIVERSAL LOGIN USERS)
+  # USER FILTERING & SUDO USERS
   ########################################################
 
   - name: Read /etc/passwd
@@ -87,11 +75,7 @@
           | list
         }}
 
-  ########################################################
-  # DETECT REAL SUDO USERS (ALL DISTROS SAFE)
-  ########################################################
-
-  - name: Remove root from sudo check (will add later)
+  - name: Remove root from sudo check (root will be added later)
     set_fact:
       valid_users: "{{ valid_users | difference(['root']) }}"
 
@@ -117,7 +101,7 @@
         }}
 
   ########################################################
-  # COLLECT USER DETAILS
+  # COLLECT USER DETAILS INCLUDING LOGIN HISTORY
   ########################################################
 
   - name: Collect sudo user details
@@ -184,9 +168,7 @@
         LOGIN HISTORY:
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% if cols[2].strip() != "Never" %}
-        User {{ cols[1] }}: Last Login: {{ cols[2] }}
-        {% endif %}
+        User {{ cols[1] }}: Last Login: {{ cols[2] | default("Never") }}
         {% endfor %}
 
         ============================================================
@@ -204,15 +186,17 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
-        Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
+        Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users,Login_History
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
         {% set sudo_users_list = [] %}
+        {% set login_history_list = [] %}
         {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
           {% set _ = sudo_users_list.append(cols[1]) %}
+          {% set _ = login_history_list.append(cols[1] ~ ':' ~ (cols[2] | default("Never"))) %}
         {% endfor %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users_list | join(';') }}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users_list | join(';') }},{{ login_history_list | join(';') }}
         {% endfor %}
 
   ########################################################
@@ -263,9 +247,7 @@
         <ul>
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% if cols[2].strip() != "Never" %}
-        <li>User {{ cols[1] }}: Last Login: {{ cols[2] }}</li>
-        {% endif %}
+        <li>User {{ cols[1] }}: Last Login: {{ cols[2] | default("Never") }}</li>
         {% endfor %}
         </ul>
         <hr>
