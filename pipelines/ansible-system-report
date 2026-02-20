@@ -12,8 +12,11 @@ pipeline {
     }
 
     parameters {
-        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
-        
+        string(
+            name: 'SERVER_NAME',
+            description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1',
+            trim: true
+        )
     }
 
     stages {
@@ -24,19 +27,29 @@ pipeline {
             }
         }
 
+        stage('Validate Input') {
+            steps {
+                script {
+                    if (!params.SERVER_NAME?.trim()) {
+                        error("SERVER_NAME parameter cannot be empty.")
+                    }
+                }
+            }
+        }
+
         stage('Run Enterprise Audit') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     script {
                         sh """
                             echo "Running Ansible Audit on: ${params.SERVER_NAME}"
-                            
+
                             ansible-playbook \
                                 -i inventory/hosts \
                                 playbooks/auditreport1.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "hosts=${params.SERVER_NAME}" \
-                                
+                                --limit "${params.SERVER_NAME}"
+
                             RC=\$?
                             echo "Ansible Exit Code: \$RC"
 
@@ -65,12 +78,12 @@ pipeline {
 
         stage('Publish HTML Report') {
             when {
-                expression { fileExists('enterprise_security_audit.html') }
+                expression { fileExists('enterprise_system_report.html') }
             }
             steps {
                 publishHTML(target: [
                     reportDir: '.',
-                    reportFiles: 'enterprise_security_audit.html',
+                    reportFiles: 'enterprise_system_report.html',
                     reportName: 'Enterprise Security Audit Report',
                     keepAll: true,
                     alwaysLinkToLastBuild: true,
