@@ -19,21 +19,18 @@
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
     register: last_patch
     changed_when: false
-    when: ansible_os_family in ['Debian']
 
-  - name: Get last patch date (RHEL/SLES)
-    shell: "rpm -qa --last | head -1 | awk '{print $NF}' || echo 'N/A'"
-    register: last_patch_rpm
+  - name: Get full kernel version (uname -rv)
+    shell: "uname -rv"
+    register: kernel_full
     changed_when: false
-    when: ansible_os_family in ['RedHat', 'Suse']
 
   - name: Set system info safely
     set_fact:
       system_info:
         host: "{{ inventory_hostname }}"
         os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-        kernel: "{{ ansible_kernel }}"
-        machine_type: "{{ ansible_virtualization_type | default('physical') }}"
+        kernel: "{{ kernel_full.stdout | default(ansible_kernel) }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
         ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
         ram_used: >-
@@ -43,12 +40,7 @@
             N/A
           {% endif %}
         uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
-        last_patch: >-
-          {% if ansible_os_family in ['Debian'] %}
-            {{ last_patch.stdout | default('N/A') }}
-          {% else %}
-            {{ last_patch_rpm.stdout | default('N/A') }}
-          {% endif %}
+        last_patch: "{{ last_patch.stdout | default('N/A') }}"
 
   ########################################################
   # DISK INFO
@@ -63,7 +55,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (UNIVERSAL LOGIN USERS)
+  # USER FILTERING
   ########################################################
 
   - name: Read /etc/passwd
@@ -84,8 +76,7 @@
           getent_passwd
           | dict2items
           | selectattr('value.shell', 'defined')
-          | rejectattr('value.shell', 'in',
-              ['/usr/sbin/nologin','/sbin/nologin','/bin/false','/usr/bin/false'])
+          | rejectattr('value.shell', 'in', ['/usr/sbin/nologin','/sbin/nologin','/bin/false','/usr/bin/false'])
           | map(attribute='key')
           | reject('equalto','nobody')
           | list
@@ -95,7 +86,7 @@
   # DETECT REAL SUDO USERS
   ########################################################
 
-  - name: Remove root from sudo check (will add later)
+  - name: Remove root from sudo check (we will add it later)
     set_fact:
       valid_users: "{{ valid_users | difference(['root']) }}"
 
@@ -127,10 +118,7 @@
   - name: Collect sudo user details
     shell: |
       LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' || echo "Never")
-      GROUPS=$(id -nG {{ item }})
-      PASSLAST=$(chage -l {{ item }} 2>/dev/null | grep "Last password change" || echo "N/A")
-      PASSMAX=$(chage -l {{ item }} 2>/dev/null | grep "Maximum" || echo "N/A")
-      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN"
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
@@ -141,7 +129,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+  # CLEAN OLD REPORTS
   ########################################################
 
   - name: Remove old reports
@@ -167,7 +155,7 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
-        ================= FULL SYSTEM AUDIT REPORT =================
+        ================== FULL SYSTEM AUDIT REPORT ==================
 
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
@@ -182,18 +170,19 @@
         Last Patch: {{ sys.last_patch }}
 
         SUDO USERS:
-        {% for user in hostvars[host].final_users %}
-          User: {{ user }}
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        User: {{ cols[1] }}
         {% endfor %}
 
         LOGIN HISTORY:
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% set last_login = cols[2].strip() %}
-        {% if last_login == "" or "Never" in last_login %}
-          {% set last_login = "Never" %}
+        {% if cols[2] != "Never" %}
+        User {{ cols[1] }}: Last Login: {{ cols[2] }}
+        {% else %}
+        User {{ cols[1] }}: Last Login: Never
         {% endif %}
-        User {{ cols[1] }}: Last Login: {{ last_login }}
         {% endfor %}
 
         ============================================================
@@ -207,10 +196,11 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
-        Host,OS,Kernel,CPU,RAM_Total,Uptime_days,Last_Patch
+        Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.uptime_days }},{{ sys.last_patch }}
+        {% set sudo_users = hostvars[host].report_data | map('split','|') | map('nth',1) | join(';') %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }}
         {% endfor %}
 
   - name: Generate HTML report
@@ -247,8 +237,9 @@
 
         <h4>Sudo Users</h4>
         <ul>
-        {% for user in hostvars[host].final_users %}
-          <li>{{ user }}</li>
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        <li>{{ cols[1] }}</li>
         {% endfor %}
         </ul>
 
@@ -256,14 +247,13 @@
         <ul>
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        {% set last_login = cols[2].strip() %}
-        {% if last_login == "" or "Never" in last_login %}
-          {% set last_login = "Never" %}
+        {% if cols[2] != "Never" %}
+        <li>User {{ cols[1] }}: Last Login: {{ cols[2] }}</li>
+        {% else %}
+        <li>User {{ cols[1] }}: Last Login: Never</li>
         {% endif %}
-        <li>User {{ cols[1] }}: Last Login: {{ last_login }}</li>
         {% endfor %}
         </ul>
-
         <hr>
         {% endfor %}
         </body>
