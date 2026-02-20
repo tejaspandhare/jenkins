@@ -1,0 +1,270 @@
+---
+- name: Full System + Sudo User Enterprise Audit Report
+  hosts: "{{ target_hosts.split(',') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    valid_users: []
+    final_users: []
+    report_data: []
+
+  tasks:
+
+  ########################################################
+  # SYSTEM INFORMATION
+  ########################################################
+
+  - name: Get last patch date (Debian/Ubuntu)
+    shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
+    register: last_patch
+    changed_when: false
+    when: ansible_os_family in ['Debian']
+
+  - name: Get last patch date (RHEL/SLES)
+    shell: "rpm -qa --last | head -1 | awk '{print $NF}' || echo 'N/A'"
+    register: last_patch_rpm
+    changed_when: false
+    when: ansible_os_family in ['RedHat', 'Suse']
+
+  - name: Set system info safely
+    set_fact:
+      system_info:
+        host: "{{ inventory_hostname }}"
+        os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+        kernel: "{{ ansible_kernel }}"
+        machine_type: "{{ ansible_virtualization_type | default('physical') }}"
+        cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
+        ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
+        ram_used: >-
+          {% if ansible_memavailable_mb is defined %}
+            {{ ansible_memtotal_mb - ansible_memavailable_mb }} MB
+          {% else %}
+            N/A
+          {% endif %}
+        uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
+        last_patch: >-
+          {% if ansible_os_family in ['Debian'] %}
+            {{ last_patch.stdout | default('N/A') }}
+          {% else %}
+            {{ last_patch_rpm.stdout | default('N/A') }}
+          {% endif %}
+
+  ########################################################
+  # DISK INFO
+  ########################################################
+
+  - name: Build disk info list with usage %
+    set_fact:
+      disk_info: "{{ disk_info | default([]) + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ ')' ] }}"
+    loop: "{{ ansible_mounts }}"
+    when:
+      - item.fstype not in ['tmpfs','devtmpfs','overlay']
+      - not item.mount.startswith('/run')
+
+  ########################################################
+  # USER FILTERING (UNIVERSAL LOGIN USERS)
+  ########################################################
+
+  - name: Read /etc/passwd
+    slurp:
+      src: /etc/passwd
+    register: passwd_file
+    changed_when: false
+
+  - name: Parse passwd entries
+    set_fact:
+      getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
+    loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
+
+  - name: Build valid local login users list
+    set_fact:
+      valid_users: >-
+        {{
+          getent_passwd
+          | dict2items
+          | selectattr('value.shell', 'defined')
+          | rejectattr('value.shell', 'in',
+              ['/usr/sbin/nologin','/sbin/nologin','/bin/false','/usr/bin/false'])
+          | map(attribute='key')
+          | reject('equalto','nobody')
+          | list
+        }}
+
+  ########################################################
+  # DETECT REAL SUDO USERS
+  ########################################################
+
+  - name: Remove root from sudo check (will add later)
+    set_fact:
+      valid_users: "{{ valid_users | difference(['root']) }}"
+
+  - name: Check which users actually have sudo privileges
+    shell: |
+      sudo -l -U {{ item }} 2>/dev/null | grep -q '(ALL)' && echo {{ item }} || echo ""
+    loop: "{{ valid_users }}"
+    register: sudo_check
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Build final sudo users list
+    set_fact:
+      final_users: >-
+        {{
+          (
+            sudo_check.results
+            | map(attribute='stdout')
+            | reject('equalto','')
+            | list
+          )
+          + ['root']
+        }}
+
+  ########################################################
+  # COLLECT USER DETAILS
+  ########################################################
+
+  - name: Collect sudo user details
+    shell: |
+      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' || echo "Never")
+      GROUPS=$(id -nG {{ item }})
+      PASSLAST=$(chage -l {{ item }} 2>/dev/null | grep "Last password change" || echo "N/A")
+      PASSMAX=$(chage -l {{ item }} 2>/dev/null | grep "Maximum" || echo "N/A")
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
+    loop: "{{ final_users }}"
+    register: user_output
+    changed_when: false
+    ignore_errors: yes
+
+  - name: Store user report data
+    set_fact:
+      report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
+
+  ########################################################
+  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+  ########################################################
+
+  - name: Remove old reports
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/{{ item }}"
+      state: absent
+    loop:
+      - system_report.txt
+      - system_report.csv
+      - enterprise_system_report.html
+
+  ########################################################
+  # GENERATE REPORTS
+  ########################################################
+
+  - name: Generate TXT report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      content: |
+        ================= FULL SYSTEM AUDIT REPORT =================
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        ------------------------------------------------------------
+        Host: {{ sys.host }}
+        OS: {{ sys.os }}
+        Kernel: {{ sys.kernel }}
+        CPU Cores: {{ sys.cpu }}
+        RAM Total: {{ sys.ram_total }}
+        RAM Used: {{ sys.ram_used }}
+        Uptime (days): {{ sys.uptime_days }}
+        Last Patch: {{ sys.last_patch }}
+
+        SUDO USERS:
+        {% for user in hostvars[host].final_users %}
+          User: {{ user }}
+        {% endfor %}
+
+        LOGIN HISTORY:
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        {% set last_login = cols[2].strip() %}
+        {% if last_login == "" or "Never" in last_login %}
+          {% set last_login = "Never" %}
+        {% endif %}
+        User {{ cols[1] }}: Last Login: {{ last_login }}
+        {% endfor %}
+
+        ============================================================
+
+        {% endfor %}
+
+  - name: Generate CSV report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      content: |
+        Host,OS,Kernel,CPU,RAM_Total,Uptime_days,Last_Patch
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.uptime_days }},{{ sys.last_patch }}
+        {% endfor %}
+
+  - name: Generate HTML report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      content: |
+        <html>
+        <head>
+        <title>Full System Audit Report</title>
+        <style>
+        table {border-collapse: collapse; width: 100%;}
+        th, td {border:1px solid black; padding:8px;}
+        th {background:#f2f2f2;}
+        </style>
+        </head>
+        <body>
+        <h2>Full System Audit Report</h2>
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        <h3>{{ sys.host }}</h3>
+        <ul>
+          <li>OS: {{ sys.os }}</li>
+          <li>Kernel: {{ sys.kernel }}</li>
+          <li>CPU Cores: {{ sys.cpu }}</li>
+          <li>RAM Total: {{ sys.ram_total }}</li>
+          <li>RAM Used: {{ sys.ram_used }}</li>
+          <li>Uptime (days): {{ sys.uptime_days }}</li>
+          <li>Last Patch: {{ sys.last_patch }}</li>
+        </ul>
+
+        <h4>Sudo Users</h4>
+        <ul>
+        {% for user in hostvars[host].final_users %}
+          <li>{{ user }}</li>
+        {% endfor %}
+        </ul>
+
+        <h4>Login History</h4>
+        <ul>
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        {% set last_login = cols[2].strip() %}
+        {% if last_login == "" or "Never" in last_login %}
+          {% set last_login = "Never" %}
+        {% endif %}
+        <li>User {{ cols[1] }}: Last Login: {{ last_login }}</li>
+        {% endfor %}
+        </ul>
+
+        <hr>
+        {% endfor %}
+        </body>
+        </html>
