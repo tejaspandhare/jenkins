@@ -1,5 +1,5 @@
 ---
-- name: Full System Report
+- name: Full System + Sudo User Enterprise Audit Report
   hosts: "{{ target_hosts.split(',') }}"
   gather_facts: yes
   become: yes
@@ -9,15 +9,30 @@
     final_users: []
     report_data: []
 
+  tasks:
+
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
 
-  tasks:
-
   - name: Get last patch date (Debian/Ubuntu)
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
     register: last_patch
+    changed_when: false
+
+  - name: Get last patch date (RHEL/SLES)
+    shell: "rpm -q --last 2>/dev/null | head -1 | awk '{print $1}' || echo 'N/A'"
+    when: ansible_os_family in ['RedHat', 'Suse']
+    register: last_patch_rpm
+    changed_when: false
+
+  - name: Set last patch universally
+    set_fact:
+      last_patch_final: "{{ last_patch_rpm.stdout if ansible_os_family in ['RedHat','Suse'] else last_patch.stdout | default('N/A') }}"
+
+  - name: Get full uname
+    shell: uname -a
+    register: uname_out
     changed_when: false
 
   - name: Set system info safely
@@ -36,7 +51,8 @@
             N/A
           {% endif %}
         uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
-        last_patch: "{{ last_patch.stdout | default('N/A') }}"
+        last_patch: "{{ last_patch_final }}"
+        uname: "{{ uname_out.stdout | default('N/A') }}"
 
   ########################################################
   # DISK INFO
@@ -51,7 +67,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (UNIVERSAL LOGIN USERS)
+  # USER FILTERING (LOCAL LOGIN USERS)
   ########################################################
 
   - name: Read /etc/passwd
@@ -83,7 +99,7 @@
         }}
 
   ########################################################
-  # DETECT REAL SUDO USERS (ALL DISTROS SAFE)
+  # DETECT REAL SUDO USERS
   ########################################################
 
   - name: Remove root from sudo check (will add later)
@@ -117,11 +133,9 @@
 
   - name: Collect sudo user details
     shell: |
-      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' || echo "N/A")
+      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; if($0=="**Never logged in**") print "Never"; else print $0}')
       GROUPS=$(id -nG {{ item }})
-      PASSLAST=$(chage -l {{ item }} 2>/dev/null | grep "Last password change" || echo "N/A")
-      PASSMAX=$(chage -l {{ item }} 2>/dev/null | grep "Maximum" || echo "N/A")
-      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
+      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
@@ -166,6 +180,7 @@
         Host: {{ sys.host }}
         OS: {{ sys.os }}
         Kernel: {{ sys.kernel }}
+        Uname: {{ sys.uname }}
         CPU Cores: {{ sys.cpu }}
         RAM Total: {{ sys.ram_total }}
         RAM Used: {{ sys.ram_used }}
@@ -173,14 +188,16 @@
         Last Patch: {{ sys.last_patch }}
 
         SUDO USERS:
-        {% if hostvars[host].final_users | length == 0 %}
-          No sudo users found
-        {% else %}
-          {% for line in hostvars[host].report_data | default([]) %}
-          {% set cols = line.split('|') %}
-          User: {{ cols[1] }}, Last Login: {{ cols[2] }}, Groups: {{ cols[3] }}
-          {% endfor %}
-        {% endif %}
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        User: {{ cols[1] }}
+        {% endfor %}
+
+        LOGIN HISTORY:
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        User {{ cols[1] }}: Last Login: {{ cols[2] }}
+        {% endfor %}
 
         ============================================================
 
@@ -193,10 +210,10 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
-        Host,OS,Kernel,CPU,RAM_Total,Uptime_days,Last_Patch
+        Host,OS,Kernel,Uname,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.uptime_days }},{{ sys.last_patch }}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.uname }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }}
         {% endfor %}
 
   - name: Generate HTML report
@@ -224,8 +241,10 @@
         <ul>
           <li>OS: {{ sys.os }}</li>
           <li>Kernel: {{ sys.kernel }}</li>
+          <li>Uname: {{ sys.uname }}</li>
           <li>CPU Cores: {{ sys.cpu }}</li>
           <li>RAM Total: {{ sys.ram_total }}</li>
+          <li>RAM Used: {{ sys.ram_used }}</li>
           <li>Uptime (days): {{ sys.uptime_days }}</li>
           <li>Last Patch: {{ sys.last_patch }}</li>
         </ul>
