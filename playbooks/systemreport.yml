@@ -173,6 +173,7 @@
         Host: {{ sys.host }}
         OS: {{ sys.os }}
         Kernel: {{ sys.kernel }}
+        Uname: {{ sys.uname }}
         CPU Cores: {{ sys.cpu }}
         RAM Total: {{ sys.ram_total }}
         RAM Used: {{ sys.ram_used }}
@@ -188,9 +189,90 @@
         LOGIN HISTORY:
         {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
+        {% if cols[2] != "Never" %}
         User {{ cols[1] }}: Last Login: {{ cols[2] }}
+        {% endif %}
         {% endfor %}
 
         ============================================================
 
         {% endfor %}
+
+  ########################################################
+  # GENERATE CSV REPORT
+  ########################################################
+
+  - name: Generate CSV report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      content: |
+        Host,OS,Kernel,Uname,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        {% set sudo_users = hostvars[host].report_data | map('split', '|') | map(attribute=1) | join(';') %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.uname }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }}
+        {% endfor %}
+
+  ########################################################
+  # GENERATE HTML REPORT
+  ########################################################
+
+  - name: Generate HTML report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      content: |
+        <html>
+        <head>
+        <title>Full System Audit Report</title>
+        <style>
+        table {border-collapse: collapse; width: 100%;}
+        th, td {border:1px solid black; padding:8px;}
+        th {background:#f2f2f2;}
+        </style>
+        </head>
+        <body>
+        <h2>Full System Audit Report</h2>
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        <h3>{{ sys.host }}</h3>
+        <ul>
+          <li>OS: {{ sys.os }}</li>
+          <li>Kernel: {{ sys.kernel }}</li>
+          <li>Uname: {{ sys.uname }}</li>
+          <li>CPU Cores: {{ sys.cpu }}</li>
+          <li>RAM Total: {{ sys.ram_total }}</li>
+          <li>RAM Used: {{ sys.ram_used }}</li>
+          <li>Uptime (days): {{ sys.uptime_days }}</li>
+          <li>Last Patch: {{ sys.last_patch }}</li>
+        </ul>
+
+        <h4>Sudo Users</h4>
+        <ul>
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        <li>{{ cols[1] }}</li>
+        {% endfor %}
+        </ul>
+
+        <h4>Login History</h4>
+        <ul>
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        {% if cols[2] != "Never" %}
+        <li>User {{ cols[1] }}: Last Login: {{ cols[2] }}</li>
+        {% endif %}
+        {% endfor %}
+        </ul>
+
+        <hr>
+        {% endfor %}
+
+        </body>
+        </html>
