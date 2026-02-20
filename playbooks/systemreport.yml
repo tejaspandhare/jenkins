@@ -30,11 +30,6 @@
     set_fact:
       last_patch_final: "{{ last_patch_rpm.stdout if ansible_os_family in ['RedHat','Suse'] else last_patch.stdout | default('N/A') }}"
 
-  - name: Get full uname
-    shell: uname -a
-    register: uname_out
-    changed_when: false
-
   - name: Get full kernel version
     shell: uname -rv
     register: kernel_full
@@ -46,7 +41,6 @@
         host: "{{ inventory_hostname }}"
         os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
         kernel: "{{ kernel_full.stdout | default(ansible_kernel) }}"
-        uname: "{{ uname_out.stdout | default('N/A') }}"
         machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
         ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
@@ -173,7 +167,6 @@
         Host: {{ sys.host }}
         OS: {{ sys.os }}
         Kernel: {{ sys.kernel }}
-        Uname: {{ sys.uname }}
         CPU Cores: {{ sys.cpu }}
         RAM Total: {{ sys.ram_total }}
         RAM Used: {{ sys.ram_used }}
@@ -191,6 +184,8 @@
         {% set cols = line.split('|') %}
         {% if cols[2] != "Never" %}
         User {{ cols[1] }}: Last Login: {{ cols[2] }}
+        {% else %}
+        User {{ cols[1] }}: Last Login: Never
         {% endif %}
         {% endfor %}
 
@@ -209,11 +204,11 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
-        Host,OS,Kernel,Uname,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
+        Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
         {% set sudo_users = hostvars[host].report_data | map('split', '|') | map(attribute=1) | join(';') %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.uname }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }}
         {% endfor %}
 
   ########################################################
@@ -245,7 +240,6 @@
         <ul>
           <li>OS: {{ sys.os }}</li>
           <li>Kernel: {{ sys.kernel }}</li>
-          <li>Uname: {{ sys.uname }}</li>
           <li>CPU Cores: {{ sys.cpu }}</li>
           <li>RAM Total: {{ sys.ram_total }}</li>
           <li>RAM Used: {{ sys.ram_used }}</li>
@@ -267,6 +261,8 @@
         {% set cols = line.split('|') %}
         {% if cols[2] != "Never" %}
         <li>User {{ cols[1] }}: Last Login: {{ cols[2] }}</li>
+        {% else %}
+        <li>User {{ cols[1] }}: Last Login: Never</li>
         {% endif %}
         {% endfor %}
         </ul>
