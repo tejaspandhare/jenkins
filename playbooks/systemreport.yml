@@ -9,11 +9,11 @@
     final_users: []
     report_data: []
 
+  tasks:
+
   ########################################################
   # SYSTEM INFORMATION
   ########################################################
-
-  tasks:
 
   - name: Get last patch date (Debian/Ubuntu)
     shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
@@ -51,7 +51,7 @@
       - not item.mount.startswith('/run')
 
   ########################################################
-  # USER FILTERING (UNIVERSAL LOGIN USERS)
+  # USER FILTERING
   ########################################################
 
   - name: Read /etc/passwd
@@ -83,7 +83,7 @@
         }}
 
   ########################################################
-  # DETECT REAL SUDO USERS (ALL DISTROS SAFE)
+  # DETECT SUDO USERS
   ########################################################
 
   - name: Remove root from sudo check (will add later)
@@ -132,7 +132,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+  # CLEAN OLD REPORTS
   ########################################################
 
   - name: Remove old reports
@@ -148,7 +148,7 @@
       - enterprise_system_report.html
 
   ########################################################
-  # GENERATE REPORTS
+  # GENERATE TXT REPORT
   ########################################################
 
   - name: Generate TXT report
@@ -173,18 +173,23 @@
         Last Patch: {{ sys.last_patch }}
 
         SUDO USERS:
-        {% if hostvars[host].final_users | length == 0 %}
-          No sudo users found
-        {% else %}
-          {% for line in hostvars[host].report_data | default([]) %}
+        {% for user in hostvars[host].final_users %}
+          - User: {{ user }}
+        {% endfor %}
+
+        LOGIN HISTORY:
+        {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
-          User: {{ cols[1] }}, Last Login: {{ cols[2] }}, Groups: {{ cols[3] }}
-          {% endfor %}
-        {% endif %}
+          - User {{ cols[1] }}: Last Login: {{ cols[2] | default('N/A') }}
+        {% endfor %}
 
         ============================================================
 
         {% endfor %}
+
+  ########################################################
+  # GENERATE CSV REPORT
+  ########################################################
 
   - name: Generate CSV report
     run_once: true
@@ -193,11 +198,17 @@
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
       content: |
-        Host,OS,Kernel,CPU,RAM_Total,Uptime_days,Last_Patch
+        Host,Sudo_Users,Login_History
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.uptime_days }},{{ sys.last_patch }}
+        {% set sudo_list = hostvars[host].final_users | join('; ') %}
+        {% set login_list = hostvars[host].report_data | map('split','|') | map('nth',1,2) | map('join',': Last Login: ') | join('; ') %}
+        {{ sys.host }},"{{ sudo_list }}","{{ login_list }}"
         {% endfor %}
+
+  ########################################################
+  # GENERATE HTML REPORT
+  ########################################################
 
   - name: Generate HTML report
     run_once: true
@@ -226,26 +237,25 @@
           <li>Kernel: {{ sys.kernel }}</li>
           <li>CPU Cores: {{ sys.cpu }}</li>
           <li>RAM Total: {{ sys.ram_total }}</li>
+          <li>RAM Used: {{ sys.ram_used }}</li>
           <li>Uptime (days): {{ sys.uptime_days }}</li>
           <li>Last Patch: {{ sys.last_patch }}</li>
         </ul>
 
-        <h4>Sudo Users</h4>
-        <table>
-        <tr>
-          <th>User</th>
-          <th>Last Login</th>
-          <th>Groups</th>
-        </tr>
-        {% for line in hostvars[host].report_data | default([]) %}
-        {% set cols = line.split('|') %}
-        <tr>
-          <td>{{ cols[1] }}</td>
-          <td>{{ cols[2] }}</td>
-          <td>{{ cols[3] }}</td>
-        </tr>
+        <h4>SUDO USERS</h4>
+        <ul>
+        {% for user in hostvars[host].final_users %}
+          <li>User: {{ user }}</li>
         {% endfor %}
-        </table>
+        </ul>
+
+        <h4>LOGIN HISTORY</h4>
+        <ul>
+        {% for line in hostvars[host].report_data | default([]) %}
+          {% set cols = line.split('|') %}
+          <li>User {{ cols[1] }}: Last Login: {{ cols[2] | default('N/A') }}</li>
+        {% endfor %}
+        </ul>
         <hr>
         {% endfor %}
         </body>
