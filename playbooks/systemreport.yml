@@ -91,7 +91,8 @@
       valid_users: "{{ valid_users | difference(['root']) }}"
 
   - name: Check which users actually have sudo privileges
-    shell: "sudo -l -U {{ item }} 2>/dev/null | grep -q '(ALL)' && echo {{ item }}"
+    shell: |
+      sudo -l -U {{ item }} 2>/dev/null | grep -q '(ALL)' && echo {{ item }} || echo ""
     loop: "{{ valid_users }}"
     register: sudo_check
     changed_when: false
@@ -116,10 +117,10 @@
 
   - name: Collect sudo user details
     shell: |
-      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
+      LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' || echo "N/A")
       GROUPS=$(id -nG {{ item }})
-      PASSLAST=$(chage -l {{ item }} 2>/dev/null | grep "Last password change")
-      PASSMAX=$(chage -l {{ item }} 2>/dev/null | grep "Maximum")
+      PASSLAST=$(chage -l {{ item }} 2>/dev/null | grep "Last password change" || echo "N/A")
+      PASSMAX=$(chage -l {{ item }} 2>/dev/null | grep "Maximum" || echo "N/A")
       echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|$PASSLAST|$PASSMAX"
     loop: "{{ final_users }}"
     register: user_output
