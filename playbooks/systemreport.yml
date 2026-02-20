@@ -1,6 +1,6 @@
 ---
 - name: Full System  Report
-  hosts: "{{ hosts.split(',') }}"
+  hosts: "{{ target_hosts.split(',') }}"
   gather_facts: yes
   become: yes
 
