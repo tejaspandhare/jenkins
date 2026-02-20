@@ -1,6 +1,6 @@
 ---
-- name: Full System + Sudo User Enterprise Audit Report
-  hosts: "{{ hosts.split(';') }}"
+- name: Full System  Report
+  hosts: "{{ hosts.split(',') }}"
   gather_facts: yes
   become: yes
 
