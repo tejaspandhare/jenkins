@@ -7,52 +7,70 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
+
     parameters {
-        string(
-            name: 'SERVER_NAME',
-            description: 'Target servers separated by comma (e.g. lb1,lb2)'
-        )
+        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
+        
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Repository') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Run Audit') {
+        stage('Run Enterprise Audit') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                    sh """
-                        ansible-playbook \
-                          -i inventory/hosts \
-                          playbooks/systemreport.yml \
-                          --private-key="\$ANSIBLE_KEY_FILE" \
-                          --limit "${params.SERVER_NAME}"
-                    """
+                    script {
+                        sh """
+                            echo "Running Ansible Audit on: ${params.SERVER_NAME}"
+                            
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                playbooks/auditreport1.yml \
+                                --private-key="\$ANSIBLE_KEY_FILE" \
+                                -e "hosts=${params.SERVER_NAME}" \
+                                
+                            RC=\$?
+                            echo "Ansible Exit Code: \$RC"
+
+                            # Treat 0 and 2 as success
+                            if [ \$RC -eq 0 ] || [ \$RC -eq 2 ]; then
+                                echo "Ansible completed successfully."
+                                exit 0
+                            else
+                                echo "Ansible failed."
+                                exit \$RC
+                            fi
+                        """
+                    }
                 }
             }
         }
 
-        stage('Verify Reports') {
+        stage('Verify Generated Reports') {
             steps {
                 sh '''
-                    echo "========== REPORT FILES =========="
-                    ls -lah reports/ || true
+                    echo "Listing generated reports:"
+                    ls -lah *.html *.txt *.csv || true
                 '''
             }
         }
 
-        stage('Publish HTML') {
+        stage('Publish HTML Report') {
             when {
-                expression { fileExists('reports/system_report.html') }
+                expression { fileExists('enterprise_security_audit.html') }
             }
             steps {
                 publishHTML(target: [
-                    reportDir: 'reports',
-                    reportFiles: 'system_report.html',
+                    reportDir: '.',
+                    reportFiles: 'enterprise_security_audit.html',
                     reportName: 'Enterprise Security Audit Report',
                     keepAll: true,
                     alwaysLinkToLastBuild: true,
@@ -63,8 +81,22 @@ pipeline {
     }
 
     post {
+
+        success {
+            echo "Build SUCCESS - Audit completed."
+        }
+
+        unstable {
+            echo "Build UNSTABLE - Check warnings."
+        }
+
+        failure {
+            echo "Build FAILED - Review logs."
+        }
+
         always {
-            archiveArtifacts artifacts: 'reports/*', allowEmptyArchive: true
+            echo "Archiving reports..."
+            archiveArtifacts artifacts: '*.html, *.txt, *.csv', allowEmptyArchive: true
         }
     }
 }
