@@ -12,12 +12,12 @@
   tasks:
 
   ########################################################
-  # VERSION CHECK (Helps Confirm Jenkins Uses Latest File)
+  # DEBUG VERSION CHECK
   ########################################################
 
-  - name: VERSION CHECK
+  - name: DEBUG PLAYBOOK VERSION
     debug:
-      msg: "AUDIT PLAYBOOK VERSION 3 - FIXED LASTLOG PARSING"
+      msg: "AUDIT PLAYBOOK VERSION 3 - FIXED LASTLOG"
 
   ########################################################
   # SYSTEM INFORMATION
@@ -109,7 +109,7 @@
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS (ROBUST LASTLOG PARSING)
+  # USER DETAILS (PATTERN-BASED LASTLOG PARSING)
   ########################################################
 
   - name: Collect sudo user details (pattern-based parsing)
@@ -174,3 +174,134 @@
         {% else %}
           HIGH
         {% endif %}
+
+  ########################################################
+  # CLEAN OLD REPORTS
+  ########################################################
+
+  - name: Remove old TXT report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      state: absent
+
+  - name: Remove old CSV report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      state: absent
+
+  - name: Remove old HTML report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      state: absent
+
+  ########################################################
+  # GENERATE TXT REPORT
+  ########################################################
+
+  - name: Generate TXT report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
+      content: |
+        ================= FULL SYSTEM AUDIT REPORT =================
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        ------------------------------------------------------------
+        Host: {{ sys.host }}
+        OS: {{ sys.os }}
+        Kernel: {{ sys.kernel }}
+        CPU Cores: {{ sys.cpu }}
+        RAM Total: {{ sys.ram_total }}
+        RAM Used: {{ sys.ram_used }}
+        Uptime (days): {{ sys.uptime_days }}
+        Last Patch: {{ sys.last_patch }}
+        Security Score: {{ hostvars[host].security_score }}/100 ({{ hostvars[host].risk_rating }})
+
+        SUDO USERS:
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        User: {{ cols[1] }} (Last Login: {{ cols[2] }})
+        {% endfor %}
+
+        ============================================================
+
+        {% endfor %}
+
+  ########################################################
+  # GENERATE CSV REPORT
+  ########################################################
+
+  - name: Generate CSV report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.csv"
+      content: |
+        Host,OS,Kernel,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch,Sudo_Users,Security_Score,Risk
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        {% set sudo_users = hostvars[host].report_data | map('split','|') | map(attribute=1) | join(';') %}
+        {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }},{{ sudo_users }},{{ hostvars[host].security_score }},{{ hostvars[host].risk_rating }}
+        {% endfor %}
+
+  ########################################################
+  # GENERATE HTML REPORT
+  ########################################################
+
+  - name: Generate HTML report
+    run_once: true
+    delegate_to: localhost
+    become: false
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      content: |
+        <html>
+        <head>
+        <title>Enterprise System Audit Report</title>
+        <style>
+        table {border-collapse: collapse; width:100%;}
+        th, td {border:1px solid black; padding:6px;}
+        th {background:#f2f2f2;}
+        </style>
+        </head>
+        <body>
+        <h2>Enterprise System Audit Report</h2>
+
+        {% for host in ansible_play_hosts %}
+        {% set sys = hostvars[host].system_info %}
+        <h3>{{ sys.host }}</h3>
+        <ul>
+          <li>OS: {{ sys.os }}</li>
+          <li>Kernel: {{ sys.kernel }}</li>
+          <li>CPU: {{ sys.cpu }}</li>
+          <li>RAM Total: {{ sys.ram_total }}</li>
+          <li>RAM Used: {{ sys.ram_used }}</li>
+          <li>Uptime (days): {{ sys.uptime_days }}</li>
+          <li>Last Patch: {{ sys.last_patch }}</li>
+          <li>Security Score: {{ hostvars[host].security_score }}/100 ({{ hostvars[host].risk_rating }})</li>
+        </ul>
+
+        <h4>Sudo Users</h4>
+        <ul>
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        <li>{{ cols[1] }} (Last Login: {{ cols[2] }})</li>
+        {% endfor %}
+        </ul>
+        <hr>
+        {% endfor %}
+        </body>
+        </html>
