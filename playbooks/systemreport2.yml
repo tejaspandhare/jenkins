@@ -115,7 +115,7 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # DISK & SECURITY CHECKS
+  # SECURITY CHECKS
   ########################################################
 
   - name: Get disk usage
@@ -149,27 +149,23 @@
         }}
 
   ########################################################
-  # CLEAN OLD REPORTS
+  # LOCAL REPORT GENERATION (NO SUDO ON JENKINS)
   ########################################################
 
   - name: Remove old reports
     run_once: true
     delegate_to: localhost
+    become: false
     file:
       path: "{{ lookup('env','WORKSPACE') }}/{{ item }}"
       state: absent
     loop:
-      - system_report.txt
-      - system_report.csv
       - enterprise_system_report.html
-
-  ########################################################
-  # GENERATE HTML REPORT
-  ########################################################
 
   - name: Generate HTML report
     run_once: true
     delegate_to: localhost
+    become: false
     copy:
       dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       content: |
