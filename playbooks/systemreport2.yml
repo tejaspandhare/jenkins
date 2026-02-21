@@ -1,5 +1,5 @@
 ---
-- name: Full Enterprise + Security Audit Report
+- name: Full System + Sudo User Enterprise Audit Report
   hosts: "{{ target_hosts.split(',') }}"
   gather_facts: yes
   become: yes
@@ -35,7 +35,13 @@
     register: kernel_full
     changed_when: false
 
-  - name: Set system info
+  # 🔥 Reliable RAM Used (works on all Linux)
+  - name: Get used RAM safely
+    shell: free -m | awk '/Mem:/ {print $3}'
+    register: ram_used_cmd
+    changed_when: false
+
+  - name: Set system info safely
     set_fact:
       system_info:
         host: "{{ inventory_hostname }}"
@@ -43,19 +49,12 @@
         kernel: "{{ kernel_full.stdout | default(ansible_kernel) }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
         ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
-        ram_used: >-
-          {% if ansible_memavailable_mb is defined %}
-            {{ (ansible_memtotal_mb | int - ansible_memavailable_mb | int) }} MB
-          {% elif ansible_memory_mb is defined and ansible_memory_mb.real is defined %}
-            {{ ansible_memory_mb.real.used }} MB
-          {% else %}
-            N/A
-          {% endif %}
+        ram_used: "{{ ram_used_cmd.stdout }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | int // 86400) }}"
         last_patch: "{{ last_patch_final }}"
 
   ########################################################
-  # USER ENUMERATION
+  # USER FILTERING
   ########################################################
 
   - name: Read /etc/passwd
@@ -69,7 +68,7 @@
       getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
     loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
 
-  - name: Build valid login users
+  - name: Build valid local login users list
     set_fact:
       valid_users: >-
         {{
@@ -98,17 +97,22 @@
     changed_when: false
     ignore_errors: yes
 
-  - name: Build final sudo list
+  - name: Build final sudo users list
     set_fact:
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS (FIXED LAST LOGIN)
+  # USER DETAILS (FIXED LOGIN PARSING)
   ########################################################
 
   - name: Collect sudo user details
     shell: |
-      LASTLOGIN=$(lastlog -u {{ item }} | sed -n '2p' | awk '{if ($0 ~ /Never/) print "Never"; else {for (i=4;i<=NF;i++) printf $i " "; print ""}}')
+      LOGIN_LINE=$(lastlog -u {{ item }} | tail -1)
+      if echo "$LOGIN_LINE" | grep -q "Never"; then
+        LASTLOGIN="Never"
+      else
+        LASTLOGIN=$(echo "$LOGIN_LINE" | cut -c 38-)
+      fi
       GROUPS=$(id -nG {{ item }})
       echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
     loop: "{{ final_users }}"
@@ -121,103 +125,54 @@
       report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
 
   ########################################################
-  # SECURITY CHECKS
+  # CLEAN OLD REPORTS (JENKINS SAFE)
   ########################################################
 
-  - name: Get disk usage
-    shell: df -hT --exclude-type=tmpfs --exclude-type=devtmpfs
-    register: disk_usage
-    changed_when: false
-
-  - name: Check SSH root login
-    shell: grep -Ei '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo "Not Set"
-    register: ssh_root
-    changed_when: false
-
-  - name: Scan world writable files
-    shell: find / -xdev -type f -perm -0002 2>/dev/null | wc -l
-    register: world_writable_count
-    changed_when: false
-
-  - name: Scan SUID/SGID files
-    shell: find / -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | wc -l
-    register: suid_count
-    changed_when: false
-
-  - name: Calculate security score
-    set_fact:
-      security_score: >-
-        {{
-          100
-          - (10 if ssh_root.stdout is search("yes") else 0)
-          - (10 if world_writable_count.stdout|int > 20 else 0)
-          - (10 if suid_count.stdout|int > 50 else 0)
-        }}
-
-  ########################################################
-  # LOCAL REPORT GENERATION (JENKINS SAFE)
-  ########################################################
-
-  - name: Remove old report
+  - name: Remove old reports
     run_once: true
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       state: absent
 
-  - name: Generate HTML report
+  ########################################################
+  # GENERATE TXT REPORT
+  ########################################################
+
+  - name: Generate TXT report
     run_once: true
     delegate_to: localhost
     become: false
     copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
+      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
       content: |
-        <html>
-        <head>
-        <title>Enterprise System Audit</title>
-        <style>
-        body {font-family: Arial;}
-        table {border-collapse: collapse; width:100%;}
-        th, td {border:1px solid black; padding:6px;}
-        th {background:#f2f2f2;}
-        </style>
-        </head>
-        <body>
-        <h2>Enterprise System Audit Report</h2>
+        ================= FULL SYSTEM AUDIT REPORT =================
 
         {% for host in ansible_play_hosts %}
         {% set sys = hostvars[host].system_info %}
-        <h3>{{ sys.host }}</h3>
-        <ul>
-          <li>OS: {{ sys.os }}</li>
-          <li>Kernel: {{ sys.kernel }}</li>
-          <li>CPU: {{ sys.cpu }}</li>
-          <li>RAM Total: {{ sys.ram_total }}</li>
-          <li>RAM Used: {{ sys.ram_used }}</li>
-          <li>Uptime (days): {{ sys.uptime_days }}</li>
-          <li>Last Patch: {{ sys.last_patch }}</li>
-        </ul>
+        ------------------------------------------------------------
+        Host: {{ sys.host }}
+        OS: {{ sys.os }}
+        Kernel: {{ sys.kernel }}
+        CPU Cores: {{ sys.cpu }}
+        RAM Total: {{ sys.ram_total }}
+        RAM Used: {{ sys.ram_used }}
+        Uptime (days): {{ sys.uptime_days }}
+        Last Patch: {{ sys.last_patch }}
 
-        <h4>Security Overview</h4>
-        <ul>
-          <li>SSH Root Login: {{ hostvars[host].ssh_root.stdout }}</li>
-          <li>World Writable Files: {{ hostvars[host].world_writable_count.stdout }}</li>
-          <li>SUID/SGID Files: {{ hostvars[host].suid_count.stdout }}</li>
-          <li><b>Security Score: {{ hostvars[host].security_score }}/100</b></li>
-        </ul>
-
-        <h4>Sudo Users</h4>
-        <ul>
-        {% for line in hostvars[host].report_data %}
+        SUDO USERS:
+        {% for line in hostvars[host].report_data | default([]) %}
         {% set cols = line.split('|') %}
-        <li>{{ cols[1] }} (Last Login: {{ cols[2] }})</li>
+        User: {{ cols[1] }}
         {% endfor %}
-        </ul>
 
-        <h4>Disk Usage</h4>
-        <pre>{{ hostvars[host].disk_usage.stdout }}</pre>
-        <hr>
+        LOGIN HISTORY:
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+        User {{ cols[1] }}: Last Login: {{ cols[2] }}
         {% endfor %}
-        </body>
-        </html>
+
+        ============================================================
+
+        {% endfor %}
