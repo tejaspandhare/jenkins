@@ -1,178 +1,32 @@
----
-- name: Full System + Sudo User Enterprise Audit Report
-  hosts: "{{ target_hosts.split(',') }}"
-  gather_facts: yes
-  become: yes
+########################################################
+# USER DETAILS (FIXED LAST LOGIN - ISO FORMAT)
+########################################################
 
-  vars:
-    valid_users: []
-    final_users: []
-    report_data: []
+- name: Collect sudo user details (fixed last login ISO format)
+  shell: |
+    # Get last login line for the user
+    LOGIN_LINE=$(lastlog -u {{ item }} | tail -1)
 
-  tasks:
+    # Parse last login
+    if echo "$LOGIN_LINE" | grep -q "\*\*Never"; then
+      LASTLOGIN="Never"
+    else
+      # Extract date and time columns from lastlog and convert to ISO format
+      RAW_DATE=$(echo "$LOGIN_LINE" | awk '{for(i=4;i<=NF;i++) printf $i" "; print ""}')
+      # Convert to YYYY-MM-DD HH:MM:SS using date command
+      LASTLOGIN=$(date -d "$RAW_DATE" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$RAW_DATE")
+    fi
 
-  ########################################################
-  # SYSTEM INFORMATION
-  ########################################################
+    # Get groups
+    GROUPS=$(id -nG {{ item }})
 
-  - name: Get last patch date (Debian/Ubuntu)
-    shell: "stat -c %y /var/lib/dpkg/status 2>/dev/null | awk '{print $1}' || echo 'N/A'"
-    register: last_patch
-    changed_when: false
+    # Output in inventory_host|user|lastlogin|groups format
+    echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
+  loop: "{{ final_users }}"
+  register: user_output
+  changed_when: false
+  ignore_errors: yes
 
-  - name: Get last patch date (RHEL/SLES)
-    shell: "rpm -q --last 2>/dev/null | head -1 | awk '{print $1}' || echo 'N/A'"
-    when: ansible_os_family in ['RedHat', 'Suse']
-    register: last_patch_rpm
-    changed_when: false
-
-  - name: Set last patch universally
-    set_fact:
-      last_patch_final: "{{ last_patch_rpm.stdout if ansible_os_family in ['RedHat','Suse'] else last_patch.stdout | default('N/A') }}"
-
-  - name: Get full kernel version
-    shell: uname -rv
-    register: kernel_full
-    changed_when: false
-
-  # 🔥 Reliable RAM Used (works on all Linux)
-  - name: Get used RAM safely
-    shell: free -m | awk '/Mem:/ {print $3}'
-    register: ram_used_cmd
-    changed_when: false
-
-  - name: Set system info safely
-    set_fact:
-      system_info:
-        host: "{{ inventory_hostname }}"
-        os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-        kernel: "{{ kernel_full.stdout | default(ansible_kernel) }}"
-        cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
-        ram_used: "{{ ram_used_cmd.stdout }} MB"
-        uptime_days: "{{ (ansible_uptime_seconds | int // 86400) }}"
-        last_patch: "{{ last_patch_final }}"
-
-  ########################################################
-  # USER FILTERING
-  ########################################################
-
-  - name: Read /etc/passwd
-    slurp:
-      src: /etc/passwd
-    register: passwd_file
-    changed_when: false
-
-  - name: Parse passwd entries
-    set_fact:
-      getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
-    loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
-
-  - name: Build valid local login users list
-    set_fact:
-      valid_users: >-
-        {{
-          getent_passwd
-          | dict2items
-          | selectattr('value.shell','defined')
-          | rejectattr('value.shell','in',['/usr/sbin/nologin','/sbin/nologin','/bin/false','/usr/bin/false'])
-          | map(attribute='key')
-          | reject('equalto','nobody')
-          | list
-        }}
-
-  - name: Remove root from sudo check
-    set_fact:
-      valid_users: "{{ valid_users | difference(['root']) }}"
-
-  ########################################################
-  # SUDO DETECTION
-  ########################################################
-
-  - name: Detect real sudo users
-    shell: |
-      sudo -l -U {{ item }} 2>/dev/null | grep -q 'ALL' && echo {{ item }} || echo ""
-    loop: "{{ valid_users }}"
-    register: sudo_check
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Build final sudo users list
-    set_fact:
-      final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
-
-  ########################################################
-  # USER DETAILS (FIXED LOGIN PARSING)
-  ########################################################
-
-  - name: Collect sudo user details
-    shell: |
-      LOGIN_LINE=$(lastlog -u {{ item }} | tail -1)
-      if echo "$LOGIN_LINE" | grep -q "Never"; then
-        LASTLOGIN="Never"
-      else
-        LASTLOGIN=$(echo "$LOGIN_LINE" | cut -c 38-)
-      fi
-      GROUPS=$(id -nG {{ item }})
-      echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
-    loop: "{{ final_users }}"
-    register: user_output
-    changed_when: false
-    ignore_errors: yes
-
-  - name: Store user report data
-    set_fact:
-      report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
-
-  ########################################################
-  # CLEAN OLD REPORTS (JENKINS SAFE)
-  ########################################################
-
-  - name: Remove old reports
-    run_once: true
-    delegate_to: localhost
-    become: false
-    file:
-      path: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
-      state: absent
-
-  ########################################################
-  # GENERATE TXT REPORT
-  ########################################################
-
-  - name: Generate TXT report
-    run_once: true
-    delegate_to: localhost
-    become: false
-    copy:
-      dest: "{{ lookup('env','WORKSPACE') }}/system_report.txt"
-      content: |
-        ================= FULL SYSTEM AUDIT REPORT =================
-
-        {% for host in ansible_play_hosts %}
-        {% set sys = hostvars[host].system_info %}
-        ------------------------------------------------------------
-        Host: {{ sys.host }}
-        OS: {{ sys.os }}
-        Kernel: {{ sys.kernel }}
-        CPU Cores: {{ sys.cpu }}
-        RAM Total: {{ sys.ram_total }}
-        RAM Used: {{ sys.ram_used }}
-        Uptime (days): {{ sys.uptime_days }}
-        Last Patch: {{ sys.last_patch }}
-
-        SUDO USERS:
-        {% for line in hostvars[host].report_data | default([]) %}
-        {% set cols = line.split('|') %}
-        User: {{ cols[1] }}
-        {% endfor %}
-
-        LOGIN HISTORY:
-        {% for line in hostvars[host].report_data | default([]) %}
-        {% set cols = line.split('|') %}
-        User {{ cols[1] }}: Last Login: {{ cols[2] }}
-        {% endfor %}
-
-        ============================================================
-
-        {% endfor %}
+- name: Store user report data
+  set_fact:
+    report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
