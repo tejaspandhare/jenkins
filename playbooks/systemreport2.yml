@@ -12,6 +12,14 @@
   tasks:
 
   ########################################################
+  # VERSION CHECK (Helps Confirm Jenkins Uses Latest File)
+  ########################################################
+
+  - name: VERSION CHECK
+    debug:
+      msg: "AUDIT PLAYBOOK VERSION 3 - FIXED LASTLOG PARSING"
+
+  ########################################################
   # SYSTEM INFORMATION
   ########################################################
 
@@ -101,7 +109,7 @@
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS (PATTERN-BASED LASTLOG PARSING)
+  # USER DETAILS (ROBUST LASTLOG PARSING)
   ########################################################
 
   - name: Collect sudo user details (pattern-based parsing)
@@ -111,7 +119,6 @@
       if echo "$LOGIN_LINE" | grep -qi "Never"; then
         LASTLOGIN="Never"
       else
-        # Extract starting from weekday (Mon, Tue, Wed...)
         RAW_DATE=$(echo "$LOGIN_LINE" | grep -oE "(Mon|Tue|Wed|Thu|Fri|Sat|Sun).*")
         LASTLOGIN=$(date -d "$RAW_DATE" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$RAW_DATE")
       fi
