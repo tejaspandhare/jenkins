@@ -41,10 +41,16 @@
         host: "{{ inventory_hostname }}"
         os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
         kernel: "{{ kernel_full.stdout | default(ansible_kernel) }}"
-        machine_type: "{{ ansible_virtualization_type | default('physical') }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
-        ram_total: "{{ ansible_memory_mb.real.total | default('N/A') }} MB"
-        ram_used: "{{ ansible_memory_mb.real.used | default('N/A') }} MB"
+        ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
+        ram_used: >-
+          {% if ansible_memavailable_mb is defined %}
+            {{ (ansible_memtotal_mb | int - ansible_memavailable_mb | int) }} MB
+          {% elif ansible_memory_mb is defined and ansible_memory_mb.real is defined %}
+            {{ ansible_memory_mb.real.used }} MB
+          {% else %}
+            N/A
+          {% endif %}
         uptime_days: "{{ (ansible_uptime_seconds | int // 86400) }}"
         last_patch: "{{ last_patch_final }}"
 
@@ -97,12 +103,12 @@
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS
+  # USER DETAILS (FIXED LAST LOGIN)
   ########################################################
 
   - name: Collect sudo user details
     shell: |
-      LASTLOGIN=$(lastlog -u {{ item }} | awk 'NR==2 {if ($0 ~ /Never/) print "Never"; else { $1=""; sub(/^ +/, ""); print }}')
+      LASTLOGIN=$(lastlog -u {{ item }} | sed -n '2p' | awk '{if ($0 ~ /Never/) print "Never"; else {for (i=4;i<=NF;i++) printf $i " "; print ""}}')
       GROUPS=$(id -nG {{ item }})
       echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS"
     loop: "{{ final_users }}"
@@ -149,18 +155,16 @@
         }}
 
   ########################################################
-  # LOCAL REPORT GENERATION (NO SUDO ON JENKINS)
+  # LOCAL REPORT GENERATION (JENKINS SAFE)
   ########################################################
 
-  - name: Remove old reports
+  - name: Remove old report
     run_once: true
     delegate_to: localhost
     become: false
     file:
-      path: "{{ lookup('env','WORKSPACE') }}/{{ item }}"
+      path: "{{ lookup('env','WORKSPACE') }}/enterprise_system_report.html"
       state: absent
-    loop:
-      - enterprise_system_report.html
 
   - name: Generate HTML report
     run_once: true
