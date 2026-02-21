@@ -101,18 +101,18 @@
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS (ROBUST lastlog PARSING)
+  # USER DETAILS (PATTERN-BASED LASTLOG PARSING)
   ########################################################
 
-  - name: Collect sudo user details (robust lastlog parsing)
+  - name: Collect sudo user details (pattern-based parsing)
     shell: |
       LOGIN_LINE=$(lastlog -u {{ item }} | tail -1)
 
       if echo "$LOGIN_LINE" | grep -qi "Never"; then
         LASTLOGIN="Never"
       else
-        # Remove first 4 fields dynamically
-        RAW_DATE=$(echo "$LOGIN_LINE" | awk '{$1=$2=$3=$4=""; sub(/^ +/,""); print}')
+        # Extract starting from weekday (Mon, Tue, Wed...)
+        RAW_DATE=$(echo "$LOGIN_LINE" | grep -oE "(Mon|Tue|Wed|Thu|Fri|Sat|Sun).*")
         LASTLOGIN=$(date -d "$RAW_DATE" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$RAW_DATE")
       fi
 
