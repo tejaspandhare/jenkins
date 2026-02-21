@@ -101,16 +101,17 @@
       final_users: "{{ (sudo_check.results | map(attribute='stdout') | reject('equalto','') | list) + ['root'] }}"
 
   ########################################################
-  # USER DETAILS (FIXED LAST LOGIN - ISO FORMAT)
+  # USER DETAILS (FIXED lastlog parsing)
   ########################################################
 
-  - name: Collect sudo user details (fixed last login ISO format)
+  - name: Collect sudo user details (fixed lastlog parsing)
     shell: |
       LOGIN_LINE=$(lastlog -u {{ item }} | tail -1)
 
-      if echo "$LOGIN_LINE" | grep -q "\*\*Never"; then
+      if echo "$LOGIN_LINE" | grep -qi "Never"; then
         LASTLOGIN="Never"
       else
+        # Extract date starting from 4th column onward
         RAW_DATE=$(echo "$LOGIN_LINE" | awk '{for(i=4;i<=NF;i++) printf $i" "; print ""}')
         LASTLOGIN=$(date -d "$RAW_DATE" +"%Y-%m-%d %H:%M:%S" 2>/dev/null || echo "$RAW_DATE")
       fi
