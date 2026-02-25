@@ -46,7 +46,7 @@ pipeline {
 
                             ansible-playbook \
                                 -i inventory/hosts \
-                                playbooks/systemreport1.yml \
+                                playbooks/systemreport2.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
                                 -e "target_hosts=${params.SERVER_NAME}"
 
