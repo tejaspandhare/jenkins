@@ -1,5 +1,5 @@
 ---
-- name: Full Enterprise System Audit (v4 Hardened)
+- name: Full Enterprise System Audit (v4.1 Stable)
   hosts: "{{ target_hosts.split(',') }}"
   gather_facts: yes
   become: yes
@@ -17,10 +17,19 @@
 
   - name: DEBUG PLAYBOOK VERSION
     debug:
-      msg: "AUDIT PLAYBOOK VERSION 4 - CI SAFE"
+      msg: "AUDIT PLAYBOOK VERSION 4.1 - EVALUATION SAFE"
 
   ########################################################
-  # PATCH STATUS - DEBIAN / UBUNTU
+  # GET RUNNING KERNEL (UNIVERSAL)
+  ########################################################
+
+  - name: Get running kernel
+    command: uname -r
+    register: running_kernel
+    changed_when: false
+
+  ########################################################
+  # PATCH STATUS - DEBIAN
   ########################################################
 
   - name: Get last apt upgrade date
@@ -78,45 +87,53 @@
     failed_when: false
 
   ########################################################
-  # UNIVERSAL PATCH FACTS
+  # SET PATCH BASE FACTS (SAFE)
   ########################################################
 
-  - name: Get running kernel
-    command: uname -r
-    register: running_kernel
-    changed_when: false
-
-  - name: Set unified patch facts
+  - name: Set patch base facts
     set_fact:
       last_patch_final: >-
         {{
           (last_patch_deb.stdout if ansible_os_family == "Debian"
-          else last_patch_rpm.stdout) | default("N/A")
+          else last_patch_rpm.stdout | default("N/A"))
         }}
       pending_update_count: >-
         {{
           (pending_updates_deb.stdout if ansible_os_family == "Debian"
-          else pending_updates_rpm.stdout) | default("0")
+          else pending_updates_rpm.stdout | default("0"))
         }}
       reboot_required: >-
         {{
           (reboot_required_deb.stat.exists if ansible_os_family == "Debian"
           else false) | default(false)
         }}
+
+  ########################################################
+  # SET LATEST KERNEL SAFELY
+  ########################################################
+
+  - name: Set latest kernel safely
+    set_fact:
       latest_kernel: >-
         {{
           (latest_kernel_deb.stdout if ansible_os_family == "Debian"
           else running_kernel.stdout) | default(running_kernel.stdout)
         }}
-      kernel_mismatch: "{{ running_kernel.stdout != latest_kernel }}"
+
+  ########################################################
+  # CALCULATE KERNEL MISMATCH (SEPARATE TASK)
+  ########################################################
+
+  - name: Calculate kernel mismatch
+    set_fact:
+      kernel_mismatch: "{{ running_kernel.stdout | default('') != latest_kernel | default('') }}"
 
   ########################################################
   # SYSTEM INFO
   ########################################################
 
   - name: Get used RAM
-    shell: |
-      free -m | awk '/Mem:/ {print $3}'
+    shell: free -m | awk '/Mem:/ {print $3}'
     register: ram_used_cmd
     changed_when: false
 
@@ -132,12 +149,12 @@
         ram_total: "{{ ansible_memtotal_mb }} MB"
         ram_used: "{{ ram_used_cmd.stdout | default('N/A') }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | int // 86400) }}"
-        last_patch: "{{ last_patch_final }}"
-        pending_updates: "{{ pending_update_count }}"
-        reboot_required: "{{ reboot_required }}"
+        last_patch: "{{ last_patch_final | default('N/A') }}"
+        pending_updates: "{{ pending_update_count | default('0') }}"
+        reboot_required: "{{ reboot_required | default(false) }}"
 
   ########################################################
-  # USER ENUMERATION (FIXED YAML SAFE)
+  # USER ENUMERATION
   ########################################################
 
   - name: Get local login users
@@ -186,20 +203,17 @@
   ########################################################
 
   - name: Check SSH root login
-    shell: |
-      grep -Ei '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo "Not Set"
+    shell: grep -Ei '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo "Not Set"
     register: ssh_root
     changed_when: false
 
   - name: Count world writable files
-    shell: |
-      find / -xdev -type f -perm -0002 2>/dev/null | wc -l
+    shell: find / -xdev -type f -perm -0002 2>/dev/null | wc -l
     register: world_writable_count
     changed_when: false
 
   - name: Count SUID/SGID files
-    shell: |
-      find / -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | wc -l
+    shell: find / -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | wc -l
     register: suid_count
     changed_when: false
 
