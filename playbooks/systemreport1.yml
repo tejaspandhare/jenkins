@@ -17,7 +17,7 @@
 
   - name: DEBUG PLAYBOOK VERSION
     debug:
-      msg: "AUDIT PLAYBOOK VERSION 4 - ENTERPRISE PATCH LOGIC"
+      msg: "AUDIT PLAYBOOK VERSION 4 - CI SAFE"
 
   ########################################################
   # PATCH STATUS - DEBIAN / UBUNTU
@@ -29,12 +29,15 @@
     when: ansible_os_family == "Debian"
     register: last_patch_deb
     changed_when: false
+    failed_when: false
 
   - name: Count pending upgrades (Debian)
-    shell: apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
+    shell: |
+      apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
     when: ansible_os_family == "Debian"
     register: pending_updates_deb
     changed_when: false
+    failed_when: false
 
   - name: Check reboot required (Debian)
     stat:
@@ -48,16 +51,19 @@
     when: ansible_os_family == "Debian"
     register: latest_kernel_deb
     changed_when: false
+    failed_when: false
 
   ########################################################
   # PATCH STATUS - RHEL / SUSE
   ########################################################
 
   - name: Get last RPM package install date
-    shell: rpm -q --last | head -1
+    shell: |
+      rpm -q --last | head -1
     when: ansible_os_family in ['RedHat','Suse']
     register: last_patch_rpm
     changed_when: false
+    failed_when: false
 
   - name: Count pending updates (RHEL/SUSE)
     shell: |
@@ -84,23 +90,23 @@
     set_fact:
       last_patch_final: >-
         {{
-          last_patch_deb.stdout if ansible_os_family == "Debian"
-          else last_patch_rpm.stdout | default("N/A")
+          (last_patch_deb.stdout if ansible_os_family == "Debian"
+          else last_patch_rpm.stdout) | default("N/A")
         }}
       pending_update_count: >-
         {{
-          pending_updates_deb.stdout if ansible_os_family == "Debian"
-          else pending_updates_rpm.stdout | default("0")
+          (pending_updates_deb.stdout if ansible_os_family == "Debian"
+          else pending_updates_rpm.stdout) | default("0")
         }}
       reboot_required: >-
         {{
-          reboot_required_deb.stat.exists if ansible_os_family == "Debian"
-          else false
+          (reboot_required_deb.stat.exists if ansible_os_family == "Debian"
+          else false) | default(false)
         }}
       latest_kernel: >-
         {{
-          latest_kernel_deb.stdout if ansible_os_family == "Debian"
-          else running_kernel.stdout
+          (latest_kernel_deb.stdout if ansible_os_family == "Debian"
+          else running_kernel.stdout) | default(running_kernel.stdout)
         }}
       kernel_mismatch: "{{ running_kernel.stdout != latest_kernel }}"
 
@@ -109,7 +115,8 @@
   ########################################################
 
   - name: Get used RAM
-    shell: free -m | awk '/Mem:/ {print $3}'
+    shell: |
+      free -m | awk '/Mem:/ {print $3}'
     register: ram_used_cmd
     changed_when: false
 
@@ -123,24 +130,26 @@
         kernel_mismatch: "{{ kernel_mismatch }}"
         cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
         ram_total: "{{ ansible_memtotal_mb }} MB"
-        ram_used: "{{ ram_used_cmd.stdout }} MB"
+        ram_used: "{{ ram_used_cmd.stdout | default('N/A') }} MB"
         uptime_days: "{{ (ansible_uptime_seconds | int // 86400) }}"
         last_patch: "{{ last_patch_final }}"
         pending_updates: "{{ pending_update_count }}"
         reboot_required: "{{ reboot_required }}"
 
   ########################################################
-  # USER ENUMERATION
+  # USER ENUMERATION (FIXED YAML SAFE)
   ########################################################
 
   - name: Get local login users
-    command: awk -F: '$3 >= 1000 && $7 !~ /(nologin|false)/ {print $1}' /etc/passwd
+    shell: |
+      awk -F: '$3 >= 1000 && $7 !~ /(nologin|false)/ {print $1}' /etc/passwd
     register: valid_users_cmd
     changed_when: false
+    failed_when: false
 
   - name: Set valid users
     set_fact:
-      valid_users: "{{ valid_users_cmd.stdout_lines | difference(['nobody']) }}"
+      valid_users: "{{ valid_users_cmd.stdout_lines | default([]) | difference(['nobody']) }}"
 
   - name: Detect sudo users
     shell: |
@@ -166,6 +175,7 @@
     loop: "{{ final_users }}"
     register: user_output
     changed_when: false
+    failed_when: false
 
   - name: Store user report data
     set_fact:
@@ -176,17 +186,20 @@
   ########################################################
 
   - name: Check SSH root login
-    shell: grep -Ei '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo "Not Set"
+    shell: |
+      grep -Ei '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo "Not Set"
     register: ssh_root
     changed_when: false
 
   - name: Count world writable files
-    shell: find / -xdev -type f -perm -0002 2>/dev/null | wc -l
+    shell: |
+      find / -xdev -type f -perm -0002 2>/dev/null | wc -l
     register: world_writable_count
     changed_when: false
 
   - name: Count SUID/SGID files
-    shell: find / -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | wc -l
+    shell: |
+      find / -xdev -type f \( -perm -4000 -o -perm -2000 \) 2>/dev/null | wc -l
     register: suid_count
     changed_when: false
 
