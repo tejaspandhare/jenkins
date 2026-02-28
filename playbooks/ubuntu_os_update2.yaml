@@ -1,5 +1,5 @@
 ---
-- name: Perform Maintenance Tasks
+- name: Perform OS Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
@@ -10,101 +10,131 @@
 
   tasks:
 
-    #################################################################
-    # Remove Disabled Snaps
-    #################################################################
+  #####################################################################
+  # OS Detection
+  #####################################################################
 
-    - name: Get list of disabled snaps
-      ansible.builtin.shell: snap list --all | awk '/disabled/{print $1, $3}'
-      register: disabled_snaps
-      changed_when: false
+  - name: Check the OS
+    debug:
+      msg: "Detected OS Family: {{ ansible_facts['os_family'] }}"
 
-    - name: Remove disabled snap revisions
-      ansible.builtin.shell: snap remove {{ item.split()[0] }} --revision={{ item.split()[1] }}
-      loop: "{{ disabled_snaps.stdout_lines }}"
-      when: disabled_snaps.stdout_lines | length > 0
-      ignore_errors: true
+  #####################################################################
+  # SNAP CLEANUP (Debian Only)
+  #####################################################################
 
-    #################################################################
-    # System Cleanup
-    #################################################################
+  - name: Remove disabled snaps (Debian-based systems)
+    shell: snap list --all | awk '/disabled/{print $1, $3}'
+    register: disabled_snaps
+    changed_when: false
+    when: ansible_facts['os_family'] == "Debian"
 
-    - name: Vacuum journal logs to 20M
-      ansible.builtin.shell: journalctl --vacuum-size=20M
-      changed_when: false
+  - name: Remove disabled snap revisions
+    shell: snap remove {{ item.split()[0] }} --revision={{ item.split()[1] }}
+    loop: "{{ disabled_snaps.stdout_lines }}"
+    ignore_errors: true
+    when:
+      - ansible_facts['os_family'] == "Debian"
+      - disabled_snaps.stdout_lines | length > 0
 
-    - name: Fix broken packages
-      ansible.builtin.shell: DEBIAN_FRONTEND=noninteractive dpkg --configure -a
-      changed_when: false
+  #####################################################################
+  # SYSTEM CLEANUP
+  #####################################################################
 
-    #################################################################
-    # APT Update
-    #################################################################
+  - name: Vacuum journal logs to 20M
+    shell: journalctl --vacuum-size=20M
+    changed_when: false
 
-    - name: Update apt cache
-      ansible.builtin.apt:
-        update_cache: yes
+  - name: Fix broken packages (Debian-based systems)
+    shell: DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+    changed_when: false
+    when: ansible_facts['os_family'] == "Debian"
 
-    - name: Check running kernel version before patching
-      ansible.builtin.command: uname -r
-      register: kernel_version_before
-      changed_when: false
+  #####################################################################
+  # PACKAGE UPDATE
+  #####################################################################
 
-    #################################################################
-    # Hold Excluded Packages
-    #################################################################
+  - name: Perform apt update and dist-upgrade (Debian-based systems)
+    apt:
+      update_cache: yes
+      upgrade: dist
+    when: ansible_facts['os_family'] == "Debian"
 
-    - name: Hold specified packages
-      ansible.builtin.command: apt-mark hold {{ item }}
-      loop: "{{ exclude_packages_list }}"
-      when: exclude_packages_list | length > 0
-      ignore_errors: true
+  - name: Perform yum update (RHEL 7 and below)
+    yum:
+      name: "*"
+      state: latest
+    when:
+      - ansible_facts['os_family'] == "RedHat"
+      - ansible_facts['distribution_major_version'] | int < 8
 
-    #################################################################
-    # Perform Upgrade
-    #################################################################
+  - name: Perform dnf update (RHEL 8+)
+    dnf:
+      name: "*"
+      state: latest
+    when:
+      - ansible_facts['os_family'] == "RedHat"
+      - ansible_facts['distribution_major_version'] | int >= 8
 
-    - name: Perform dist upgrade
-      ansible.builtin.apt:
-        upgrade: dist
-      register: apt_upgrade_result
+  #####################################################################
+  # HOLD EXCLUDED PACKAGES (Debian Only)
+  #####################################################################
 
-    #################################################################
-    # Kernel Detection
-    #################################################################
+  - name: Hold specified packages
+    command: apt-mark hold {{ item }}
+    loop: "{{ exclude_packages_list }}"
+    when:
+      - ansible_facts['os_family'] == "Debian"
+      - exclude_packages_list | length > 0
+    ignore_errors: true
 
-    - name: Get latest installed kernel version
-      ansible.builtin.shell: |
-        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
-      register: latest_kernel_install
-      changed_when: false
+  #####################################################################
+  # KERNEL CHECK
+  #####################################################################
 
-    - name: Determine if reboot is required
-      set_fact:
-        reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
+  - name: Get running kernel version
+    command: uname -r
+    register: kernel_version_before
+    changed_when: false
 
-    #################################################################
-    # Colored Output
-    #################################################################
+  - name: Get latest installed kernel (Debian-based systems)
+    shell: |
+      dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+    register: latest_kernel_install
+    changed_when: false
+    when: ansible_facts['os_family'] == "Debian"
 
-    - name: Print kernel comparison (ANSI colored)
-      ansible.builtin.debug:
-        msg: |
-          \033[1;34mOld Kernel:\033[0m {{ kernel_version_before.stdout.strip() }}
-          \033[1;32mNew Kernel:\033[0m {{ latest_kernel_install.stdout.strip() }}
-          {% if reboot_required %}
-          \033[1;31mReboot Required: YES\033[0m
-          {% else %}
-          \033[1;33mReboot Required: NO\033[0m
-          {% endif %}
+  - name: Get latest installed kernel (RedHat-based systems)
+    shell: |
+      rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'
+    register: latest_kernel_install
+    changed_when: false
+    when: ansible_facts['os_family'] == "RedHat"
 
-    #################################################################
-    # Reboot If Needed
-    #################################################################
+  - name: Determine if reboot is required
+    set_fact:
+      reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
 
-    - name: Reboot if new kernel detected
-      ansible.builtin.reboot:
-        msg: "Reboot initiated by Ansible due to new kernel installation"
-        reboot_timeout: 600
-      when: reboot_required
-      ignore_errors: true
+  #####################################################################
+  # COLORED OUTPUT
+  #####################################################################
+
+  - name: Print kernel comparison (ANSI colored)
+    debug:
+      msg: |
+        \033[1;34mOld Kernel:\033[0m {{ kernel_version_before.stdout.strip() }}
+        \033[1;32mNew Kernel:\033[0m {{ latest_kernel_install.stdout.strip() }}
+        {% if reboot_required %}
+        \033[1;31mReboot Required: YES\033[0m
+        {% else %}
+        \033[1;33mReboot Required: NO\033[0m
+        {% endif %}
+
+  #####################################################################
+  # REBOOT IF REQUIRED
+  #####################################################################
+
+  - name: Reboot if new kernel detected
+    reboot:
+      msg: "Reboot initiated by Ansible due to new kernel installation"
+      reboot_timeout: 600
+    when: reboot_required
