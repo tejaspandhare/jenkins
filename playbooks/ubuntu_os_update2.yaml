@@ -1,5 +1,5 @@
 ---
-- name: Perform OS Maintenance Tasks
+- name: Perform Cross-Platform OS Maintenance
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
@@ -10,19 +10,22 @@
 
   tasks:
 
-  #####################################################################
-  # OS Detection
-  #####################################################################
+  ####################################################################
+  # OS INFO
+  ####################################################################
 
-  - name: Check the OS
+  - name: Display detected OS
     debug:
-      msg: "Detected OS Family: {{ ansible_facts['os_family'] }}"
+      msg:
+        - "OS Family: {{ ansible_facts['os_family'] }}"
+        - "Distribution: {{ ansible_facts['distribution'] }}"
+        - "Version: {{ ansible_facts['distribution_version'] }}"
 
-  #####################################################################
-  # SNAP CLEANUP (Debian Only)
-  #####################################################################
+  ####################################################################
+  # SNAP CLEANUP (Debian / Ubuntu only)
+  ####################################################################
 
-  - name: Remove disabled snaps (Debian-based systems)
+  - name: Remove disabled snaps
     shell: snap list --all | awk '/disabled/{print $1, $3}'
     register: disabled_snaps
     changed_when: false
@@ -36,30 +39,32 @@
       - ansible_facts['os_family'] == "Debian"
       - disabled_snaps.stdout_lines | length > 0
 
-  #####################################################################
+  ####################################################################
   # SYSTEM CLEANUP
-  #####################################################################
+  ####################################################################
 
   - name: Vacuum journal logs to 20M
     shell: journalctl --vacuum-size=20M
     changed_when: false
 
-  - name: Fix broken packages (Debian-based systems)
+  - name: Fix broken packages (Debian)
     shell: DEBIAN_FRONTEND=noninteractive dpkg --configure -a
     changed_when: false
     when: ansible_facts['os_family'] == "Debian"
 
-  #####################################################################
-  # PACKAGE UPDATE
-  #####################################################################
+  ####################################################################
+  # PACKAGE UPDATES
+  ####################################################################
 
-  - name: Perform apt update and dist-upgrade (Debian-based systems)
+  # Debian / Ubuntu
+  - name: Update and upgrade (Debian/Ubuntu)
     apt:
       update_cache: yes
       upgrade: dist
     when: ansible_facts['os_family'] == "Debian"
 
-  - name: Perform yum update (RHEL 7 and below)
+  # RHEL / CentOS / Rocky / Alma
+  - name: Update packages (RHEL 7 and below)
     yum:
       name: "*"
       state: latest
@@ -67,7 +72,7 @@
       - ansible_facts['os_family'] == "RedHat"
       - ansible_facts['distribution_major_version'] | int < 8
 
-  - name: Perform dnf update (RHEL 8+)
+  - name: Update packages (RHEL 8+ / Rocky / Alma)
     dnf:
       name: "*"
       state: latest
@@ -75,66 +80,91 @@
       - ansible_facts['os_family'] == "RedHat"
       - ansible_facts['distribution_major_version'] | int >= 8
 
-  #####################################################################
-  # HOLD EXCLUDED PACKAGES (Debian Only)
-  #####################################################################
+  # SUSE / openSUSE / SLES
+  - name: Update packages (SUSE-based systems)
+    zypper:
+      name: "*"
+      state: latest
+    when: ansible_facts['os_family'] == "Suse"
 
-  - name: Hold specified packages
+  ####################################################################
+  # HOLD EXCLUDED PACKAGES (Debian Only)
+  ####################################################################
+
+  - name: Hold excluded packages (Debian)
     command: apt-mark hold {{ item }}
     loop: "{{ exclude_packages_list }}"
+    ignore_errors: true
     when:
       - ansible_facts['os_family'] == "Debian"
       - exclude_packages_list | length > 0
-    ignore_errors: true
 
-  #####################################################################
-  # KERNEL CHECK
-  #####################################################################
+  ####################################################################
+  # KERNEL + REBOOT DETECTION (Enterprise Method)
+  ####################################################################
 
   - name: Get running kernel version
     command: uname -r
-    register: kernel_version_before
+    register: running_kernel
     changed_when: false
 
-  - name: Get latest installed kernel (Debian-based systems)
-    shell: |
-      dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
-    register: latest_kernel_install
-    changed_when: false
+  # Debian / Ubuntu reboot detection
+  - name: Check reboot-required file (Debian)
+    stat:
+      path: /var/run/reboot-required
+    register: debian_reboot_flag
     when: ansible_facts['os_family'] == "Debian"
 
-  - name: Get latest installed kernel (RedHat-based systems)
-    shell: |
-      rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'
-    register: latest_kernel_install
+  - name: Set reboot flag (Debian)
+    set_fact:
+      reboot_required: "{{ debian_reboot_flag.stat.exists }}"
+    when: ansible_facts['os_family'] == "Debian"
+
+  # RHEL / Rocky / Alma / CentOS
+  - name: Check reboot requirement (RHEL-based)
+    command: needs-restarting -r
+    register: rhel_reboot_flag
+    failed_when: false
     changed_when: false
     when: ansible_facts['os_family'] == "RedHat"
 
-  - name: Determine if reboot is required
+  - name: Set reboot flag (RHEL-based)
     set_fact:
-      reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
+      reboot_required: "{{ rhel_reboot_flag.rc != 0 }}"
+    when: ansible_facts['os_family'] == "RedHat"
 
-  #####################################################################
+  # SUSE
+  - name: Check reboot requirement (SUSE)
+    command: zypper ps -s
+    register: suse_reboot_flag
+    changed_when: false
+    when: ansible_facts['os_family'] == "Suse"
+
+  - name: Set reboot flag (SUSE)
+    set_fact:
+      reboot_required: "{{ 'kernel' in suse_reboot_flag.stdout }}"
+    when: ansible_facts['os_family'] == "Suse"
+
+  ####################################################################
   # COLORED OUTPUT
-  #####################################################################
+  ####################################################################
 
-  - name: Print kernel comparison (ANSI colored)
+  - name: Display maintenance summary (ANSI colored)
     debug:
       msg: |
-        \033[1;34mOld Kernel:\033[0m {{ kernel_version_before.stdout.strip() }}
-        \033[1;32mNew Kernel:\033[0m {{ latest_kernel_install.stdout.strip() }}
+        \033[1;34mRunning Kernel:\033[0m {{ running_kernel.stdout }}
         {% if reboot_required %}
         \033[1;31mReboot Required: YES\033[0m
         {% else %}
-        \033[1;33mReboot Required: NO\033[0m
+        \033[1;32mReboot Required: NO\033[0m
         {% endif %}
 
-  #####################################################################
+  ####################################################################
   # REBOOT IF REQUIRED
-  #####################################################################
+  ####################################################################
 
-  - name: Reboot if new kernel detected
+  - name: Reboot system if required
     reboot:
-      msg: "Reboot initiated by Ansible due to new kernel installation"
-      reboot_timeout: 600
-    when: reboot_required
+      msg: "Reboot initiated by Ansible due to updates"
+      reboot_timeout: 900
+    when: reboot_required | default(false)
