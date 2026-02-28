@@ -1,128 +1,110 @@
 ---
-- name: Perform Maintenance Tasks (NO KERNEL LOGIC)
+- name: Perform Maintenance Tasks
   hosts: "{{ hosts.split(';') }}"
-  become: true
   gather_facts: true
+  become: true
 
   vars:
     EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
     exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | reject('equalto','') | list }}"
 
-  pre_tasks:
-
-    # ------------------------------------------------
-    # HARD GUARANTEE: FAIL if old kernel logic exists
-    # ------------------------------------------------
-    - name: Fail if old kernel variables are present
-      ansible.builtin.fail:
-        msg: >
-          OLD KERNEL LOGIC DETECTED.
-          Variables like latest_kernel_install or kernel_version_before
-          must NOT exist in this playbook run.
-      when:
-        - latest_kernel_install is defined
-          or kernel_version_before is defined
-          or reboot_required is defined
-
-    - name: Playbook identity marker
-      ansible.builtin.debug:
-        msg: "RUNNING PLAYBOOK: 2026-01-CLEAN-NO-KERNEL-LOGIC"
-
   tasks:
 
-    # ===================
-    # SNAP CLEANUP
-    # ===================
-    - name: List all snaps
-      ansible.builtin.command: snap list --all
-      register: snap_list_output
+    #################################################################
+    # Remove Disabled Snaps
+    #################################################################
+
+    - name: Get list of disabled snaps
+      ansible.builtin.shell: snap list --all | awk '/disabled/{print $1, $3}'
+      register: disabled_snaps
       changed_when: false
 
-    - name: Extract disabled snaps
-      ansible.builtin.set_fact:
-        disabled_snaps: >-
-          {{
-            snap_list_output.stdout_lines
-            | select('search', 'disabled')
-            | map('regex_search', '^(\\S+)', '\\1')
-            | select('string')
-            | list
-          }}
-
-    - name: Remove disabled snaps
-      ansible.builtin.command: snap remove {{ item }} --purge
-      loop: "{{ disabled_snaps }}"
+    - name: Remove disabled snap revisions
+      ansible.builtin.shell: snap remove {{ item.split()[0] }} --revision={{ item.split()[1] }}
+      loop: "{{ disabled_snaps.stdout_lines }}"
+      when: disabled_snaps.stdout_lines | length > 0
       ignore_errors: true
-      changed_when: true
 
-    # ===================
-    # SYSTEM CLEANUP
-    # ===================
+    #################################################################
+    # System Cleanup
+    #################################################################
+
     - name: Vacuum journal logs to 20M
-      ansible.builtin.command: journalctl --vacuum-size=20M
-      changed_when: true
+      ansible.builtin.shell: journalctl --vacuum-size=20M
+      changed_when: false
 
     - name: Fix broken packages
-      ansible.builtin.command: dpkg --configure -a
-      environment:
-        DEBIAN_FRONTEND: noninteractive
+      ansible.builtin.shell: DEBIAN_FRONTEND=noninteractive dpkg --configure -a
       changed_when: false
 
-    # ===================
-    # APT MAINTENANCE
-    # ===================
-    - name: Update APT cache
+    #################################################################
+    # APT Update
+    #################################################################
+
+    - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
 
-    - name: Hold excluded packages
+    - name: Check running kernel version before patching
+      ansible.builtin.command: uname -r
+      register: kernel_version_before
+      changed_when: false
+
+    #################################################################
+    # Hold Excluded Packages
+    #################################################################
+
+    - name: Hold specified packages
       ansible.builtin.command: apt-mark hold {{ item }}
       loop: "{{ exclude_packages_list }}"
       when: exclude_packages_list | length > 0
       ignore_errors: true
-      changed_when: true
 
-    - name: Perform dist-upgrade
+    #################################################################
+    # Perform Upgrade
+    #################################################################
+
+    - name: Perform dist upgrade
       ansible.builtin.apt:
         upgrade: dist
-        update_cache: no
+      register: apt_upgrade_result
 
-    # ===================
-    # REBOOT LOGIC (ONLY VALID METHOD)
-    # ===================
-    - name: Check if reboot is required (Ubuntu native)
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-      register: reboot_flag
+    #################################################################
+    # Kernel Detection
+    #################################################################
 
-    - name: Debug reboot-required status
+    - name: Get latest installed kernel version
+      ansible.builtin.shell: |
+        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+      register: latest_kernel_install
+      changed_when: false
+
+    - name: Determine if reboot is required
+      set_fact:
+        reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
+
+    #################################################################
+    # Colored Output
+    #################################################################
+
+    - name: Print kernel comparison (ANSI colored)
       ansible.builtin.debug:
-        msg: "Reboot required file exists: {{ reboot_flag.stat.exists }}"
+        msg: |
+          \033[1;34mOld Kernel:\033[0m {{ kernel_version_before.stdout.strip() }}
+          \033[1;32mNew Kernel:\033[0m {{ latest_kernel_install.stdout.strip() }}
+          {% if reboot_required %}
+          \033[1;31mReboot Required: YES\033[0m
+          {% else %}
+          \033[1;33mReboot Required: NO\033[0m
+          {% endif %}
 
-    - name: Reboot system if required
+    #################################################################
+    # Reboot If Needed
+    #################################################################
+
+    - name: Reboot if new kernel detected
       ansible.builtin.reboot:
+        msg: "Reboot initiated by Ansible due to new kernel installation"
         reboot_timeout: 600
-      when: reboot_flag.stat.exists
-      changed_when: true
-
-    # ===================
-    # JENKINS / ANSIBLE TMP CLEANUP
-    # ===================
-    - name: Find ansiballz_cache directories
-      ansible.builtin.find:
-        paths: /var/jenkins_home/.ansible/tmp
-        patterns: ansiballz_cache
-        recurse: yes
-        file_type: directory
-      register: ansiballz_dirs
-
-    - name: Remove ansiballz_cache directories
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ ansiballz_dirs.files }}"
-      ignore_errors: true
-
-    - name: Remove ansible-local temp directories
-      ansible.builtin.command: rm -rf /var/jenkins_home/.ansible/tmp/ansible-local-*
+      when: reboot_required
       ignore_errors: true
