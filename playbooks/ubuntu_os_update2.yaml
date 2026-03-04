@@ -1,8 +1,10 @@
 ---
-- name: Ubuntu OS Patching & Kernel Management (Clean Output)
+- name: Enterprise Ubuntu Patching (Batch Mode)
   hosts: "{{ hosts }}"
   become: yes
-  gather_facts: yes
+  gather_facts: false
+  serial: 50
+  strategy: linear
 
   vars:
     reboot_required_file: "/var/run/reboot-required"
@@ -10,7 +12,7 @@
   tasks:
 
     #####################################################################
-    # UPDATE CACHE (Silent)
+    # UPDATE + UPGRADE (Silent)
     #####################################################################
 
     - name: Update APT cache
@@ -19,11 +21,7 @@
         cache_valid_time: 3600
       changed_when: false
 
-    #####################################################################
-    # DIST-UPGRADE (Suppress dpkg Noise)
-    #####################################################################
-
-    - name: Upgrade all packages (dist-upgrade)
+    - name: Upgrade packages (dist-upgrade)
       ansible.builtin.apt:
         upgrade: dist
         autoremove: yes
@@ -35,15 +33,15 @@
       no_log: true
 
     #####################################################################
-    # KERNEL INFORMATION
+    # KERNEL CHECK
     #####################################################################
 
-    - name: Get running kernel version
+    - name: Get running kernel
       ansible.builtin.command: uname -r
       register: running_kernel
       changed_when: false
 
-    - name: Get latest installed kernel version
+    - name: Get latest installed kernel
       ansible.builtin.shell: |
         dpkg -l 'linux-image-[0-9]*' \
         | awk '/^ii/{print $2}' \
@@ -53,55 +51,36 @@
       register: latest_kernel
       changed_when: false
 
-    - name: Set kernel facts
-      ansible.builtin.set_fact:
-        running_kernel_version: "{{ running_kernel.stdout }}"
-        latest_kernel_version: "{{ latest_kernel.stdout }}"
-
-    #####################################################################
-    # REBOOT CHECK
-    #####################################################################
-
-    - name: Check if reboot is required
+    - name: Check reboot requirement
       ansible.builtin.stat:
         path: "{{ reboot_required_file }}"
       register: reboot_file
 
-    - name: Set reboot_required fact
+    - name: Set per-host result facts
       ansible.builtin.set_fact:
-        reboot_required: "{{ reboot_file.stat.exists }}"
-
-    #####################################################################
-    # CLEAN SUMMARY (ONLY THIS SHOWS IN JENKINS)
-    #####################################################################
-
-    - name: Display patch summary
-      ansible.builtin.debug:
-        msg:
-          - "================================="
-          - "Host: {{ inventory_hostname }}"
-          - "Packages Updated: {{ upgrade_result.changed }}"
-          - "Running Kernel: {{ running_kernel_version }}"
-          - "Latest Installed Kernel: {{ latest_kernel_version }}"
-          - "Reboot Required: {{ reboot_required }}"
-          - "================================="
+        patch_result:
+          host: "{{ inventory_hostname }}"
+          changed: "{{ upgrade_result.changed }}"
+          running_kernel: "{{ running_kernel.stdout }}"
+          latest_kernel: "{{ latest_kernel.stdout }}"
+          reboot_required: "{{ reboot_file.stat.exists }}"
 
     #####################################################################
     # REBOOT IF REQUIRED
     #####################################################################
 
-    - name: Reboot host if required
+    - name: Reboot if required
       ansible.builtin.reboot:
-        reboot_timeout: 600
-      when: reboot_required
+        reboot_timeout: 900
+      when: reboot_file.stat.exists
 
-    - name: Verify kernel after reboot
-      ansible.builtin.command: uname -r
-      register: post_reboot_kernel
-      changed_when: false
-      when: reboot_required
+    #####################################################################
+    # CLEAN PER-HOST SUMMARY
+    #####################################################################
 
-    - name: Display post-reboot kernel
+    - name: Print per-host summary
       ansible.builtin.debug:
-        msg: "Kernel after reboot: {{ post_reboot_kernel.stdout }}"
-      when: reboot_required
+        msg: |
+          {{ inventory_hostname }} |
+          Updated: {{ upgrade_result.changed }} |
+          Reboot: {{ reboot_file.stat.exists }}
