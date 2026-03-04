@@ -3,8 +3,6 @@ pipeline {
 
     environment {
         ANSIBLE_PRIVATE_KEY = credentials('automation-key')
-
-        // Clean & quiet Ansible output
         ANSIBLE_STDOUT_CALLBACK = 'minimal'
         ANSIBLE_DISPLAY_SKIPPED_HOSTS = 'false'
         ANSIBLE_FORCE_COLOR = 'false'
@@ -22,15 +20,21 @@ pipeline {
             }
         }
 
+        stage('Checkout Code') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('OS Maintenance & Kernel Check') {
             steps {
-                sh """
+                sh '''
                 ansible-playbook \
                   -i inventory/hosts \
                   playbooks/ubuntu_os_update2.yaml \
                   --private-key="$ANSIBLE_PRIVATE_KEY" \
-                  -e "hosts=${params.SERVER_NAME}"
-                """
+                  -e "hosts=${SERVER_NAME}"
+                '''
             }
         }
     }
