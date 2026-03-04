@@ -1,5 +1,5 @@
 ---
-- name: Cross Platform OS Maintenance
+- name: Cross-Platform OS Maintenance
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
@@ -14,13 +14,15 @@
   # PACKAGE UPDATES
   #####################################################################
 
-  - name: Update packages (Debian)
+  - name: Update and upgrade (Debian/Ubuntu)
     apt:
       update_cache: yes
       upgrade: dist
+      autoremove: yes
+      autoclean: yes
     when: ansible_facts['os_family'] == "Debian"
 
-  - name: Update packages (RHEL7 and below)
+  - name: Update packages (RHEL 7 and below)
     yum:
       name: "*"
       state: latest
@@ -28,7 +30,7 @@
       - ansible_facts['os_family'] == "RedHat"
       - ansible_facts['distribution_major_version'] | int < 8
 
-  - name: Update packages (RHEL8+)
+  - name: Update packages (RHEL 8+ / Alma / Rocky)
     dnf:
       name: "*"
       state: latest
@@ -46,7 +48,7 @@
   # HOLD PACKAGES (Debian Only)
   #####################################################################
 
-  - name: Hold excluded packages (Debian)
+  - name: Hold excluded packages (Debian-based)
     command: apt-mark hold {{ item }}
     loop: "{{ exclude_packages_list }}"
     when:
@@ -63,67 +65,64 @@
     register: running_kernel
     changed_when: false
 
-  #####################################################################
-  # Get latest installed kernel safely (literal block avoids YAML errors)
-  #####################################################################
-
-  - name: Get latest installed kernel (Debian)
+  # Debian / Ubuntu
+  - name: Get latest installed kernel (Debian/Ubuntu)
     shell: |
-      dpkg -l "linux-image-*" | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+      dpkg --list | grep '^ii' | grep 'linux-image-[0-9]' | awk '{print $2}' | sort -V | tail -n1
     register: latest_kernel_debian
     changed_when: false
     failed_when: false
     when: ansible_facts['os_family'] == "Debian"
 
-  - name: Get latest installed kernel (RedHat)
+  # RedHat / Rocky / Alma
+  - name: Get latest installed kernel (RedHat-based)
     shell: |
-      rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'
+      rpm -q kernel | sort -V | tail -n1
     register: latest_kernel_redhat
     changed_when: false
     failed_when: false
     when: ansible_facts['os_family'] == "RedHat"
 
-  - name: Get latest installed kernel (SUSE)
+  # SUSE / openSUSE / SLES
+  - name: Get latest installed kernel (SUSE-based)
     shell: |
-      rpm -q kernel-default | sort -V | tail -n1 | sed 's/kernel-default-//'
+      rpm -q kernel-default | sort -V | tail -n1
     register: latest_kernel_suse
     changed_when: false
     failed_when: false
     when: ansible_facts['os_family'] == "Suse"
 
   #####################################################################
-  # Normalize kernel variables
+  # NORMALIZE KERNEL VARIABLES
   #####################################################################
 
   - name: Set normalized kernel variables
     set_fact:
       running_kernel_version: "{{ running_kernel.stdout | default('UNKNOWN') | trim }}"
       latest_kernel_version: >-
-        {{ (latest_kernel_debian.stdout if latest_kernel_debian is defined else
+        {{ (latest_kernel_debian.stdout if latest_kernel_debian is defined and latest_kernel_debian.stdout | length > 0 else
            (latest_kernel_redhat.stdout if latest_kernel_redhat is defined else
            (latest_kernel_suse.stdout if latest_kernel_suse is defined else 'UNKNOWN'))) | trim }}
 
   - name: Determine if reboot is required
     set_fact:
-      reboot_required: "{{ running_kernel_version != latest_kernel_version }}"
+      reboot_required: "{{ running_kernel_version != latest_kernel_version and latest_kernel_version != 'UNKNOWN' }}"
 
   #####################################################################
-  # Print kernel versions (safe)
+  # DISPLAY KERNEL STATUS
   #####################################################################
 
   - name: Display kernel comparison
     debug:
       msg: |
+        ==============================
         Old kernel: {{ running_kernel_version }}
         New kernel: {{ latest_kernel_version }}
-        {% if reboot_required %}
-        Reboot Required: YES
-        {% else %}
-        Reboot Required: NO
-        {% endif %}
+        Reboot Required: {{ 'YES' if reboot_required else 'NO' }}
+        ==============================
 
   #####################################################################
-  # Reboot if new kernel installed
+  # REBOOT IF NEEDED
   #####################################################################
 
   - name: Reboot system if new kernel detected
