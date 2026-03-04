@@ -1,67 +1,65 @@
 ---
 - name: Ubuntu OS Patching
-  hosts: "{{ hosts }}"
+  hosts: all
   become: yes
   gather_facts: yes
-
+  serial: 50   # batches of 50 servers
   vars:
-    reboot_required_file: "/var/run/reboot-required"
+    patch_results: []
 
   tasks:
-    - name: Update APT cache
+
+    - name: Print host starting patch
+      ansible.builtin.debug:
+        msg: "Running OS patching on {{ inventory_hostname }}"
+
+    - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
-        cache_valid_time: 3600
+      register: update_cache_result
 
-    - name: Upgrade all packages including dependencies
+    - name: Upgrade packages (dist-upgrade)
       ansible.builtin.apt:
         upgrade: dist
         autoremove: yes
-        install_recommends: yes
       register: upgrade_result
-      no_log: true
       ignore_errors: yes
 
-    - name: Get running kernel version
-      ansible.builtin.command: uname -r
-      register: running_kernel
-      changed_when: false
-
-    - name: Get latest installed kernel version
-      ansible.builtin.shell: |
-        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
-      register: latest_kernel
-      changed_when: false
-
     - name: Check if reboot is required
-      ansible.builtin.stat:
-        path: "{{ reboot_required_file }}"
-      register: reboot_file
+      ansible.builtin.shell: /usr/bin/needs-restarting -r || echo "no"
+      register: reboot_check
+      changed_when: false
+      failed_when: false
 
-    - name: Set host patch result
-      set_fact:
+    - name: Gather patch results per host
+      ansible.builtin.set_fact:
         patch_result:
           host: "{{ inventory_hostname }}"
           changed: "{{ upgrade_result.changed | default(false) }}"
-          reboot_required: "{{ reboot_file.stat.exists }}"
-          running_kernel: "{{ running_kernel.stdout }}"
-          latest_kernel: "{{ latest_kernel.stdout }}"
-          failed: "{{ upgrade_result is failed }}"
+          failed: "{{ upgrade_result.failed | default(false) }}"
+          reboot_required: "{{ 'yes' in reboot_check.stdout | lower }}"
+          running_kernel: "{{ ansible_kernel }}"
+          latest_kernel: "{{ ansible_kernel }}"   # you can replace with logic to fetch latest installed kernel
 
-- name: Print patch summary
+    - name: Append host patch_result to global list
+      ansible.builtin.set_fact:
+        patch_results: "{{ patch_results + [ patch_result ] }}"
+
+    - name: Print host patch summary
+      ansible.builtin.debug:
+        msg: "Host: {{ inventory_hostname }} | Updated: {{ patch_result.changed }} | Reboot: {{ patch_result.reboot_required }} | Failed: {{ patch_result.failed }} | Running Kernel: {{ patch_result.running_kernel }} | Latest Kernel: {{ patch_result.latest_kernel }}"
+
+- name: Display final summary
   hosts: localhost
-  gather_facts: false
+  gather_facts: no
   tasks:
-    - name: Aggregate all host results
-      set_fact:
-        results: "{{ hostvars | dict2items | map(attribute='value.patch_result') | select('defined') | list }}"
 
     - name: Display concise summary
-      debug:
+      ansible.builtin.debug:
         msg: |
           ===================================
-          TOTAL HOSTS: {{ results | length }}
-          UPDATED: {{ results | selectattr('changed','equalto',true) | list | length }}
-          REBOOT REQUIRED: {{ results | selectattr('reboot_required','equalto',true) | list | length }}
-          FAILED: {{ results | selectattr('failed','equalto',true) | list | length }}
+          TOTAL HOSTS: {{ patch_results | length }}
+          UPDATED: {{ patch_results | selectattr('changed','equalto',true) | list | length }}
+          REBOOT REQUIRED: {{ patch_results | selectattr('reboot_required','equalto',true) | list | length }}
+          FAILED: {{ patch_results | selectattr('failed','equalto',true) | list | length }}
           ===================================
