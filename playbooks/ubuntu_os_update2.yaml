@@ -1,5 +1,5 @@
 ---
-- name: Cross-Platform OS Maintenance
+- name: Cross-Platform OS Patching and Kernel Management
   hosts: "{{ hosts.split(';') }}"
   gather_facts: true
   become: true
@@ -107,27 +107,30 @@
            (latest_kernel_redhat.stdout if latest_kernel_redhat is defined else
            (latest_kernel_suse.stdout if latest_kernel_suse is defined else 'UNKNOWN'))) | trim }}
 
-  - name: Parse kernel major.minor
+  #####################################################################
+  # REBOOT LOGIC - All kernel updates
+  #####################################################################
+  - name: Determine if reboot is required (any kernel change)
     set_fact:
-      running_kernel_major_minor: "{{ running_kernel_version.split('-')[0].split('.')[:2] | join('.') }}"
-      latest_kernel_major_minor: "{{ latest_kernel_version.split('-')[0].split('.')[:2] | join('.') }}"
-
-  - name: Determine if reboot is required (major/minor version change only)
-    set_fact:
-      reboot_required: "{{ running_kernel_major_minor != latest_kernel_major_minor and latest_kernel_version != 'UNKNOWN' }}"
+      reboot_required: "{{ running_kernel_version != latest_kernel_version and latest_kernel_version != 'UNKNOWN' }}"
 
   #####################################################################
-  # DISPLAY KERNEL STATUS
+  # DISPLAY KERNEL STATUS (ANSI colors)
   #####################################################################
   - name: Display kernel comparison
     debug:
       msg: |
-        ==============================
-        Running Kernel: {{ running_kernel_version }}
-        Latest Installed Kernel: {{ latest_kernel_version }}
-        Reboot Required: {{ 'YES' if reboot_required else 'NO' }}
-        Kernel after reboot: {{ latest_kernel_version if reboot_required else running_kernel_version }}
-        ==============================
+        \033[1;34m==============================\033[0m
+        \033[1;36mRunning Kernel: \033[0m {{ running_kernel_version }}
+        \033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel_version }}
+        {% if reboot_required %}
+        \033[1;31mReboot Required: YES\033[0m
+        \033[1;33mKernel after reboot: \033[0m {{ latest_kernel_version }}
+        {% else %}
+        \033[1;32mReboot Required: NO\033[0m
+        \033[1;33mKernel after reboot: \033[0m {{ running_kernel_version }}
+        {% endif %}
+        \033[1;34m==============================\033[0m
 
   #####################################################################
   # REBOOT IF NEEDED
