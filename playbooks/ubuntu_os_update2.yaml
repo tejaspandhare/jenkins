@@ -64,25 +64,28 @@
     changed_when: false
 
   #####################################################################
-  # Get latest installed kernel safely
+  # Get latest installed kernel safely (literal block avoids YAML errors)
   #####################################################################
 
   - name: Get latest installed kernel (Debian)
-    shell: "dpkg -l 'linux-image-*' | awk '/^ii/{print \$2}' | sort -V | tail -n1 | sed 's/linux-image-//'"
+    shell: |
+      dpkg -l "linux-image-*" | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
     register: latest_kernel_debian
     changed_when: false
     failed_when: false
     when: ansible_facts['os_family'] == "Debian"
 
   - name: Get latest installed kernel (RedHat)
-    shell: "rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'"
+    shell: |
+      rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'
     register: latest_kernel_redhat
     changed_when: false
     failed_when: false
     when: ansible_facts['os_family'] == "RedHat"
 
   - name: Get latest installed kernel (SUSE)
-    shell: "rpm -q kernel-default | sort -V | tail -n1 | sed 's/kernel-default-//'"
+    shell: |
+      rpm -q kernel-default | sort -V | tail -n1 | sed 's/kernel-default-//'
     register: latest_kernel_suse
     changed_when: false
     failed_when: false
