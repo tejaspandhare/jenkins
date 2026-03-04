@@ -41,7 +41,7 @@
       - ansible_facts['os_family'] == "RedHat"
       - ansible_facts['distribution_major_version'] | int < 8
 
-  # RHEL 8+ / Rocky / Alma
+  # RHEL 8+
   - name: Update packages using dnf (RHEL 8+)
     dnf:
       name: "*"
@@ -50,7 +50,7 @@
       - ansible_facts['os_family'] == "RedHat"
       - ansible_facts['distribution_major_version'] | int >= 8
 
-  # SUSE / SLES / openSUSE
+  # SUSE
   - name: Update packages using zypper (SUSE-based)
     zypper:
       name: "*"
@@ -78,9 +78,9 @@
     register: running_kernel
     changed_when: false
 
-  ############################################################
+  #####################################################################
   # Get latest installed kernel per OS
-  ############################################################
+  #####################################################################
 
   # Debian / Ubuntu
   - name: Get latest installed kernel (Debian-based)
@@ -106,28 +106,23 @@
     changed_when: false
     when: ansible_facts['os_family'] == "Suse"
 
-  ############################################################
+  #####################################################################
   # Compare kernels
-  ############################################################
+  #####################################################################
 
   - name: Determine if reboot is required
     set_fact:
       reboot_required: "{{ running_kernel.stdout.strip() != latest_kernel.stdout.strip() }}"
 
   #####################################################################
-  # ALWAYS PRINT OLD + NEW KERNEL
+  # PRINT ONLY OLD + NEW KERNEL (CLEAN OUTPUT)
   #####################################################################
 
-  - name: Display kernel comparison (ANSI colored)
-    debug:
-      msg: |
-        \033[1;34mOld (Running) Kernel:\033[0m {{ running_kernel.stdout.strip() }}
-        \033[1;32mNew (Installed) Kernel:\033[0m {{ latest_kernel.stdout.strip() }}
-        {% if reboot_required %}
-        \033[1;31mReboot Required: YES\033[0m
-        {% else %}
-        \033[1;33mReboot Required: NO\033[0m
-        {% endif %}
+  - name: Print kernel versions
+    shell: |
+      echo "Old kernel: {{ running_kernel.stdout.strip() }}"
+      echo "New kernel: {{ latest_kernel.stdout.strip() }}"
+    changed_when: false
 
   #####################################################################
   # REBOOT IF NEW KERNEL DETECTED
