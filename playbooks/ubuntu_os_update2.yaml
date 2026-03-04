@@ -11,17 +11,6 @@
   tasks:
 
   #####################################################################
-  # DISPLAY OS INFO
-  #####################################################################
-
-  - name: Display detected OS information
-    debug:
-      msg:
-        - "OS Family: {{ ansible_facts['os_family'] }}"
-        - "Distribution: {{ ansible_facts['distribution'] }}"
-        - "Version: {{ ansible_facts['distribution_version'] }}"
-
-  #####################################################################
   # PACKAGE UPDATES
   #####################################################################
 
@@ -70,66 +59,68 @@
     ignore_errors: true
 
   #####################################################################
-  # KERNEL CHECK SECTION
+  # KERNEL CHECK
   #####################################################################
 
-  - name: Get running kernel version (Old Kernel)
+  - name: Get running kernel version
     command: uname -r
     register: running_kernel
     changed_when: false
 
   #####################################################################
-  # Get latest installed kernel per OS
+  # GET LATEST INSTALLED KERNEL
   #####################################################################
 
-  # Debian / Ubuntu
+  # Debian
   - name: Get latest installed kernel (Debian-based)
-    shell: |
-      dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+    shell: >
+      dpkg -l 'linux-image-*'
+      | awk '/^ii/{print $2}'
+      | sort -V
+      | tail -n1
+      | sed 's/linux-image-//'
     register: latest_kernel
     changed_when: false
     when: ansible_facts['os_family'] == "Debian"
 
-  # RHEL / Rocky / Alma / CentOS
+  # RedHat
   - name: Get latest installed kernel (RedHat-based)
-    shell: |
-      rpm -q kernel | sort -V | tail -n1 | sed 's/kernel-//'
+    shell: >
+      rpm -q kernel
+      | sort -V
+      | tail -n1
+      | sed 's/kernel-//'
     register: latest_kernel
     changed_when: false
     when: ansible_facts['os_family'] == "RedHat"
 
-  # SUSE / openSUSE / SLES
+  # SUSE
   - name: Get latest installed kernel (SUSE-based)
-    shell: |
-      rpm -q kernel-default | sort -V | tail -n1 | sed 's/kernel-default-//'
+    shell: >
+      rpm -q kernel-default
+      | sort -V
+      | tail -n1
+      | sed 's/kernel-default-//'
     register: latest_kernel
     changed_when: false
     when: ansible_facts['os_family'] == "Suse"
 
   #####################################################################
-  # Compare kernels
-  #####################################################################
-
-  - name: Determine if reboot is required
-    set_fact:
-      reboot_required: "{{ running_kernel.stdout.strip() != latest_kernel.stdout.strip() }}"
-
-  #####################################################################
-  # PRINT ONLY OLD + NEW KERNEL (CLEAN OUTPUT)
+  # PRINT ONLY OLD + NEW KERNEL
   #####################################################################
 
   - name: Print kernel versions
-    shell: |
-      echo "Old kernel: {{ running_kernel.stdout.strip() }}"
-      echo "New kernel: {{ latest_kernel.stdout.strip() }}"
-    changed_when: false
+    debug:
+      msg: |
+        Old kernel: {{ running_kernel.stdout.strip() }}
+        New kernel: {{ latest_kernel.stdout.strip() }}
 
   #####################################################################
-  # REBOOT IF NEW KERNEL DETECTED
+  # REBOOT IF REQUIRED
   #####################################################################
 
   - name: Reboot system if new kernel detected
     reboot:
       msg: "Reboot triggered by Ansible (new kernel installed)"
       reboot_timeout: 900
-    when: reboot_required | default(false)
+    when: running_kernel.stdout.strip() != latest_kernel.stdout.strip()
