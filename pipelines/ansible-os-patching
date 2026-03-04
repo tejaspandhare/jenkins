@@ -1,0 +1,46 @@
+pipeline {
+    agent any
+
+    environment {
+        ANSIBLE_PRIVATE_KEY = credentials('automation-key')
+
+        // Clean & quiet Ansible output
+        ANSIBLE_STDOUT_CALLBACK = 'minimal'
+        ANSIBLE_DISPLAY_SKIPPED_HOSTS = 'false'
+        ANSIBLE_FORCE_COLOR = 'false'
+    }
+
+    options {
+        timestamps()
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('OS Maintenance & Kernel Check') {
+            steps {
+                sh """
+                ansible-playbook \
+                  -i inventory/hosts \
+                  playbooks/ubuntu_os_update2.yaml \
+                  --private-key="$ANSIBLE_PRIVATE_KEY" \
+                  -e "hosts=${params.SERVER_NAME}"
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "OS patching completed successfully."
+        }
+        failure {
+            echo "OS patching failed."
+        }
+    }
+}
