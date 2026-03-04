@@ -1,86 +1,125 @@
 ---
-- name: Enterprise Ubuntu Patching (Batch Mode)
+- name: Enterprise Ubuntu Patching
   hosts: "{{ hosts }}"
   become: yes
   gather_facts: false
-  serial: 50
+  serial: "{{ 50 if env == 'prod' else '100%' }}"
   strategy: linear
+  any_errors_fatal: false
 
   vars:
     reboot_required_file: "/var/run/reboot-required"
 
   tasks:
 
-    #####################################################################
-    # UPDATE + UPGRADE (Silent)
-    #####################################################################
+    ###################################################################
+    # PATCH BLOCK (FAIL-SAFE)
+    ###################################################################
+    - block:
 
-    - name: Update APT cache
-      ansible.builtin.apt:
-        update_cache: yes
-        cache_valid_time: 3600
-      changed_when: false
+        - name: Update APT cache
+          ansible.builtin.apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          changed_when: false
 
-    - name: Upgrade packages (dist-upgrade)
-      ansible.builtin.apt:
-        upgrade: dist
-        autoremove: yes
-        install_recommends: yes
-        dpkg_options:
-          - "--force-confdef"
-          - "--force-confold"
-      register: upgrade_result
-      no_log: true
+        - name: Upgrade packages (dist-upgrade)
+          ansible.builtin.apt:
+            upgrade: dist
+            autoremove: yes
+            install_recommends: yes
+            dpkg_options: "force-confdef,force-confold"
+          register: upgrade_result
+          no_log: true
 
-    #####################################################################
-    # KERNEL CHECK
-    #####################################################################
+        - name: Get running kernel
+          command: uname -r
+          register: running_kernel
+          changed_when: false
 
-    - name: Get running kernel
-      ansible.builtin.command: uname -r
-      register: running_kernel
-      changed_when: false
+        - name: Get latest installed kernel
+          shell: |
+            dpkg -l 'linux-image-[0-9]*' \
+            | awk '/^ii/{print $2}' \
+            | sed 's/linux-image-//' \
+            | sort -V \
+            | tail -n1
+          register: latest_kernel
+          changed_when: false
 
-    - name: Get latest installed kernel
-      ansible.builtin.shell: |
-        dpkg -l 'linux-image-[0-9]*' \
-        | awk '/^ii/{print $2}' \
-        | sed 's/linux-image-//' \
-        | sort -V \
-        | tail -n1
-      register: latest_kernel
-      changed_when: false
+        - name: Check reboot requirement
+          stat:
+            path: "{{ reboot_required_file }}"
+          register: reboot_file
 
-    - name: Check reboot requirement
-      ansible.builtin.stat:
-        path: "{{ reboot_required_file }}"
-      register: reboot_file
+        - name: Set patch result fact
+          set_fact:
+            patch_result:
+              host: "{{ inventory_hostname }}"
+              changed: "{{ upgrade_result.changed }}"
+              reboot_required: "{{ reboot_file.stat.exists }}"
+              failed: false
+              running_kernel: "{{ running_kernel.stdout }}"
+              latest_kernel: "{{ latest_kernel.stdout }}"
 
-    - name: Set per-host result facts
-      ansible.builtin.set_fact:
-        patch_result:
-          host: "{{ inventory_hostname }}"
-          changed: "{{ upgrade_result.changed }}"
-          running_kernel: "{{ running_kernel.stdout }}"
-          latest_kernel: "{{ latest_kernel.stdout }}"
-          reboot_required: "{{ reboot_file.stat.exists }}"
+        - name: Reboot if required
+          reboot:
+            reboot_timeout: 900
+          when: reboot_file.stat.exists
 
-    #####################################################################
-    # REBOOT IF REQUIRED
-    #####################################################################
+      rescue:
 
-    - name: Reboot if required
-      ansible.builtin.reboot:
-        reboot_timeout: 900
-      when: reboot_file.stat.exists
+        - name: Mark host as failed
+          set_fact:
+            patch_result:
+              host: "{{ inventory_hostname }}"
+              changed: false
+              reboot_required: false
+              failed: true
+              running_kernel: "{{ running_kernel.stdout | default('unknown') }}"
+              latest_kernel: "{{ latest_kernel.stdout | default('unknown') }}"
 
-    #####################################################################
-    # CLEAN PER-HOST SUMMARY
-    #####################################################################
+    ###################################################################
+    # PER-HOST CLEAN OUTPUT
+    ###################################################################
+    - name: Per-host summary
+      debug:
+        msg: >
+          Host: {{ inventory_hostname }} |
+          Updated: {{ patch_result.changed }} |
+          Reboot: {{ patch_result.reboot_required }} |
+          Failed: {{ patch_result.failed }} |
+          Running Kernel: {{ patch_result.running_kernel }} |
+          Latest Kernel: {{ patch_result.latest_kernel }}
 
-    - name: Print per-host summary
-      ansible.builtin.debug:
+- name: Aggregate Patch Results
+  hosts: localhost
+  gather_facts: false
+  tasks:
+
+    - name: Collect results
+      set_fact:
+        results: >-
+          {{
+            groups['all']
+            | map('extract', hostvars, 'patch_result')
+            | select('defined')
+            | list
+          }}
+
+    - name: Print final summary
+      debug:
         msg: |
-          {{ inventory_hostname }} |
-          Updated: {{ upgrade_result.changed }} |
-          Reboot: {{ reboot_file.stat.exists }}
+          ===================================
+          TOTAL HOSTS: {{ results | length }}
+          UPDATED: {{ results | selectattr('changed') | list | length }}
+          REBOOT REQUIRED: {{ results | selectattr('reboot_required') | list | length }}
+          FAILED: {{ results | selectattr('failed') | list | length }}
+          ===================================
+
+    - name: Fail pipeline if any failures in prod
+      fail:
+        msg: "Patch failures detected in production!"
+      when:
+        - env == "prod"
+        - (results | selectattr('failed') | list | length) > 0
