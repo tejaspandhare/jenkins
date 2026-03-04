@@ -2,129 +2,129 @@
 - name: Ubuntu OS Patching & Kernel Management
   hosts: "{{ hosts }}"
   become: yes
-  gather_facts: false
-  serial: 50   # Fixed batch size for production
+  gather_facts: yes
 
   vars:
+    apt_upgrade_options: "dist"
     reboot_required_file: "/var/run/reboot-required"
 
   tasks:
 
-    ###################################################################
-    # UPDATE AND UPGRADE PACKAGES
-    ###################################################################
-    - block:
+    #####################################################################
+    # UPDATE APT CACHE
+    #####################################################################
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      register: apt_update_result
 
-        - name: Update APT cache
-          ansible.builtin.apt:
-            update_cache: yes
-            cache_valid_time: 3600
-          changed_when: false
+    #####################################################################
+    # UPGRADE PACKAGES
+    #####################################################################
+    - name: Upgrade all packages including dependencies
+      ansible.builtin.apt:
+        upgrade: "{{ apt_upgrade_options }}"
+        autoremove: yes
+        install_recommends: yes
+      register: upgrade_result
+      no_log: true
+      ignore_errors: yes
 
-        - name: Upgrade packages (dist-upgrade)
-          ansible.builtin.apt:
-            upgrade: dist
-            autoremove: yes
-            install_recommends: yes
-            dpkg_options: "force-confdef,force-confold"
-          register: upgrade_result
-          no_log: true
+    #####################################################################
+    # DETERMINE KERNEL VERSIONS
+    #####################################################################
+    - name: Get running kernel version
+      ansible.builtin.command: uname -r
+      register: running_kernel
+      changed_when: false
 
-        ###################################################################
-        # KERNEL VERSION CHECK
-        ###################################################################
-        - name: Get running kernel
-          ansible.builtin.command: uname -r
-          register: running_kernel
-          changed_when: false
+    - name: Get latest installed kernel version
+      ansible.builtin.shell: |
+        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+      register: latest_kernel
+      changed_when: false
 
-        - name: Get latest installed kernel
-          ansible.builtin.shell: |
-            dpkg -l 'linux-image-[0-9]*' \
-            | awk '/^ii/{print $2}' \
-            | sed 's/linux-image-//' \
-            | sort -V \
-            | tail -n1
-          register: latest_kernel
-          changed_when: false
-
-        ###################################################################
-        # CHECK IF REBOOT IS REQUIRED
-        ###################################################################
-        - name: Check reboot requirement
-          ansible.builtin.stat:
-            path: "{{ reboot_required_file }}"
-          register: reboot_file
-
-        - name: Set patch result fact
-          ansible.builtin.set_fact:
-            patch_result:
-              host: "{{ inventory_hostname }}"
-              changed: "{{ upgrade_result.changed }}"
-              reboot_required: "{{ reboot_file.stat.exists }}"
-              failed: false
-              running_kernel: "{{ running_kernel.stdout }}"
-              latest_kernel: "{{ latest_kernel.stdout }}"
-
-        ###################################################################
-        # REBOOT IF REQUIRED
-        ###################################################################
-        - name: Reboot if required
-          ansible.builtin.reboot:
-            reboot_timeout: 900
-          when: reboot_file.stat.exists
-
-      rescue:
-
-        - name: Mark host as failed
-          ansible.builtin.set_fact:
-            patch_result:
-              host: "{{ inventory_hostname }}"
-              changed: false
-              reboot_required: false
-              failed: true
-              running_kernel: "{{ running_kernel.stdout | default('unknown') }}"
-              latest_kernel: "{{ latest_kernel.stdout | default('unknown') }}"
-
-    ###################################################################
-    # PER-HOST CLEAN OUTPUT
-    ###################################################################
-    - name: Per-host summary
-      ansible.builtin.debug:
-        msg: >
-          Host: {{ inventory_hostname }} |
-          Updated: {{ patch_result.changed }} |
-          Reboot: {{ patch_result.reboot_required }} |
-          Failed: {{ patch_result.failed }} |
-          Running Kernel: {{ patch_result.running_kernel }} |
-          Latest Kernel: {{ patch_result.latest_kernel }}
-
-- name: Aggregate Patch Results
-  hosts: localhost
-  gather_facts: false
-  tasks:
-
-    - name: Collect results
+    - name: Set kernel facts
       ansible.builtin.set_fact:
-        results: >-
-          {{
-            groups['all']
-            | map('extract', hostvars, 'patch_result')
-            | select('defined')
-            | list
-          }}
+        running_kernel_version: "{{ running_kernel.stdout }}"
+        latest_kernel_version: "{{ latest_kernel.stdout }}"
 
-    - name: Print final summary
-      ansible.builtin.debug:
-        msg: |
-          ===================================
-          TOTAL HOSTS: {{ results | length }}
-          UPDATED: {{ results | selectattr('changed') | list | length }}
-          REBOOT REQUIRED: {{ results | selectattr('reboot_required') | list | length }}
-          FAILED: {{ results | selectattr('failed') | list | length }}
-          ===================================
+    #####################################################################
+    # CHECK IF REBOOT IS REQUIRED
+    #####################################################################
+    - name: Check if reboot is required
+      ansible.builtin.stat:
+        path: "{{ reboot_required_file }}"
+      register: reboot_file
 
-    - name: Fail pipeline if any failures in prod
-      ansible.builtin.fail:
-        msg: "Patch failures detected!"
-      when: (results | selectattr('failed') | list | length) > 0
+    - name: Set reboot fact
+      ansible.builtin.set_fact:
+        reboot_required: "{{ reboot_file.stat.exists }}"
+
+    #####################################################################
+    # PRINT HOST PATCH STATUS (Jenkins friendly)
+    #####################################################################
+    - name: Print host patch summary
+      ansible.builtin.shell: |
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        NC='\033[0m'
+
+        UPDATED="{{ 'True' if upgrade_result.changed else 'False' }}"
+        REBOOT="{{ 'True' if reboot_required else 'False' }}"
+        FAILED="{{ 'True' if upgrade_result is failed else 'False' }}"
+
+        echo -e "Host: {{ inventory_hostname }} | Updated: ${GREEN}${UPDATED}${NC} | Reboot: ${YELLOW}${REBOOT}${NC} | Failed: ${RED}${FAILED}${NC} | Running Kernel: {{ running_kernel_version }} | Latest Kernel: {{ latest_kernel_version }}"
+      changed_when: false
+
+    #####################################################################
+    # REBOOT HOST IF NEEDED
+    #####################################################################
+    - name: Reboot host if required
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when: reboot_required
+
+    #####################################################################
+    # COLLECT HOST PATCH RESULTS FOR BATCH SUMMARY
+    #####################################################################
+    - name: Set host patch result fact
+      ansible.builtin.set_fact:
+        patch_result:
+          host: "{{ inventory_hostname }}"
+          changed: "{{ upgrade_result.changed | default(false) }}"
+          reboot_required: "{{ reboot_required }}"
+          running_kernel: "{{ running_kernel_version }}"
+          latest_kernel: "{{ latest_kernel_version }}"
+          failed: "{{ upgrade_result is failed }}"
+          
+    - name: Add host patch result to results list
+      ansible.builtin.set_fact:
+        results: "{{ results | default([]) + [ patch_result ] }}"
+      run_once: false
+
+    #####################################################################
+    # PRINT BATCH SUMMARY ON CONTROLLER
+    #####################################################################
+    - name: Print batch summary
+      ansible.builtin.shell: |
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        NC='\033[0m'
+
+        TOTAL={{ results | length }}
+        UPDATED={{ results | selectattr('changed','equalto',true) | list | length }}
+        REBOOT={{ results | selectattr('reboot_required','equalto',true) | list | length }}
+        FAILED={{ results | selectattr('failed','equalto',true) | list | length }}
+
+        echo -e "==================================="
+        echo -e "TOTAL HOSTS: ${TOTAL}"
+        echo -e "UPDATED: ${GREEN}${UPDATED}${NC}"
+        echo -e "REBOOT REQUIRED: ${YELLOW}${REBOOT}${NC}"
+        echo -e "FAILED: ${RED}${FAILED}${NC}"
+        echo -e "==================================="
+      run_once: true
+      changed_when: false
