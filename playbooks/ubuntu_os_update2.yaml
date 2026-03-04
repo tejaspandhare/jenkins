@@ -1,142 +1,91 @@
 ---
-- name: Cross-Platform OS Patching and Kernel Management
-  hosts: "{{ hosts.split(';') }}"
-  gather_facts: true
+- name: Ubuntu OS Patch & Kernel Update
+  hosts: "{{ hosts }}"
+  gather_facts: yes
   become: true
 
   vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | reject('equalto','') | list }}"
+    # Safe defaults
+    reboot_required: false
+    running_kernel_version: "{{ ansible_kernel }}"
+    latest_kernel_version: ""
 
   tasks:
 
-  #####################################################################
-  # DISPLAY OS INFO
-  #####################################################################
-  - name: Display detected OS information
-    debug:
-      msg:
-        - "OS Family: {{ ansible_facts['os_family'] }}"
-        - "Distribution: {{ ansible_facts['distribution'] }}"
-        - "Version: {{ ansible_facts['distribution_version'] }}"
+    #####################################################################
+    # UPDATE APT CACHE AND FIX BROKEN PACKAGES
+    #####################################################################
+    - name: Fix broken packages
+      apt:
+        fix_broken: yes
+      register: fix_result
+      changed_when: fix_result.changed
 
-  #####################################################################
-  # PACKAGE UPDATES
-  #####################################################################
-  - name: Update and upgrade (Debian/Ubuntu)
-    apt:
-      update_cache: yes
-      upgrade: dist
-      autoremove: yes
-      autoclean: yes
-    when: ansible_facts['os_family'] == "Debian"
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+      register: apt_update
+      changed_when: apt_update.changed
 
-  - name: Update packages (RHEL 7 and below)
-    yum:
-      name: "*"
-      state: latest
-    when:
-      - ansible_facts['os_family'] == "RedHat"
-      - ansible_facts['distribution_major_version'] | int < 8
+    #####################################################################
+    # FULL UPGRADE (install all pending updates, including kernel)
+    #####################################################################
+    - name: Perform full upgrade
+      apt:
+        upgrade: dist
+      register: upgrade_result
+      changed_when: upgrade_result.changed
 
-  - name: Update packages (RHEL 8+ / Alma / Rocky)
-    dnf:
-      name: "*"
-      state: latest
-    when:
-      - ansible_facts['os_family'] == "RedHat"
-      - ansible_facts['distribution_major_version'] | int >= 8
+    #####################################################################
+    # DETERMINE LATEST INSTALLED KERNEL
+    #####################################################################
+    - name: Get latest installed kernel
+      shell: |
+        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+      register: latest_kernel
+      changed_when: false
 
-  - name: Update packages (SUSE)
-    zypper:
-      name: "*"
-      state: latest
-    when: ansible_facts['os_family'] == "Suse"
+    - name: Set latest kernel fact
+      set_fact:
+        latest_kernel_version: "{{ latest_kernel.stdout }}"
 
-  #####################################################################
-  # HOLD PACKAGES (Debian Only)
-  #####################################################################
-  - name: Hold excluded packages (Debian-based)
-    command: apt-mark hold {{ item }}
-    loop: "{{ exclude_packages_list }}"
-    when:
-      - ansible_facts['os_family'] == "Debian"
-      - exclude_packages_list | length > 0
-    ignore_errors: true
+    #####################################################################
+    # CHECK IF REBOOT IS REQUIRED
+    #####################################################################
+    - name: Check if reboot required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_file
+      changed_when: false
 
-  #####################################################################
-  # KERNEL CHECK
-  #####################################################################
-  - name: Get running kernel version
-    command: uname -r
-    register: running_kernel
-    changed_when: false
+    - name: Set reboot fact
+      set_fact:
+        reboot_required: "{{ reboot_file.stat.exists }}"
 
-  - name: Get latest installed kernel (Debian/Ubuntu)
-    shell: |
-      dpkg --list | grep '^ii' | grep 'linux-image-[0-9]' | awk '{print $2}' | sort -V | tail -n1
-    register: latest_kernel_debian
-    changed_when: false
-    failed_when: false
-    when: ansible_facts['os_family'] == "Debian"
-
-  - name: Get latest installed kernel (RedHat-based)
-    shell: |
-      rpm -q kernel | sort -V | tail -n1
-    register: latest_kernel_redhat
-    changed_when: false
-    failed_when: false
-    when: ansible_facts['os_family'] == "RedHat"
-
-  - name: Get latest installed kernel (SUSE-based)
-    shell: |
-      rpm -q kernel-default | sort -V | tail -n1
-    register: latest_kernel_suse
-    changed_when: false
-    failed_when: false
-    when: ansible_facts['os_family'] == "Suse"
-
-  #####################################################################
-  # NORMALIZE KERNEL VARIABLES
-  #####################################################################
-  - name: Normalize kernel variables
-    set_fact:
-      running_kernel_version: "{{ running_kernel.stdout | default('UNKNOWN') | trim }}"
-      latest_kernel_version: >-
-        {{ (latest_kernel_debian.stdout | regex_replace('^linux-image-', '') if latest_kernel_debian is defined and latest_kernel_debian.stdout | length > 0 else
-           (latest_kernel_redhat.stdout if latest_kernel_redhat is defined else
-           (latest_kernel_suse.stdout if latest_kernel_suse is defined else 'UNKNOWN'))) | trim }}
-
-  #####################################################################
-  # REBOOT LOGIC - All kernel updates
-  #####################################################################
-  - name: Determine if reboot is required (any kernel change)
-    set_fact:
-      reboot_required: "{{ running_kernel_version != latest_kernel_version and latest_kernel_version != 'UNKNOWN' }}"
-
-  #####################################################################
-  # DISPLAY KERNEL STATUS (ANSI colors)
-  #####################################################################
-  - name: Display kernel comparison
-    debug:
-      msg: |
-        \033[1;34m==============================\033[0m
-        \033[1;36mRunning Kernel: \033[0m {{ running_kernel_version }}
-        \033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel_version }}
+    #####################################################################
+    # DISPLAY KERNEL STATUS WITH COLORS (Jenkins Console Friendly)
+    #####################################################################
+    - name: Display kernel comparison in colors
+      shell: |
+        echo -e "\033[1;34m==============================\033[0m"
+        echo -e "\033[1;36mRunning Kernel: \033[0m {{ running_kernel_version }}"
+        echo -e "\033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel_version }}"
         {% if reboot_required %}
-        \033[1;31mReboot Required: YES\033[0m
-        \033[1;33mKernel after reboot: \033[0m {{ latest_kernel_version }}
+        echo -e "\033[1;31mReboot Required: YES\033[0m"
+        echo -e "\033[1;33mKernel after reboot: \033[0m {{ latest_kernel_version }}"
         {% else %}
-        \033[1;32mReboot Required: NO\033[0m
-        \033[1;33mKernel after reboot: \033[0m {{ running_kernel_version }}
+        echo -e "\033[1;32mReboot Required: NO\033[0m"
+        echo -e "\033[1;33mKernel after reboot: \033[0m {{ running_kernel_version }}"
         {% endif %}
-        \033[1;34m==============================\033[0m
+        echo -e "\033[1;34m==============================\033[0m"
+      changed_when: false
 
-  #####################################################################
-  # REBOOT IF NEEDED
-  #####################################################################
-  - name: Reboot system if new kernel detected
-    reboot:
-      msg: "Reboot triggered by Ansible (new kernel installed)"
-      reboot_timeout: 900
-    when: reboot_required
+    #####################################################################
+    # SAFE REBOOT IF NEEDED
+    #####################################################################
+    - name: Reboot the server if required
+      reboot:
+        reboot_timeout: 600
+        pre_reboot_delay: 5
+        post_reboot_delay: 10
+      when: reboot_required
