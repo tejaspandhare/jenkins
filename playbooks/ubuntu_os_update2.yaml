@@ -1,39 +1,55 @@
 ---
-- name: Ubuntu OS Patching & Kernel Management
+- name: Ubuntu OS Patching & Kernel Management (Clean Output)
   hosts: "{{ hosts }}"
   become: yes
   gather_facts: yes
+
   vars:
-    apt_upgrade_options: "dist"
     reboot_required_file: "/var/run/reboot-required"
 
   tasks:
 
     #####################################################################
-    # UPDATE APT CACHE AND UPGRADE PACKAGES
+    # UPDATE CACHE (Silent)
     #####################################################################
+
     - name: Update APT cache
       ansible.builtin.apt:
         update_cache: yes
         cache_valid_time: 3600
+      changed_when: false
 
-    - name: Upgrade all packages including dependencies
+    #####################################################################
+    # DIST-UPGRADE (Suppress dpkg Noise)
+    #####################################################################
+
+    - name: Upgrade all packages (dist-upgrade)
       ansible.builtin.apt:
-        upgrade: "{{ apt_upgrade_options }}"
+        upgrade: dist
         autoremove: yes
         install_recommends: yes
+        dpkg_options:
+          - "--force-confdef"
+          - "--force-confold"
       register: upgrade_result
+      no_log: true
 
     #####################################################################
-    # DETERMINE KERNEL VERSIONS
+    # KERNEL INFORMATION
     #####################################################################
+
     - name: Get running kernel version
       ansible.builtin.command: uname -r
       register: running_kernel
+      changed_when: false
 
     - name: Get latest installed kernel version
       ansible.builtin.shell: |
-        dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1 | sed 's/linux-image-//'
+        dpkg -l 'linux-image-[0-9]*' \
+        | awk '/^ii/{print $2}' \
+        | sed 's/linux-image-//' \
+        | sort -V \
+        | tail -n1
       register: latest_kernel
       changed_when: false
 
@@ -43,55 +59,49 @@
         latest_kernel_version: "{{ latest_kernel.stdout }}"
 
     #####################################################################
-    # CHECK IF REBOOT IS REQUIRED
+    # REBOOT CHECK
     #####################################################################
+
     - name: Check if reboot is required
       ansible.builtin.stat:
         path: "{{ reboot_required_file }}"
       register: reboot_file
 
-    - name: Set reboot fact
+    - name: Set reboot_required fact
       ansible.builtin.set_fact:
         reboot_required: "{{ reboot_file.stat.exists }}"
 
     #####################################################################
-    # PRINT KERNEL STATUS WITH COLORS (Jenkins friendly)
+    # CLEAN SUMMARY (ONLY THIS SHOWS IN JENKINS)
     #####################################################################
-    - name: Print kernel versions in color
-      ansible.builtin.shell: |
-        echo -e "\033[1;34m==============================\033[0m"
-        echo -e "\033[1;36mRunning Kernel: \033[0m {{ running_kernel_version }}"
-        echo -e "\033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel_version }}"
-        {% if reboot_required %}
-        echo -e "\033[1;31mReboot Required: YES\033[0m"
-        {% else %}
-        echo -e "\033[1;32mReboot Required: NO\033[0m"
-        {% endif %}
-        echo -e "\033[1;33mKernel after reboot: \033[0m {{ latest_kernel_version }}"
-        echo -e "\033[1;34m==============================\033[0m"
-      changed_when: false
+
+    - name: Display patch summary
+      ansible.builtin.debug:
+        msg:
+          - "================================="
+          - "Host: {{ inventory_hostname }}"
+          - "Packages Updated: {{ upgrade_result.changed }}"
+          - "Running Kernel: {{ running_kernel_version }}"
+          - "Latest Installed Kernel: {{ latest_kernel_version }}"
+          - "Reboot Required: {{ reboot_required }}"
+          - "================================="
 
     #####################################################################
-    # REBOOT HOST IF NEEDED
+    # REBOOT IF REQUIRED
     #####################################################################
+
     - name: Reboot host if required
       ansible.builtin.reboot:
         reboot_timeout: 600
       when: reboot_required
 
-    #####################################################################
-    # VERIFY KERNEL AFTER REBOOT
-    #####################################################################
-    - name: Get running kernel version after reboot
+    - name: Verify kernel after reboot
       ansible.builtin.command: uname -r
       register: post_reboot_kernel
       changed_when: false
       when: reboot_required
 
-    - name: Print kernel after reboot
-      ansible.builtin.shell: |
-        {% if reboot_required %}
-        echo -e "\033[1;33mKernel after reboot: \033[0m {{ post_reboot_kernel.stdout }}"
-        {% endif %}
-      changed_when: false
+    - name: Display post-reboot kernel
+      ansible.builtin.debug:
+        msg: "Kernel after reboot: {{ post_reboot_kernel.stdout }}"
       when: reboot_required
