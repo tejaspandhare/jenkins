@@ -1,121 +1,98 @@
 ---
-- name: Perform Maintenance Tasks
-  hosts: "{{ hosts.split(';') }}"
-  gather_facts: true
-  become: true
+- name: Ubuntu OS Patching & Kernel Management
+  hosts: "{{ hosts }}"
+  become: yes
+  gather_facts: yes
 
   vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | list }}"
-    
+    reboot_required_file: "/var/run/reboot-required"
+
   tasks:
 
-    - name: Remove disabled snaps - list all snaps
-      ansible.builtin.shell: "snap list --all"
-      register: snap_list_output
-      changed_when: false
-
-    - name: Extract disabled snaps and prepare for removal
-      set_fact:
-        disabled_snaps: >-
-          {{
-            snap_list_output.stdout_lines
-            | select("search", "disabled")
-            | map("regex_search", "^(\S+)\s+\S+\s+\S+\s+disabled\s+.*", "\\1")
-            | select("string")
-            | list
-          }}
-
-    - name: Remove disabled snaps
-      ansible.builtin.shell: "snap remove {{ item }} --purge"
-      loop: "{{ disabled_snaps }}"
-      ignore_errors: true
-      changed_when: true
-
-    - name: Vacuum journalctl logs to limit size to 20M
-      ansible.builtin.shell: "journalctl --vacuum-size=20M"
-      changed_when: true
-
-    - name: Fix Broken packages
-      ansible.builtin.shell: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
-      changed_when: false
+    #####################################################################
+    # UPDATE & UPGRADE
+    #####################################################################
 
     - name: Update APT cache
       ansible.builtin.apt:
         update_cache: yes
+        cache_valid_time: 3600
 
-    - name: Check current kernel version
-      ansible.builtin.command: uname -r
-      register: kernel_version_before
-      changed_when: false
-
-    - name: Hold specified packages
-      ansible.builtin.shell: "apt-mark hold {{ item }}"
-      loop: "{{ exclude_packages_list }}"
-      when: exclude_packages_list | length > 0
-      ignore_errors: true
-      changed_when: true
-
-    - name: Perform OS patch update
+    - name: Upgrade all packages (dist-upgrade)
       ansible.builtin.apt:
         upgrade: dist
-        update_cache: no
-      register: apt_upgrade_result
-      changed_when: "'upgraded' in apt_upgrade_result.stdout_lines | join(' ')"
+        autoremove: yes
+        install_recommends: yes
+      register: upgrade_result
 
-    - name: Get latest installed kernel version from dpkg.log
-      ansible.builtin.shell: |
-        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
-      register: latest_kernel_install
+    #####################################################################
+    # KERNEL INFORMATION
+    #####################################################################
+
+    - name: Get running kernel version
+      ansible.builtin.command: uname -r
+      register: running_kernel
       changed_when: false
 
-    - name: Debug extracted latest kernel version
-      ansible.builtin.debug:
-        msg: "Latest installed kernel version: {{ latest_kernel_install.stdout.strip() }}"
+    - name: Get latest installed kernel version
+      ansible.builtin.shell: |
+        dpkg -l 'linux-image-[0-9]*' \
+        | awk '/^ii/{print $2}' \
+        | sed 's/linux-image-//' \
+        | sort -V \
+        | tail -n1
+      register: latest_kernel
+      changed_when: false
 
-    - name: Determine if reboot is required
-      set_fact:
-        reboot_required: >-
-          {{ not kernel_version_before.stdout.strip().startswith(latest_kernel_install.stdout.strip()) }}
+    - name: Set kernel facts
+      ansible.builtin.set_fact:
+        running_kernel_version: "{{ running_kernel.stdout }}"
+        latest_kernel_version: "{{ latest_kernel.stdout }}"
 
-    - name: Debug kernel comparison
+    #####################################################################
+    # REBOOT CHECK
+    #####################################################################
+
+    - name: Check if reboot is required
+      ansible.builtin.stat:
+        path: "{{ reboot_required_file }}"
+      register: reboot_file
+
+    - name: Set reboot_required fact
+      ansible.builtin.set_fact:
+        reboot_required: "{{ reboot_file.stat.exists }}"
+
+    #####################################################################
+    # CLEAN SUMMARY OUTPUT (JENKINS FRIENDLY)
+    #####################################################################
+
+    - name: Display patching summary
       ansible.builtin.debug:
         msg:
-          - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
-          - "Latest installed kernel: {{ latest_kernel_install.stdout.strip() }}"
-          - "Reboot required: {{ reboot_required }}"
+          - "================================="
+          - "Host: {{ inventory_hostname }}"
+          - "Packages changed: {{ upgrade_result.changed }}"
+          - "Running Kernel: {{ running_kernel_version }}"
+          - "Latest Installed Kernel: {{ latest_kernel_version }}"
+          - "Reboot Required: {{ reboot_required }}"
+          - "================================="
 
-    - name: Reboot if a new kernel is installed
+    #####################################################################
+    # REBOOT IF REQUIRED
+    #####################################################################
+
+    - name: Reboot host if required
       ansible.builtin.reboot:
+        reboot_timeout: 600
       when: reboot_required
-      ignore_errors: true
-      changed_when: true
 
-    # -------------------
-    # Ansible temp cleanup
-    # -------------------
+    - name: Verify kernel after reboot
+      ansible.builtin.command: uname -r
+      register: post_reboot_kernel
+      changed_when: false
+      when: reboot_required
 
-    - name: Find all ansiballz_cache folders under Jenkins home
-      ansible.builtin.find:
-        paths: /var/jenkins_home/.ansible/tmp
-        patterns: ansiballz_cache
-        recurse: yes
-        file_type: directory
-      register: ansiballz_dirs
-
-    - name: Print found ansiballz_cache directories
+    - name: Display post-reboot kernel
       ansible.builtin.debug:
-        var: ansiballz_dirs.files | map(attribute='path') | list
-
-    - name: Remove all found ansiballz_cache directories
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ ansiballz_dirs.files }}"
-      ignore_errors: true
-
-    - name: Remove all ansible-local-* temp directories completely
-      ansible.builtin.shell: "rm -rf /var/jenkins_home/.ansible/tmp/ansible-local-*"
-      args:
-        warn: false
-      ignore_errors: true
+        msg: "Kernel after reboot: {{ post_reboot_kernel.stdout }}"
+      when: reboot_required
