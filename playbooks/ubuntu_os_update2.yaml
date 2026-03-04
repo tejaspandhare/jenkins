@@ -1,10 +1,8 @@
 ---
-# ubuntu_os_update_full.yaml
 - name: Ubuntu OS Full Patching & Kernel Check
   hosts: "{{ hosts | default('all') }}"
   become: yes
   gather_facts: yes
-  remote_tmp: /tmp/ansible_tmp  # avoids ansiballz_cache issues
 
   vars:
     reboot_required: false
@@ -12,66 +10,53 @@
   tasks:
 
     #####################################################################
-    # UPDATE APT CACHE & FIX BROKEN PACKAGES
+    # UPDATE APT CACHE AND FIX BROKEN PACKAGES
     #####################################################################
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
         cache_valid_time: 3600
 
-    - name: Upgrade all packages including minor kernel updates
+    - name: Upgrade all packages including kernel
       ansible.builtin.apt:
         upgrade: dist
-        autoremove: yes
         install_recommends: yes
 
     #####################################################################
-    # GET CURRENT & LATEST INSTALLED KERNEL
+    # GET KERNEL INFORMATION
     #####################################################################
     - name: Get running kernel version
-      ansible.builtin.shell: uname -r
+      ansible.builtin.command: uname -r
       register: running_kernel
       changed_when: false
 
-    - name: Get latest installed kernel package
+    - name: Get latest installed kernel version
       ansible.builtin.shell: |
         dpkg -l 'linux-image-*' | awk '/^ii/{print $2}' | sort -V | tail -n1
       register: latest_kernel
       changed_when: false
 
-    - name: Strip linux-image- prefix for display
-      ansible.builtin.set_fact:
-        latest_kernel_display: "{{ latest_kernel.stdout | regex_replace('^linux-image-', '') }}"
-
     #####################################################################
-    # CHECK IF REBOOT REQUIRED
+    # DETERMINE IF REBOOT IS REQUIRED
     #####################################################################
     - name: Check if reboot required
       ansible.builtin.stat:
         path: /var/run/reboot-required
       register: reboot_file
 
-    - name: Set reboot flag
+    - name: Set reboot fact
       ansible.builtin.set_fact:
         reboot_required: "{{ reboot_file.stat.exists }}"
 
     #####################################################################
-    # PRINT KERNEL STATUS WITH COLORS
+    # PRINT KERNEL STATUS
     #####################################################################
-    - name: Print kernel status
+    - name: Show kernel and reboot status
       ansible.builtin.debug:
         msg: |
           \033[1;34m==============================\033[0m
           \033[1;36mRunning Kernel: \033[0m {{ running_kernel.stdout }}
-          \033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel_display }}
-          \033[1;{{ '31' if reboot_required else '32' }}mReboot Required: \033[0m {{ 'YES' if reboot_required else 'NO' }}
-          \033[1;33mKernel after reboot: \033[0m {{ latest_kernel_display }}
+          \033[1;32mLatest Installed Kernel: \033[0m {{ latest_kernel.stdout }}
+          \033[1;32mReboot Required: \033[0m {{ 'YES' if reboot_required else 'NO' }}
+          \033[1;33mKernel after reboot: \033[0m {{ latest_kernel.stdout }}
           \033[1;34m==============================\033[0m
-
-    #####################################################################
-    # REBOOT IF REQUIRED
-    #####################################################################
-    - name: Reboot server if required
-      ansible.builtin.reboot:
-        reboot_timeout: 600
-      when: reboot_required
