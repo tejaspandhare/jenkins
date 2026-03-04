@@ -1,8 +1,8 @@
 ---
-- name: Ubuntu OS Patching & Kernel Management (Enterprise Clean)
+- name: Ubuntu OS Patching & Kernel Management (Clean Output)
   hosts: "{{ hosts }}"
   become: yes
-  gather_facts: false
+  gather_facts: yes
 
   vars:
     reboot_required_file: "/var/run/reboot-required"
@@ -10,17 +10,7 @@
   tasks:
 
     #####################################################################
-    # MINIMAL FACTS (avoid 300+ lines of ansible_facts output)
-    #####################################################################
-
-    - name: Gather minimal system facts
-      ansible.builtin.setup:
-        gather_subset:
-          - min
-      changed_when: false
-
-    #####################################################################
-    # UPDATE CACHE (silent)
+    # UPDATE CACHE (Silent)
     #####################################################################
 
     - name: Update APT cache
@@ -30,7 +20,7 @@
       changed_when: false
 
     #####################################################################
-    # DIST-UPGRADE (no dpkg scroll in logs)
+    # DIST-UPGRADE (Suppress dpkg Noise)
     #####################################################################
 
     - name: Upgrade all packages (dist-upgrade)
@@ -82,19 +72,19 @@
         reboot_required: "{{ reboot_file.stat.exists }}"
 
     #####################################################################
-    # CLEAN SUMMARY (ONLY VISIBLE OUTPUT)
+    # CLEAN SUMMARY (ONLY THIS SHOWS IN JENKINS)
     #####################################################################
 
     - name: Display patch summary
       ansible.builtin.debug:
-        msg: |
-          =================================
-          Host: {{ inventory_hostname }}
-          Packages Updated: {{ upgrade_result.changed }}
-          Running Kernel: {{ running_kernel_version }}
-          Latest Installed Kernel: {{ latest_kernel_version }}
-          Reboot Required: {{ reboot_required }}
-          =================================
+        msg:
+          - "================================="
+          - "Host: {{ inventory_hostname }}"
+          - "Packages Updated: {{ upgrade_result.changed }}"
+          - "Running Kernel: {{ running_kernel_version }}"
+          - "Latest Installed Kernel: {{ latest_kernel_version }}"
+          - "Reboot Required: {{ reboot_required }}"
+          - "================================="
 
     #####################################################################
     # REBOOT IF REQUIRED
