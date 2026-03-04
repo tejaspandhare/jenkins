@@ -1,24 +1,21 @@
 ---
-- name: Ubuntu OS Patching & Kernel Management
+- name: Ubuntu OS Patching
   hosts: "{{ hosts }}"
   become: yes
   gather_facts: yes
 
   vars:
-    apt_upgrade_options: "dist"
     reboot_required_file: "/var/run/reboot-required"
 
   tasks:
-
     - name: Update APT cache
       ansible.builtin.apt:
         update_cache: yes
         cache_valid_time: 3600
-      register: apt_update_result
 
     - name: Upgrade all packages including dependencies
       ansible.builtin.apt:
-        upgrade: "{{ apt_upgrade_options }}"
+        upgrade: dist
         autoremove: yes
         install_recommends: yes
       register: upgrade_result
@@ -42,7 +39,7 @@
       register: reboot_file
 
     - name: Set host patch result
-      ansible.builtin.set_fact:
+      set_fact:
         patch_result:
           host: "{{ inventory_hostname }}"
           changed: "{{ upgrade_result.changed | default(false) }}"
@@ -51,22 +48,16 @@
           latest_kernel: "{{ latest_kernel.stdout }}"
           failed: "{{ upgrade_result is failed }}"
 
-    - name: Add host patch result to localhost facts
-      ansible.builtin.add_host:
-        name: localhost
-        patch_result: "{{ patch_result }}"
-
-- name: Print batch summary
+- name: Print patch summary
   hosts: localhost
   gather_facts: false
   tasks:
-
     - name: Aggregate all host results
-      ansible.builtin.set_fact:
-        results: "{{ groups['all'] | map('extract', hostvars, 'patch_result') | list }}"
+      set_fact:
+        results: "{{ hostvars | dict2items | map(attribute='value.patch_result') | select('defined') | list }}"
 
     - name: Display concise summary
-      ansible.builtin.debug:
+      debug:
         msg: |
           ===================================
           TOTAL HOSTS: {{ results | length }}
