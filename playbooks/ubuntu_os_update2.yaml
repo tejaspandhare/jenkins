@@ -51,16 +51,19 @@
           latest_kernel: "{{ latest_kernel.stdout }}"
           failed: "{{ upgrade_result is failed }}"
 
-    - name: Append host patch result to global results
-      ansible.builtin.set_fact:
-        results: "{{ (hostvars['localhost'].results | default([])) + [ patch_result ] }}"
-      delegate_to: localhost
-      run_once: false
+    - name: Add host patch result to localhost facts
+      ansible.builtin.add_host:
+        name: localhost
+        patch_result: "{{ patch_result }}"
 
 - name: Print batch summary
   hosts: localhost
   gather_facts: false
   tasks:
+
+    - name: Aggregate all host results
+      ansible.builtin.set_fact:
+        results: "{{ groups['all'] | map('extract', hostvars, 'patch_result') | list }}"
 
     - name: Display concise summary
       ansible.builtin.debug:
