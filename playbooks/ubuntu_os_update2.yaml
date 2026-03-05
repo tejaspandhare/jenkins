@@ -46,7 +46,6 @@
       when: ansible_os_family == "Debian"
       no_log: true
 
-
     ############################################################
     # RHEL / CENTOS / ROCKY / ALMALINUX
     ############################################################
@@ -73,7 +72,6 @@
         reboot_required: "{{ reboot_check.rc == 1 }}"
       when: ansible_os_family == "RedHat"
       no_log: true
-
 
     ############################################################
     # SLES / SUSE
@@ -107,7 +105,6 @@
         reboot_required: "{{ reboot_check_suse.stdout != '' }}"
       when: ansible_os_family == "Suse"
       no_log: true
-
 
     ############################################################
     # RESULT OUTPUT (CLEAN FOR JENKINS)
@@ -143,9 +140,16 @@
 
   tasks:
 
-    - name: Build server list
+    - name: Collect patch results safely
       set_fact:
-        results: "{{ groups['all'] | map('extract', hostvars, 'patch_result') | list }}"
+        results: >-
+          {{
+            groups['all']
+            | map('extract', hostvars)
+            | selectattr('patch_result', 'defined')
+            | map(attribute='patch_result')
+            | list
+          }}
 
     - name: Count updated servers
       set_fact:
