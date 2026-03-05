@@ -1,109 +1,126 @@
 ---
-#############################################
-# UNIVERSAL LINUX PATCHING
-# Supports:
-# Ubuntu / Debian
-# RHEL / CentOS / Rocky / Alma
-# SLES
-#############################################
-
-- name: Linux OS Patching
-  hosts: "{{ hosts.split(',') }}"
+- name: Universal Linux OS Patching
+  hosts: "{{ hosts }}"
   become: yes
   gather_facts: yes
-  serial: 50
+
+  vars:
+    reboot_required: false
 
   tasks:
 
-    - name: Start patching
+    - name: Show host and OS
       debug:
         msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
 
-################################################
-# UBUNTU / DEBIAN
-################################################
+    ############################################################
+    # UBUNTU / DEBIAN
+    ############################################################
 
     - name: Update apt cache
       apt:
         update_cache: yes
       when: ansible_os_family == "Debian"
-      register: update_result
       changed_when: false
+      no_log: true
 
-    - name: Upgrade Ubuntu packages
+    - name: Upgrade Ubuntu/Debian packages
       apt:
         upgrade: dist
         autoremove: yes
       when: ansible_os_family == "Debian"
       register: upgrade_result
       ignore_errors: yes
+      no_log: true
 
-################################################
-# RHEL / CENTOS / ROCKY / ALMA
-################################################
-
-    - name: Upgrade RHEL family packages
-      dnf:
-        name: "*"
-        state: latest
-      when: ansible_os_family == "RedHat"
-      register: upgrade_result
-      ignore_errors: yes
-
-################################################
-# SLES
-################################################
-
-    - name: Upgrade SLES packages
-      zypper:
-        name: "*"
-        state: latest
-      when: ansible_os_family == "Suse"
-      register: upgrade_result
-      ignore_errors: yes
-
-################################################
-# REBOOT CHECK
-################################################
-
-    - name: Check reboot (Debian)
+    - name: Check reboot required (Ubuntu)
       stat:
         path: /var/run/reboot-required
       when: ansible_os_family == "Debian"
       register: reboot_file
+      no_log: true
 
-    - name: Check reboot (RHEL family)
-      shell: needs-restarting -r
+    - name: Set reboot fact Ubuntu
+      set_fact:
+        reboot_required: "{{ reboot_file.stat.exists }}"
+      when: ansible_os_family == "Debian"
+      no_log: true
+
+
+    ############################################################
+    # RHEL / CENTOS / ROCKY / ALMALINUX
+    ############################################################
+
+    - name: Upgrade RHEL family packages
+      dnf:
+        name: '*'
+        state: latest
       when: ansible_os_family == "RedHat"
+      register: upgrade_result
+      ignore_errors: yes
+      no_log: true
+
+    - name: Check reboot requirement (RHEL)
+      command: needs-restarting -r
       register: reboot_check
       failed_when: false
       changed_when: false
+      when: ansible_os_family == "RedHat"
+      no_log: true
 
-    - name: Check reboot (SLES)
-      shell: zypper ps
+    - name: Set reboot fact RHEL
+      set_fact:
+        reboot_required: "{{ reboot_check.rc == 1 }}"
+      when: ansible_os_family == "RedHat"
+      no_log: true
+
+
+    ############################################################
+    # SLES / SUSE
+    ############################################################
+
+    - name: Refresh zypper repositories
+      command: zypper refresh
       when: ansible_os_family == "Suse"
+      changed_when: false
+      no_log: true
+
+    - name: Upgrade SLES packages
+      zypper:
+        name: '*'
+        state: latest
+      when: ansible_os_family == "Suse"
+      register: upgrade_result
+      ignore_errors: yes
+      no_log: true
+
+    - name: Check reboot required (SLES)
+      command: zypper ps -s
       register: reboot_check_suse
       failed_when: false
       changed_when: false
+      when: ansible_os_family == "Suse"
+      no_log: true
 
-################################################
-# NORMALIZE REBOOT STATUS
-################################################
-
-    - name: Set reboot fact
+    - name: Set reboot fact SUSE
       set_fact:
-        reboot_required: >-
-          {{
-          (ansible_os_family == 'Debian' and reboot_file.stat.exists)
-          or
-          (ansible_os_family == 'RedHat' and reboot_check.rc != 0)
-          or
-          (ansible_os_family == 'Suse' and reboot_check_suse.stdout != "")
-          }}
+        reboot_required: "{{ reboot_check_suse.stdout != '' }}"
+      when: ansible_os_family == "Suse"
+      no_log: true
 
-################################################
-# STORE HOST RESULT
-################################################
+
+    ############################################################
+    # RESULT OUTPUT (CLEAN FOR JENKINS)
+    ############################################################
+
+    - name: Print patch result
+      debug:
+        msg: >
+          Host={{ inventory_hostname }}
+          OS={{ ansible_distribution }}
+          Updated={{ upgrade_result.changed | default(false) }}
+          RebootRequired={{ reboot_required }}
+          Failed={{ upgrade_result.failed | default(false) }}
 
     - name: Save patch result
       set_fact:
@@ -113,14 +130,12 @@
           updated: "{{ upgrade_result.changed | default(false) }}"
           failed: "{{ upgrade_result.failed | default(false) }}"
           reboot_required: "{{ reboot_required }}"
+      no_log: true
 
-    - name: Host patch summary
-      debug:
-        msg: "Host={{ patch_result.host }} OS={{ patch_result.os }} Updated={{ patch_result.updated }} Reboot={{ patch_result.reboot_required }} Failed={{ patch_result.failed }}"
 
-################################################
-# FINAL SUMMARY
-################################################
+############################################################
+# PATCH SUMMARY
+############################################################
 
 - name: Patch Summary
   hosts: localhost
@@ -128,16 +143,21 @@
 
   tasks:
 
-    - name: Collect results
+    - name: Build server list
       set_fact:
-        patch_results: "{{ groups['all'] | map('extract', hostvars, 'patch_result') | select('defined') | list }}"
+        results: "{{ groups['all'] | map('extract', hostvars, 'patch_result') | list }}"
 
-    - name: Calculate stats
+    - name: Count updated servers
       set_fact:
-        total_hosts: "{{ patch_results | length }}"
-        updated_hosts: "{{ patch_results | selectattr('updated','equalto',true) | list | length }}"
-        failed_hosts: "{{ patch_results | selectattr('failed','equalto',true) | list | length }}"
-        reboot_hosts: "{{ patch_results | selectattr('reboot_required','equalto',true) | list | length }}"
+        updated_servers: "{{ results | selectattr('updated','equalto',true) | list | length }}"
+
+    - name: Count failed servers
+      set_fact:
+        failed_servers: "{{ results | selectattr('failed','equalto',true) | list | length }}"
+
+    - name: Count reboot required
+      set_fact:
+        reboot_servers: "{{ results | selectattr('reboot_required','equalto',true) | list | length }}"
 
     - name: Print summary
       debug:
@@ -145,8 +165,8 @@
           ======================================
           UNIVERSAL LINUX PATCH SUMMARY
           ======================================
-          Total Servers   : {{ total_hosts }}
-          Updated Servers : {{ updated_hosts }}
-          Failed Servers  : {{ failed_hosts }}
-          Reboot Required : {{ reboot_hosts }}
+          Total Servers   : {{ results | length }}
+          Updated Servers : {{ updated_servers }}
+          Failed Servers  : {{ failed_servers }}
+          Reboot Required : {{ reboot_servers }}
           ======================================
