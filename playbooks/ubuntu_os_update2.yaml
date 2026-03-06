@@ -1,142 +1,161 @@
 ---
 ############################################################
-# UNIVERSAL LINUX PATCHING
+# ENTERPRISE LINUX PATCHING PLAYBOOK
 ############################################################
 
-- name: Universal Linux OS Patching
+- name: Enterprise Linux OS Patching
   hosts: "{{ hosts }}"
   become: yes
+  serial: 1
   gather_facts: yes
 
   vars:
     reboot_required: false
+    reboot_timeout: 600
 
   tasks:
 
-  ############################################################
-  # SHOW HOST INFO
-  ############################################################
+############################################################
+# START MESSAGE
+############################################################
 
-    - name: Show host and OS
-      debug:
-        msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
+  - name: Show patch start
+    debug:
+      msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
 
-  ############################################################
-  # CAPTURE OLD KERNEL
-  ############################################################
+############################################################
+# CAPTURE OLD KERNEL
+############################################################
 
-    - name: Capture current kernel before patch
-      command: uname -r
-      register: old_kernel
-      changed_when: false
+  - name: Capture current kernel
+    command: uname -r
+    register: old_kernel
+    changed_when: false
 
-  ############################################################
-  # UBUNTU / DEBIAN PATCHING
-  ############################################################
+############################################################
+# UBUNTU / DEBIAN
+############################################################
 
-    - name: Update apt cache
-      apt:
-        update_cache: yes
-      when: ansible_os_family == "Debian"
-      changed_when: false
-      no_log: true
+  - name: Update apt cache
+    apt:
+      update_cache: yes
+    when: ansible_os_family == "Debian"
+    changed_when: false
+    no_log: true
 
-    - name: Upgrade Ubuntu/Debian packages
-      apt:
-        upgrade: dist
-        autoremove: yes
-      when: ansible_os_family == "Debian"
-      register: upgrade_result
-      ignore_errors: yes
-      no_log: true
+  - name: Upgrade Debian packages
+    apt:
+      upgrade: dist
+      autoremove: yes
+    when: ansible_os_family == "Debian"
+    register: upgrade_result
+    ignore_errors: yes
+    no_log: true
 
-  ############################################################
-  # RHEL / CENTOS / ROCKY / ALMALINUX PATCHING
-  ############################################################
+############################################################
+# RHEL FAMILY
+############################################################
 
-    - name: Upgrade RHEL family packages
-      dnf:
-        name: '*'
-        state: latest
-      when: ansible_os_family == "RedHat"
-      register: upgrade_result
-      ignore_errors: yes
-      no_log: true
+  - name: Upgrade RHEL packages
+    dnf:
+      name: "*"
+      state: latest
+    when: ansible_os_family == "RedHat"
+    register: upgrade_result
+    ignore_errors: yes
+    no_log: true
 
-  ############################################################
-  # SLES / SUSE PATCHING
-  ############################################################
+############################################################
+# SUSE
+############################################################
 
-    - name: Refresh zypper repositories
-      command: zypper refresh
-      when: ansible_os_family == "Suse"
-      changed_when: false
-      no_log: true
+  - name: Refresh SUSE repos
+    command: zypper refresh
+    when: ansible_os_family == "Suse"
+    changed_when: false
+    no_log: true
 
-    - name: Upgrade SLES packages
-      zypper:
-        name: '*'
-        state: latest
-      when: ansible_os_family == "Suse"
-      register: upgrade_result
-      ignore_errors: yes
-      no_log: true
+  - name: Upgrade SUSE packages
+    zypper:
+      name: "*"
+      state: latest
+    when: ansible_os_family == "Suse"
+    register: upgrade_result
+    ignore_errors: yes
+    no_log: true
 
-  ############################################################
-  # CAPTURE NEW KERNEL
-  ############################################################
+############################################################
+# CAPTURE NEW KERNEL
+############################################################
 
-    - name: Capture kernel after patch
-      command: uname -r
-      register: new_kernel
-      changed_when: false
+  - name: Capture new kernel
+    command: uname -r
+    register: new_kernel
+    changed_when: false
 
-  ############################################################
-  # DETERMINE REBOOT REQUIRED
-  ############################################################
+############################################################
+# DETECT KERNEL CHANGE
+############################################################
 
-    - name: Check if reboot required by kernel change
-      set_fact:
-        reboot_required: "{{ old_kernel.stdout != new_kernel.stdout }}"
+  - name: Determine if reboot required
+    set_fact:
+      reboot_required: "{{ old_kernel.stdout != new_kernel.stdout }}"
 
-  ############################################################
-  # CLEAN OUTPUT PER SERVER
-  ############################################################
+############################################################
+# AUTO REBOOT IF REQUIRED
+############################################################
 
-    - name: Print patch result
-      debug:
-        msg: |
-          ======================================
-          Host : {{ inventory_hostname }}
-          OS   : {{ ansible_distribution }}
+  - name: Reboot server if kernel updated
+    reboot:
+      msg: "Reboot triggered by Ansible patching"
+      reboot_timeout: "{{ reboot_timeout }}"
+    when: reboot_required
 
-          Old Kernel : {{ old_kernel.stdout }}
-          New Kernel : {{ new_kernel.stdout }}
+############################################################
+# WAIT FOR SERVER
+############################################################
 
-          Reboot Required : {{ reboot_required }}
-          Updated         : {{ upgrade_result.changed | default(false) }}
-          Failed          : {{ upgrade_result.failed | default(false) }}
-          ======================================
+  - name: Wait for server to come back
+    wait_for_connection:
+      delay: 10
+      timeout: 300
+    when: reboot_required
 
-  ############################################################
-  # SAVE PATCH RESULT
-  ############################################################
+############################################################
+# CLEAN SERVER OUTPUT
+############################################################
 
-    - name: Save patch result
-      set_fact:
-        patch_result:
-          host: "{{ inventory_hostname }}"
-          os: "{{ ansible_distribution }}"
-          old_kernel: "{{ old_kernel.stdout }}"
-          new_kernel: "{{ new_kernel.stdout }}"
-          updated: "{{ upgrade_result.changed | default(false) }}"
-          failed: "{{ upgrade_result.failed | default(false) }}"
-          reboot_required: "{{ reboot_required }}"
+  - name: Print patch result
+    debug:
+      msg: |
+        ======================================
+        Host : {{ inventory_hostname }}
+        OS   : {{ ansible_distribution }}
+
+        Old Kernel : {{ old_kernel.stdout }}
+        New Kernel : {{ new_kernel.stdout }}
+
+        Patch Status    : {{ 'Patched' if upgrade_result.changed else 'No Updates Available' }}
+        Reboot Required : {{ reboot_required }}
+        ======================================
+
+############################################################
+# SAVE RESULT
+############################################################
+
+  - name: Save patch result
+    set_fact:
+      patch_result:
+        host: "{{ inventory_hostname }}"
+        os: "{{ ansible_distribution }}"
+        updated: "{{ upgrade_result.changed | default(false) }}"
+        failed: "{{ upgrade_result.failed | default(false) }}"
+        reboot_required: "{{ reboot_required }}"
       no_log: true
 
 
 ############################################################
-# PATCH SUMMARY (RUNS ON JENKINS / LOCALHOST)
+# FINAL PATCH REPORT
 ############################################################
 
 - name: Patch Summary
@@ -145,37 +164,37 @@
 
   tasks:
 
-    - name: Collect patch results
-      set_fact:
-        results: >-
-          {{
-            groups['all']
-            | map('extract', hostvars)
-            | selectattr('patch_result', 'defined')
-            | map(attribute='patch_result')
-            | list
-          }}
+  - name: Collect results
+    set_fact:
+      results: >-
+        {{
+          groups['all']
+          | map('extract', hostvars)
+          | selectattr('patch_result','defined')
+          | map(attribute='patch_result')
+          | list
+        }}
 
-    - name: Count patched servers
-      set_fact:
-        updated_servers: "{{ results | selectattr('updated','equalto',true) | list | length }}"
+  - name: Count patched servers
+    set_fact:
+      patched: "{{ results | selectattr('updated','equalto',true) | list | length }}"
 
-    - name: Count failed servers
-      set_fact:
-        failed_servers: "{{ results | selectattr('failed','equalto',true) | list | length }}"
+  - name: Count failed servers
+    set_fact:
+      failed: "{{ results | selectattr('failed','equalto',true) | list | length }}"
 
-    - name: Count reboot required
-      set_fact:
-        reboot_servers: "{{ results | selectattr('reboot_required','equalto',true) | list | length }}"
+  - name: Count reboot servers
+    set_fact:
+      reboot: "{{ results | selectattr('reboot_required','equalto',true) | list | length }}"
 
-    - name: Print final patch summary
-      debug:
-        msg: |
-          ======================================
-          UNIVERSAL LINUX PATCH SUMMARY
-          ======================================
-          Total Servers     : {{ results | length }}
-          Patched Servers   : {{ updated_servers }}
-          Failed Servers    : {{ failed_servers }}
-          Reboot Required   : {{ reboot_servers }}
-          ======================================
+  - name: Print final report
+    debug:
+      msg: |
+        ======================================
+        ENTERPRISE LINUX PATCH SUMMARY
+        ======================================
+        Total Servers   : {{ results | length }}
+        Patched Servers : {{ patched }}
+        Failed Servers  : {{ failed }}
+        Rebooted        : {{ reboot }}
+        ======================================
