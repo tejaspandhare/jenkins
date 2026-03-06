@@ -1,0 +1,12 @@
+---
+- name: Enterprise Linux Patching
+  hosts: "{{ hosts }}"
+  become: yes
+  serial: 5
+  gather_facts: yes
+
+  roles:
+    - precheck
+    - patch
+    - reboot
+    - postcheck
