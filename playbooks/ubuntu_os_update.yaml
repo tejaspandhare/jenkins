@@ -1,90 +1,100 @@
 ---
-- name: Perform Maintenance Tasks
-  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: true  # Ensure facts are gathered to check OS version
-  become: true
+- name: Ubuntu OS Patching & Kernel Management
+  hosts: "{{ hosts }}"
+  become: yes
+  gather_facts: yes
 
   vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') }}"  # Retrieve EXCLUDE_PKGS from environment
-    exclude_packages_list: "{{ EXCLUDE_PKGS.split(';') | map('trim') | select('string') | list }}"
+    reboot_required_file: "/var/run/reboot-required"
+
+    # ANSI colors
+    GREEN: "\033[0;32m"
+    RED: "\033[0;31m"
+    YELLOW: "\033[0;33m"
+    BLUE: "\033[0;34m"
+    RESET: "\033[0m"
 
   tasks:
-    - name: Remove disabled snaps
-      ansible.builtin.shell:
-        cmd: "snap list --all"
-      register: snap_list_output
-      changed_when: false
 
-    - name: Process snap list output and remove disabled snaps
-      ansible.builtin.shell:
-        cmd: "snap remove {{ item.0 }} --revision={{ item.1 }}"
-      with_items: "{{ snap_list_output.stdout_lines }}"
-      when: "'disabled' in item"
-      changed_when: false
+  #####################################################################
+  # UPDATE & UPGRADE
+  #####################################################################
 
-    - name: Vacuum journalctl logs to limit size to 20M
-      ansible.builtin.shell:
-        cmd: "journalctl --vacuum-size=20M"
-      changed_when: false
+  - name: Update APT cache
+    apt:
+      update_cache: yes
+      cache_valid_time: 3600
 
-    - name: Fix Broken packages
-      ansible.builtin.shell:
-        cmd: "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
-      changed_when: false
-      
-    - name: Perform apt update to check for updates
-      ansible.builtin.shell:
-        cmd: "apt update"
-      changed_when: false
+  - name: Upgrade all packages
+    apt:
+      upgrade: dist
+      autoremove: yes
+      install_recommends: yes
+    register: upgrade_result
 
-    - name: Check kernel version before patching
-      ansible.builtin.command:
-        cmd: "uname -r"
-      register: kernel_version_before
-      changed_when: false
+  #####################################################################
+  # KERNEL INFORMATION
+  #####################################################################
 
-    - name: Hold specified packages
-      ansible.builtin.shell:
-        cmd: "apt-mark hold {{ item }}"
-      with_items: "{{ EXCLUDE_PKGS.split(';') }}"
-      when: EXCLUDE_PKGS is defined and EXCLUDE_PKGS | length > 0
-      ignore_errors: true
-      changed_when: false
+  - name: Get running kernel
+    command: uname -r
+    register: running_kernel
+    changed_when: false
 
-    - name: Perform OS patch update
-      ansible.builtin.shell:
-        cmd: "DEBIAN_FRONTEND=noninteractive apt dist-upgrade -y"
-      register: apt_upgrade_simulate
-      changed_when: false
+  - name: Get latest installed kernel
+    shell: |
+      dpkg -l 'linux-image-[0-9]*' \
+      | awk '/^ii/{print $2}' \
+      | sed 's/linux-image-//' \
+      | sort -V \
+      | tail -n1
+    register: latest_kernel
+    changed_when: false
 
+  #####################################################################
+  # REBOOT CHECK
+  #####################################################################
 
-    - name: Get current kernel version
-      command: uname -r
-      register: kernel_version_before
+  - name: Check if reboot required
+    stat:
+      path: "{{ reboot_required_file }}"
+    register: reboot_file
 
-    - name: Get the latest installed kernel version from dpkg.log
-      shell: |
-        grep 'install linux-image' /var/log/dpkg.log | tail -n 1 | awk '{print $4}' | cut -d ":" -f1 | cut -d "-" -f3-
-      register: latest_kernel_install
-      changed_when: false
+  - name: Set reboot flag
+    set_fact:
+      reboot_required: "{{ reboot_file.stat.exists }}"
 
-    - name: Debug extracted latest kernel version
-      debug:
-        msg: "Latest installed kernel version: {{ latest_kernel_install.stdout }}"
+  #####################################################################
+  # CLEAN SUMMARY OUTPUT
+  #####################################################################
 
-    - name: Check if a new kernel was installed
-      set_fact:
-        reboot_required: "{{ latest_kernel_install.stdout.strip() != kernel_version_before.stdout.strip() }}"
+  - name: Patching Summary
+    debug:
+      msg: |
+        {{ BLUE }}============================================{{ RESET }}
+        {{ GREEN }}Host                :{{ RESET }} {{ inventory_hostname }}
+        {{ GREEN }}Packages Updated    :{{ RESET }} {{ upgrade_result.changed }}
+        {{ GREEN }}Running Kernel      :{{ RESET }} {{ running_kernel.stdout }}
+        {{ GREEN }}Latest Kernel       :{{ RESET }} {{ latest_kernel.stdout }}
+        {{ YELLOW }}Reboot Required     :{{ RESET }} {{ reboot_required }}
+        {{ BLUE }}============================================{{ RESET }}
 
-    - name: Debug information about kernel versions
-      debug:
-        msg:
-          - "Current kernel version: {{ kernel_version_before.stdout.strip() }}"
-          - "New kernel version detected: {{ latest_kernel_install.stdout.strip() }}"
-          - "Reboot required: {{ reboot_required }}"
+  #####################################################################
+  # REBOOT IF REQUIRED
+  #####################################################################
 
-    - name: Reboot if a new kernel is installed
-      ansible.builtin.reboot:
-      when: reboot_required
-      ignore_errors: true
-      changed_when: true
+  - name: Reboot system if needed
+    reboot:
+      reboot_timeout: 600
+    when: reboot_required
+
+  - name: Verify kernel after reboot
+    command: uname -r
+    register: post_kernel
+    changed_when: false
+    when: reboot_required
+
+  - name: Post reboot kernel info
+    debug:
+      msg: "{{ GREEN }}Kernel after reboot:{{ RESET }} {{ post_kernel.stdout }}"
+    when: reboot_required
