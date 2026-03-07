@@ -2,136 +2,148 @@
 - name: Enterprise Linux OS Patching
   hosts: "{{ hosts }}"
   become: yes
-  gather_facts: false
-  serial: 3
+  gather_facts: yes
 
   vars:
     reboot_timeout: 600
+    patch_results: []
 
   tasks:
 
-  ########################################################
-  # MINIMAL FACTS
-  ########################################################
+    #####################################################################
+    # PRE PATCH HEALTH CHECK
+    #####################################################################
+    - name: Show patch start
+      ansible.builtin.shell: |
+        echo -e "\033[0;34m============================================\033[0m"
+        echo -e "\033[0;32mStarting patching on: \033[0m {{ inventory_hostname }} ({{ ansible_distribution }})"
+        echo -e "\033[0;34m============================================\033[0m"
+      changed_when: false
 
-  - name: Gather minimal facts
-    setup:
-      gather_subset:
-        - min
+    - name: Check disk space
+      ansible.builtin.command: df -h /
+      register: disk_check
+      changed_when: false
 
-  ########################################################
-  # PATCH START MESSAGE
-  ########################################################
+    - name: Check load average
+      ansible.builtin.command: uptime
+      register: load_check
+      changed_when: false
 
-  - name: Patch start
-    debug:
-      msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
+    #####################################################################
+    # CAPTURE CURRENT KERNEL
+    #####################################################################
+    - name: Capture current kernel
+      ansible.builtin.command: uname -r
+      register: old_kernel
+      changed_when: false
 
-  ########################################################
-  # PRE PATCH CHECK
-  ########################################################
+    #####################################################################
+    # PATCHING
+    #####################################################################
+    - name: Update Debian/Ubuntu
+      ansible.builtin.apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+      when: ansible_os_family == "Debian"
+      register: patch_result
+      ignore_errors: yes
 
-  - name: Check disk space
-    shell: df --output=avail -k / | tail -1
-    register: disk
-    changed_when: false
-    failed_when: disk.stdout | int < 1048576
+    - name: Update RHEL/CentOS/Rocky/Alma
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+      when: ansible_os_family == "RedHat"
+      register: patch_result
+      ignore_errors: yes
 
-  ########################################################
-  # CAPTURE CURRENT KERNEL
-  ########################################################
+    - name: Update SUSE/SLES
+      ansible.builtin.zypper:
+        name: "*"
+        state: latest
+      when: ansible_os_family == "Suse"
+      register: patch_result
+      ignore_errors: yes
 
-  - name: Get current kernel
-    command: uname -r
-    register: old_kernel
-    changed_when: false
+    #####################################################################
+    # CHECK IF REBOOT REQUIRED
+    #####################################################################
+    - name: Set reboot_required fact
+      ansible.builtin.set_fact:
+        reboot_required: >-
+          {{
+            (ansible_os_family == "Debian" and (ansible_facts['ansible_local'].reboot_required | default(false))) 
+            or (ansible_os_family in ["RedHat", "Suse"] and (ansible_facts['ansible_kernel'] != ansible_facts['ansible_kernel_release']))
+          }}
 
-  ########################################################
-  # PATCH SYSTEM
-  ########################################################
+    #####################################################################
+    # REBOOT IF REQUIRED
+    #####################################################################
+    - name: Reboot system if required
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ reboot_timeout }}"
+      when: reboot_required
 
-  - name: Patch Debian/Ubuntu
-    apt:
-      update_cache: yes
-      upgrade: dist
-      autoremove: yes
-    when: ansible_os_family == "Debian"
-    register: patch_result
+    - name: Wait for server after reboot
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+      when: reboot_required
 
-  - name: Patch RHEL/Rocky/Alma
-    dnf:
-      name: "*"
-      state: latest
-    when: ansible_os_family == "RedHat"
-    register: patch_result
+    #####################################################################
+    # POST PATCH VALIDATION
+    #####################################################################
+    - name: Capture new kernel
+      ansible.builtin.command: uname -r
+      register: new_kernel
+      changed_when: false
 
-  - name: Patch SUSE
-    zypper:
-      name: "*"
-      state: latest
-    when: ansible_os_family == "Suse"
-    register: patch_result
+    - name: Check system running status
+      ansible.builtin.command: systemctl is-system-running
+      register: system_status
+      changed_when: false
+      failed_when: system_status.stdout not in ["running","degraded"]
 
-  ########################################################
-  # CHECK IF REBOOT REQUIRED
-  ########################################################
+    #####################################################################
+    # CLEAN SUMMARY OUTPUT
+    #####################################################################
+    - name: Display patch summary per host
+      ansible.builtin.shell: |
+        echo -e "\033[0;34m============================================\033[0m"
+        echo -e "\033[0;32mHost                :\033[0m {{ inventory_hostname }}"
+        echo -e "\033[0;32mPackages Updated    :\033[0m {{ patch_result.changed | default(false) }}"
+        echo -e "\033[0;32mRunning Kernel      :\033[0m {{ old_kernel.stdout }}"
+        echo -e "\033[0;32mLatest Kernel       :\033[0m {{ new_kernel.stdout }}"
+        echo -e "\033[0;33mReboot Performed    :\033[0m {{ reboot_required }}"
+        echo -e "\033[0;32mSystem Status       :\033[0m {{ system_status.stdout }}"
+        echo -e "\033[0;34m============================================\033[0m"
+      changed_when: false
 
-  - name: Check reboot requirement
-    stat:
-      path: /var/run/reboot-required
-    register: reboot_file
-    when: ansible_os_family == "Debian"
-    changed_when: false
+    #####################################################################
+    # COLLECT RESULTS FOR PLAY RECAP
+    #####################################################################
+    - name: Append host patch result
+      ansible.builtin.set_fact:
+        patch_results: "{{ patch_results + [ {'host': inventory_hostname, 'updated': patch_result.changed | default(false), 'rebooted': reboot_required, 'failed': patch_result.failed | default(false) } ] }}"
 
-  - name: Set reboot flag
-    set_fact:
-      reboot_required: "{{ reboot_file.stat.exists | default(false) }}"
-    changed_when: false
+- name: Display play recap
+  hosts: localhost
+  gather_facts: no
+  vars:
+    patch_results: "{{ hostvars | map(attribute='patch_results') | sum(start=[]) }}"
+  tasks:
+    - name: Play recap
+      ansible.builtin.shell: |
+        TOTAL_HOSTS={{ patch_results | length }}
+        HOSTS_UPDATED={{ patch_results | selectattr('updated','equalto',true) | list | length }}
+        HOSTS_FAILED={{ patch_results | selectattr('failed','equalto',true) | list | length }}
+        HOSTS_REBOOTED={{ patch_results | selectattr('rebooted','equalto',true) | list | length }}
 
-  ########################################################
-  # REBOOT SERVER
-  ########################################################
-
-  - name: Reboot server if required
-    reboot:
-      reboot_timeout: "{{ reboot_timeout }}"
-      msg: "Reboot triggered by Ansible patching"
-    when: reboot_required
-
-  - name: Wait for server after reboot
-    wait_for_connection:
-      delay: 10
-      timeout: 300
-    when: reboot_required
-
-  ########################################################
-  # POST PATCH VALIDATION
-  ########################################################
-
-  - name: Get new kernel
-    command: uname -r
-    register: new_kernel
-    changed_when: false
-
-  - name: Check system status
-    command: systemctl is-system-running
-    register: system_state
-    changed_when: false
-    failed_when: system_state.stdout not in ["running", "degraded"]
-
-  ########################################################
-  # CLEAN PATCH SUMMARY
-  ########################################################
-
-  - name: Patch summary
-    debug:
-      msg: |
-        ==========================================
-        Host            : {{ inventory_hostname }}
-        OS              : {{ ansible_distribution }}
-        Old Kernel      : {{ old_kernel.stdout }}
-        New Kernel      : {{ new_kernel.stdout }}
-        Packages Updated: {{ patch_result.changed | default(false) }}
-        Reboot Performed: {{ reboot_required | default(false) }}
-        System Status   : {{ system_state.stdout }}
-        ==========================================
+        echo -e "\033[0;34m============================================\033[0m"
+        echo -e "\033[0;32mTOTAL HOSTS       :\033[0m $TOTAL_HOSTS"
+        echo -e "\033[0;32mHOSTS UPDATED     :\033[0m $HOSTS_UPDATED"
+        echo -e "\033[0;31mHOSTS FAILED      :\033[0m $HOSTS_FAILED"
+        echo -e "\033[0;33mHOSTS REBOOTED    :\033[0m $HOSTS_REBOOTED"
+        echo -e "\033[0;34m============================================\033[0m"
+      changed_when: false
