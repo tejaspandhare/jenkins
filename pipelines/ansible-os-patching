@@ -47,7 +47,7 @@ pipeline {
 
                         ansible-playbook \
                             -i inventory/hosts \
-                            playbooks/ubuntu_os_update2.yaml \
+                            playbooks/ubuntu_os_update.yaml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "hosts=${SERVER_NAME}"
 
