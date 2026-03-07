@@ -1,6 +1,6 @@
 ---
 ############################################################
-# ENTERPRISE LINUX PATCHING
+# ENTERPRISE LINUX PATCHING PLAYBOOK
 ############################################################
 
 - name: Enterprise Linux OS Patching
@@ -8,44 +8,42 @@
   become: yes
   gather_facts: yes
 
-  serial: 3        # Parallel batching (patch 3 servers at a time)
+  serial: 3
 
   vars:
     reboot_timeout: 600
-    patch_failed: false
-
-############################################################
-# PRE PATCH HEALTH CHECK
-############################################################
 
   tasks:
 
-  - name: Show patch start
+############################################################
+# PATCH START MESSAGE
+############################################################
+
+  - name: Patch start
     debug:
       msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
 
-  - name: Check disk space
-    command: df -h / /var /usr /boot
-    register: disk_check
-    changed_when: false
+############################################################
+# PRE-PATCH HEALTH CHECKS
+############################################################
 
-  - name: Fail if disk space less than 1GB
+  - name: Check disk space
     shell: |
       free=$(df --output=avail -k / | tail -1)
-      if [ "$free" -lt 1048576 ]; then exit 1; fi
-    register: disk_result
-    ignore_errors: yes
+      if [ "$free" -lt 1048576 ]; then
+        echo "LOW_DISK"
+        exit 1
+      fi
+    register: disk_check
     changed_when: false
+    failed_when: disk_check.rc != 0
+    no_log: true
 
-  - name: Stop patching if disk full
-    fail:
-      msg: "Not enough disk space for patching"
-    when: disk_result.rc != 0
-
-  - name: Check load average
+  - name: Check system load
     command: uptime
     register: load_check
     changed_when: false
+    no_log: true
 
 ############################################################
 # CAPTURE CURRENT KERNEL
@@ -55,38 +53,39 @@
     command: uname -r
     register: old_kernel
     changed_when: false
+    no_log: true
 
 ############################################################
-# PATCHING SECTION
+# PATCH OPERATING SYSTEM
 ############################################################
 
-  - name: Update Debian systems
+  - name: Patch Debian / Ubuntu
     apt:
       update_cache: yes
       upgrade: dist
       autoremove: yes
     when: ansible_os_family == "Debian"
     register: patch_result
-    ignore_errors: yes
+    no_log: true
 
-  - name: Update RHEL systems
+  - name: Patch RHEL / Rocky / Alma
     dnf:
       name: "*"
       state: latest
     when: ansible_os_family == "RedHat"
     register: patch_result
-    ignore_errors: yes
+    no_log: true
 
-  - name: Update SUSE systems
+  - name: Patch SUSE
     zypper:
       name: "*"
       state: latest
     when: ansible_os_family == "Suse"
     register: patch_result
-    ignore_errors: yes
+    no_log: true
 
 ############################################################
-# CHECK IF REBOOT REQUIRED
+# DETERMINE REBOOT REQUIREMENT
 ############################################################
 
   - name: Check reboot requirement (Debian)
@@ -94,18 +93,20 @@
       path: /var/run/reboot-required
     register: reboot_file
     when: ansible_os_family == "Debian"
+    no_log: true
 
   - name: Set reboot flag
     set_fact:
       reboot_required: "{{ reboot_file.stat.exists | default(false) }}"
+    no_log: true
 
 ############################################################
-# REBOOT SERVER IF REQUIRED
+# REBOOT IF REQUIRED
 ############################################################
 
-  - name: Reboot system
+  - name: Reboot server
     reboot:
-      msg: "Reboot triggered by patching"
+      msg: "Reboot triggered by Ansible patching"
       reboot_timeout: "{{ reboot_timeout }}"
     when: reboot_required
 
@@ -123,26 +124,28 @@
     command: uname -r
     register: new_kernel
     changed_when: false
+    no_log: true
 
   - name: Detect kernel rollback
     fail:
-      msg: "Kernel rollback detected! Patch might have failed."
+      msg: "Kernel rollback detected"
     when: new_kernel.stdout < old_kernel.stdout
 
-  - name: Check system status
+  - name: Check system state
     command: systemctl is-system-running
     register: system_status
     changed_when: false
     failed_when: system_status.stdout not in ["running","degraded"]
+    no_log: true
 
 ############################################################
-# CLEAN PATCH RESULT OUTPUT
+# CLEAN PATCH SUMMARY
 ############################################################
 
-  - name: Print patch summary
+  - name: Patch summary
     debug:
       msg: |
-        ==========================================
+        ==================================================
         Host            : {{ inventory_hostname }}
         OS              : {{ ansible_distribution }}
 
@@ -150,7 +153,7 @@
         New Kernel      : {{ new_kernel.stdout }}
 
         Packages Updated: {{ patch_result.changed | default(false) }}
-        Reboot Performed: {{ reboot_required }}
+        Reboot Performed: {{ reboot_required | default(false) }}
 
         System Status   : {{ system_status.stdout }}
-        ==========================================
+        ==================================================
