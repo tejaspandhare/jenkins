@@ -20,7 +20,7 @@
         - min
 
   ########################################################
-  # PATCH START
+  # PATCH START MESSAGE
   ########################################################
 
   - name: Patch start
@@ -28,17 +28,17 @@
       msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
 
   ########################################################
-  # PRECHECK
+  # PRE PATCH CHECK
   ########################################################
 
   - name: Check disk space
     shell: df --output=avail -k / | tail -1
     register: disk
     changed_when: false
-    failed_when: disk.stdout|int < 1048576
+    failed_when: disk.stdout | int < 1048576
 
   ########################################################
-  # CURRENT KERNEL
+  # CAPTURE CURRENT KERNEL
   ########################################################
 
   - name: Get current kernel
@@ -50,7 +50,7 @@
   # PATCH SYSTEM
   ########################################################
 
-  - name: Patch Ubuntu/Debian
+  - name: Patch Debian/Ubuntu
     apt:
       update_cache: yes
       upgrade: dist
@@ -58,15 +58,22 @@
     when: ansible_os_family == "Debian"
     register: patch_result
 
-  - name: Patch RHEL
+  - name: Patch RHEL/Rocky/Alma
     dnf:
       name: "*"
       state: latest
     when: ansible_os_family == "RedHat"
     register: patch_result
 
+  - name: Patch SUSE
+    zypper:
+      name: "*"
+      state: latest
+    when: ansible_os_family == "Suse"
+    register: patch_result
+
   ########################################################
-  # REBOOT CHECK
+  # CHECK IF REBOOT REQUIRED
   ########################################################
 
   - name: Check reboot requirement
@@ -74,22 +81,31 @@
       path: /var/run/reboot-required
     register: reboot_file
     when: ansible_os_family == "Debian"
+    changed_when: false
 
   - name: Set reboot flag
     set_fact:
       reboot_required: "{{ reboot_file.stat.exists | default(false) }}"
+    changed_when: false
 
   ########################################################
-  # REBOOT
+  # REBOOT SERVER
   ########################################################
 
   - name: Reboot server if required
     reboot:
       reboot_timeout: "{{ reboot_timeout }}"
+      msg: "Reboot triggered by Ansible patching"
+    when: reboot_required
+
+  - name: Wait for server after reboot
+    wait_for_connection:
+      delay: 10
+      timeout: 300
     when: reboot_required
 
   ########################################################
-  # VALIDATION
+  # POST PATCH VALIDATION
   ########################################################
 
   - name: Get new kernel
@@ -97,13 +113,14 @@
     register: new_kernel
     changed_when: false
 
-  - name: Check system state
+  - name: Check system status
     command: systemctl is-system-running
     register: system_state
     changed_when: false
+    failed_when: system_state.stdout not in ["running", "degraded"]
 
   ########################################################
-  # CLEAN SUMMARY
+  # CLEAN PATCH SUMMARY
   ########################################################
 
   - name: Patch summary
