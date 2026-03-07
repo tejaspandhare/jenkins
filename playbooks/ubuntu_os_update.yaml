@@ -3,35 +3,30 @@
   hosts: "{{ hosts }}"
   become: yes
   gather_facts: yes
+  serial: 3  # parallel batching
 
   vars:
     reboot_required_file: "/var/run/reboot-required"
+    reboot_timeout: 600
 
   tasks:
 
-    ############################################################
-    # START MESSAGE
-    ############################################################
+    #####################################################################
+    # START PATCH
+    #####################################################################
     - name: Show patch start
       ansible.builtin.debug:
-        msg: "\033[0;34m============================================\033[0m\n\033[0;32mStarting patching on {{ inventory_hostname }} ({{ ansible_distribution }})\033[0m\n\033[0;34m============================================\033[0m"
-      changed_when: false
+        msg: "\033[0;34mStarting patching on {{ inventory_hostname }} ({{ ansible_distribution }})\033[0m"
 
-    ############################################################
-    # CAPTURE CURRENT KERNEL
-    ############################################################
-    - name: Get running kernel version
-      ansible.builtin.command: uname -r
-      register: running_kernel
-      changed_when: false
-
-    ############################################################
+    #####################################################################
     # UPDATE & UPGRADE
-    ############################################################
+    #####################################################################
     - name: Update APT cache
       ansible.builtin.apt:
         update_cache: yes
         cache_valid_time: 3600
+      changed_when: false
+      no_log: true
 
     - name: Upgrade all packages (dist-upgrade)
       ansible.builtin.apt:
@@ -40,10 +35,16 @@
         install_recommends: yes
       register: upgrade_result
       ignore_errors: yes
+      no_log: true
 
-    ############################################################
-    # CHECK LATEST INSTALLED KERNEL
-    ############################################################
+    #####################################################################
+    # KERNEL INFORMATION
+    #####################################################################
+    - name: Get running kernel version
+      ansible.builtin.command: uname -r
+      register: running_kernel
+      changed_when: false
+
     - name: Get latest installed kernel version
       ansible.builtin.shell: |
         dpkg -l 'linux-image-[0-9]*' \
@@ -54,9 +55,14 @@
       register: latest_kernel
       changed_when: false
 
-    ############################################################
-    # REBOOT CHECK
-    ############################################################
+    - name: Set kernel facts
+      ansible.builtin.set_fact:
+        running_kernel_version: "{{ running_kernel.stdout }}"
+        latest_kernel_version: "{{ latest_kernel.stdout }}"
+
+    #####################################################################
+    # CHECK REBOOT REQUIRED
+    #####################################################################
     - name: Check if reboot is required
       ansible.builtin.stat:
         path: "{{ reboot_required_file }}"
@@ -64,29 +70,28 @@
 
     - name: Set reboot_required fact
       ansible.builtin.set_fact:
-        reboot_required: "{{ reboot_file.stat.exists }}"
+        reboot_required: "{{ reboot_file.stat.exists | default(false) }}"
 
-    ############################################################
-    # PATCH SUMMARY (Colored, Jenkins-friendly)
-    ############################################################
-    - name: Display patch summary
+    #####################################################################
+    # CLEAN SUMMARY OUTPUT BEFORE REBOOT
+    #####################################################################
+    - name: Display pre-reboot patching summary
       ansible.builtin.debug:
         msg: |
           \033[0;34m============================================\033[0m
           \033[0;32mHost                :\033[0m {{ inventory_hostname }}
           \033[0;32mPackages Updated    :\033[0m {{ upgrade_result.changed | default(false) }}
-          \033[0;32mRunning Kernel      :\033[0m {{ running_kernel.stdout }}
-          \033[0;32mLatest Kernel       :\033[0m {{ latest_kernel.stdout }}
+          \033[0;32mRunning Kernel      :\033[0m {{ running_kernel_version }}
+          \033[0;32mLatest Kernel       :\033[0m {{ latest_kernel_version }}
           \033[0;33mReboot Required     :\033[0m {{ reboot_required }}
           \033[0;34m============================================\033[0m
-      changed_when: false
 
-    ############################################################
+    #####################################################################
     # REBOOT IF REQUIRED
-    ############################################################
+    #####################################################################
     - name: Reboot host if required
       ansible.builtin.reboot:
-        reboot_timeout: 600
+        reboot_timeout: "{{ reboot_timeout }}"
       when: reboot_required
 
     - name: Capture kernel after reboot
@@ -95,15 +100,68 @@
       changed_when: false
       when: reboot_required
 
-    - name: Display kernel after reboot
-      ansible.builtin.debug:
-        msg: "\033[0;32mKernel after reboot:\033[0m {{ post_reboot_kernel.stdout }}"
-      when: reboot_required
-
-    ############################################################
-    # FINAL CHECK: Ensure kernel was updated
-    ############################################################
+    #####################################################################
+    # POST-REBOOT VALIDATION
+    #####################################################################
     - name: Fail if kernel rollback detected
       ansible.builtin.fail:
         msg: "\033[0;31mKernel rollback detected! Patch might have failed.\033[0m"
-      when: post_reboot_kernel is defined and (post_reboot_kernel.stdout < running_kernel.stdout)
+      when: reboot_required and (post_reboot_kernel.stdout is defined) and (post_reboot_kernel.stdout < running_kernel.stdout)
+
+    - name: Check system status
+      ansible.builtin.command: systemctl is-system-running
+      register: system_status
+      changed_when: false
+      failed_when: system_status.stdout not in ["running", "degraded"]
+
+    #####################################################################
+    # CLEAN SUMMARY OUTPUT AFTER PATCH
+    #####################################################################
+    - name: Display final patch summary
+      ansible.builtin.debug:
+        msg: |
+          \033[0;34m============================================\033[0m
+          \033[0;32mHost                :\033[0m {{ inventory_hostname }}
+          \033[0;32mPackages Updated    :\033[0m {{ upgrade_result.changed | default(false) }}
+          \033[0;32mRunning Kernel      :\033[0m {{ running_kernel_version }}
+          \033[0;32mLatest Kernel       :\033[0m {{ latest_kernel_version }}
+          \033[0;33mReboot Performed    :\033[0m {{ reboot_required }}
+          \033[0;32mSystem Status       :\033[0m {{ system_status.stdout }}
+          \033[0;34m============================================\033[0m
+
+    #####################################################################
+    # SAVE RESULTS FOR RECAP
+    #####################################################################
+    - name: Save patch result
+      ansible.builtin.set_fact:
+        patch_result:
+          host: "{{ inventory_hostname }}"
+          updated: "{{ upgrade_result.changed | default(false) }}"
+          rebooted: "{{ reboot_required }}"
+          failed: "{{ upgrade_result.failed | default(false) }}"
+
+- name: Play Recap - Summary of All Hosts
+  hosts: localhost
+  gather_facts: no
+  tasks:
+
+    - name: Collect patch results from all hosts
+      ansible.builtin.set_fact:
+        all_results: >-
+          {{
+            groups['all']
+            | map('extract', hostvars)
+            | selectattr('patch_result','defined')
+            | map(attribute='patch_result')
+            | list
+          }}
+
+    - name: Display play recap
+      ansible.builtin.debug:
+        msg: |
+          \033[0;34m============================================\033[0m
+          \033[0;32mTOTAL HOSTS       :\033[0m {{ all_results | length }}
+          \033[0;32mHOSTS UPDATED     :\033[0m {{ all_results | selectattr('updated','equalto',true) | list | length }}
+          \033[0;31mHOSTS FAILED      :\033[0m {{ all_results | selectattr('failed','equalto',true) | list | length }}
+          \033[0;33mHOSTS REBOOTED    :\033[0m {{ all_results | selectattr('rebooted','equalto',true) | list | length }}
+          \033[0;34m============================================\033[0m
