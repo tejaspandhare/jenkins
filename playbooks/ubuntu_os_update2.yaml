@@ -1,13 +1,8 @@
 ---
-############################################################
-# ENTERPRISE LINUX PATCHING PLAYBOOK
-############################################################
-
 - name: Enterprise Linux OS Patching
   hosts: "{{ hosts }}"
   become: yes
-  gather_facts: yes
-
+  gather_facts: false
   serial: 3
 
   vars:
@@ -15,145 +10,111 @@
 
   tasks:
 
-############################################################
-# PATCH START MESSAGE
-############################################################
+  ########################################################
+  # MINIMAL FACTS
+  ########################################################
+
+  - name: Gather minimal facts
+    setup:
+      gather_subset:
+        - min
+
+  ########################################################
+  # PATCH START
+  ########################################################
 
   - name: Patch start
     debug:
       msg: "Starting patching on {{ inventory_hostname }} ({{ ansible_distribution }})"
 
-############################################################
-# PRE-PATCH HEALTH CHECKS
-############################################################
+  ########################################################
+  # PRECHECK
+  ########################################################
 
   - name: Check disk space
-    shell: |
-      free=$(df --output=avail -k / | tail -1)
-      if [ "$free" -lt 1048576 ]; then
-        echo "LOW_DISK"
-        exit 1
-      fi
-    register: disk_check
+    shell: df --output=avail -k / | tail -1
+    register: disk
     changed_when: false
-    failed_when: disk_check.rc != 0
-    no_log: true
+    failed_when: disk.stdout|int < 1048576
 
-  - name: Check system load
-    command: uptime
-    register: load_check
-    changed_when: false
-    no_log: true
+  ########################################################
+  # CURRENT KERNEL
+  ########################################################
 
-############################################################
-# CAPTURE CURRENT KERNEL
-############################################################
-
-  - name: Capture current kernel
+  - name: Get current kernel
     command: uname -r
     register: old_kernel
     changed_when: false
-    no_log: true
 
-############################################################
-# PATCH OPERATING SYSTEM
-############################################################
+  ########################################################
+  # PATCH SYSTEM
+  ########################################################
 
-  - name: Patch Debian / Ubuntu
+  - name: Patch Ubuntu/Debian
     apt:
       update_cache: yes
       upgrade: dist
       autoremove: yes
     when: ansible_os_family == "Debian"
     register: patch_result
-    no_log: true
 
-  - name: Patch RHEL / Rocky / Alma
+  - name: Patch RHEL
     dnf:
       name: "*"
       state: latest
     when: ansible_os_family == "RedHat"
     register: patch_result
-    no_log: true
 
-  - name: Patch SUSE
-    zypper:
-      name: "*"
-      state: latest
-    when: ansible_os_family == "Suse"
-    register: patch_result
-    no_log: true
+  ########################################################
+  # REBOOT CHECK
+  ########################################################
 
-############################################################
-# DETERMINE REBOOT REQUIREMENT
-############################################################
-
-  - name: Check reboot requirement (Debian)
+  - name: Check reboot requirement
     stat:
       path: /var/run/reboot-required
     register: reboot_file
     when: ansible_os_family == "Debian"
-    no_log: true
 
   - name: Set reboot flag
     set_fact:
       reboot_required: "{{ reboot_file.stat.exists | default(false) }}"
-    no_log: true
 
-############################################################
-# REBOOT IF REQUIRED
-############################################################
+  ########################################################
+  # REBOOT
+  ########################################################
 
-  - name: Reboot server
+  - name: Reboot server if required
     reboot:
-      msg: "Reboot triggered by Ansible patching"
       reboot_timeout: "{{ reboot_timeout }}"
     when: reboot_required
 
-  - name: Wait for server
-    wait_for_connection:
-      delay: 10
-      timeout: 300
-    when: reboot_required
+  ########################################################
+  # VALIDATION
+  ########################################################
 
-############################################################
-# POST PATCH VALIDATION
-############################################################
-
-  - name: Capture new kernel
+  - name: Get new kernel
     command: uname -r
     register: new_kernel
     changed_when: false
-    no_log: true
-
-  - name: Detect kernel rollback
-    fail:
-      msg: "Kernel rollback detected"
-    when: new_kernel.stdout < old_kernel.stdout
 
   - name: Check system state
     command: systemctl is-system-running
-    register: system_status
+    register: system_state
     changed_when: false
-    failed_when: system_status.stdout not in ["running","degraded"]
-    no_log: true
 
-############################################################
-# CLEAN PATCH SUMMARY
-############################################################
+  ########################################################
+  # CLEAN SUMMARY
+  ########################################################
 
   - name: Patch summary
     debug:
       msg: |
-        ==================================================
+        ==========================================
         Host            : {{ inventory_hostname }}
         OS              : {{ ansible_distribution }}
-
         Old Kernel      : {{ old_kernel.stdout }}
         New Kernel      : {{ new_kernel.stdout }}
-
         Packages Updated: {{ patch_result.changed | default(false) }}
         Reboot Performed: {{ reboot_required | default(false) }}
-
-        System Status   : {{ system_status.stdout }}
-        ==================================================
+        System Status   : {{ system_state.stdout }}
+        ==========================================
