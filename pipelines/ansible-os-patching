@@ -8,7 +8,7 @@ pipeline {
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'false'
+        ANSIBLE_FORCE_COLOR = 'true'
         ANSIBLE_STDOUT_CALLBACK = 'minimal'
         ANSIBLE_DISPLAY_SKIPPED_HOSTS = 'false'
     }
@@ -16,7 +16,7 @@ pipeline {
     parameters {
         string(
             name: 'SERVER_NAME',
-            description: 'Target server(s) separated by comma. Example: server1,server2',
+            description: 'Target servers separated by comma (server1,server2)',
             trim: true
         )
     }
@@ -35,31 +35,42 @@ pipeline {
                     if (!params.SERVER_NAME?.trim()) {
                         error("SERVER_NAME parameter cannot be empty.")
                     }
+
+                    echo "Target servers: ${params.SERVER_NAME}"
                 }
             }
         }
 
         stage('Run OS Update & Kernel Check') {
             steps {
-                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
+
                     sh '''
-                        echo "Running OS patching on: ${SERVER_NAME}"
+                        set -e
+
+                        echo "======================================="
+                        echo "Starting OS patching"
+                        echo "Servers: ${SERVER_NAME}"
+                        echo "======================================="
 
                         ansible-playbook \
-                            -i inventory/hosts \
-                            playbooks/ubuntu_os_update.yaml \
-                            --private-key="$ANSIBLE_KEY_FILE" \
-                            -e "hosts=${SERVER_NAME}"
+                          -i inventory/hosts \
+                          playbooks/ubuntu_os_update.yaml \
+                          --private-key="$ANSIBLE_KEY_FILE" \
+                          -e "hosts=${SERVER_NAME}"
 
                         RC=$?
+
+                        echo ""
                         echo "Ansible Exit Code: $RC"
 
-                        # Treat 0 and 2 as success (2 = changes made)
-                        if [ $RC -eq 0 ] || [ $RC -eq 2 ]; then
-                            echo "Ansible completed successfully."
+                        if [ "$RC" -eq 0 ] || [ "$RC" -eq 2 ]; then
+                            echo "OS patching completed successfully."
                             exit 0
                         else
-                            echo "Ansible failed."
+                            echo "OS patching failed."
                             exit $RC
                         fi
                     '''
@@ -71,15 +82,19 @@ pipeline {
     post {
 
         success {
-            echo "Build SUCCESS - OS patching completed."
+            echo "SUCCESS: OS patching completed."
         }
 
         unstable {
-            echo "Build UNSTABLE - Check warnings."
+            echo "UNSTABLE: Check warnings."
         }
 
         failure {
-            echo "Build FAILED - Review logs."
+            echo "FAILED: OS patching encountered errors."
+        }
+
+        always {
+            echo "Build completed at: ${new Date()}"
         }
     }
 }
