@@ -3,20 +3,20 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')               // Enable ANSI color for console
+        ansiColor('xterm')
         buildDiscarder(logRotator(numToKeepStr: '20'))
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true'     // Force color output
-        ANSIBLE_STDOUT_CALLBACK = 'minimal'  // Minimal noise
+        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_STDOUT_CALLBACK = 'minimal'
         ANSIBLE_DISPLAY_SKIPPED_HOSTS = 'false'
     }
 
     parameters {
         string(
             name: 'SERVER_NAME',
-            description: 'Target server(s) separated by comma. Example: lb1,lb2',
+            description: 'Target servers separated by comma (server1,server2)',
             trim: true
         )
     }
@@ -35,32 +35,42 @@ pipeline {
                     if (!params.SERVER_NAME?.trim()) {
                         error("SERVER_NAME parameter cannot be empty.")
                     }
+
+                    echo "Target servers: ${params.SERVER_NAME}"
                 }
             }
         }
 
-        stage('Run OS Patching') {
+        stage('Run OS Update & Kernel Check') {
             steps {
-                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
+
                     sh '''
-                        echo -e "\\033[0;34mStarting OS patching for: ${SERVER_NAME}\\033[0m"
+                        set -e
+
+                        echo "======================================="
+                        echo "Starting OS patching"
+                        echo "Servers: ${SERVER_NAME}"
+                        echo "======================================="
 
                         ansible-playbook \
-                            -i inventory/hosts \
-                            playbooks/ubuntu_os_update2.yaml \
-                            --private-key="$ANSIBLE_KEY_FILE" \
-                            -e "hosts=${SERVER_NAME}" \
-                            -e "ansible_ssh_user=your_user_here"
+                          -i inventory/hosts \
+                          playbooks/ubuntu_os_update.yaml \
+                          --private-key="$ANSIBLE_KEY_FILE" \
+                          -e "hosts=${SERVER_NAME}"
 
                         RC=$?
-                        echo -e "\\033[0;34mAnsible Exit Code: $RC\\033[0m"
 
-                        # Treat 0 and 2 as success (2 = changes made)
-                        if [ $RC -eq 0 ] || [ $RC -eq 2 ]; then
-                            echo -e "\\033[0;32mAnsible completed successfully.\\033[0m"
+                        echo ""
+                        echo "Ansible Exit Code: $RC"
+
+                        if [ "$RC" -eq 0 ] || [ "$RC" -eq 2 ]; then
+                            echo "OS patching completed successfully."
                             exit 0
                         else
-                            echo -e "\\033[0;31mAnsible failed!\\033[0m"
+                            echo "OS patching failed."
                             exit $RC
                         fi
                     '''
@@ -72,15 +82,19 @@ pipeline {
     post {
 
         success {
-            echo -e "\\033[0;32mBuild SUCCESS - OS patching completed.\\033[0m"
+            echo "SUCCESS: OS patching completed."
         }
 
         unstable {
-            echo -e "\\033[0;33mBuild UNSTABLE - Check warnings.\\033[0m"
+            echo "UNSTABLE: Check warnings."
         }
 
         failure {
-            echo -e "\\033[0;31mBuild FAILED - Review logs.\\033[0m"
+            echo "FAILED: OS patching encountered errors."
+        }
+
+        always {
+            echo "Build completed at: ${new Date()}"
         }
     }
 }
