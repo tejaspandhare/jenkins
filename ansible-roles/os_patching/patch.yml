@@ -1,4 +1,8 @@
 ---
+############################################################
+# ENTERPRISE LINUX PATCHING
+############################################################
+
 - name: Enterprise Linux Patching
   hosts: "{{ hosts }}"
   become: yes
@@ -10,3 +14,19 @@
     - patch
     - reboot
     - postcheck
+
+
+############################################################
+# GENERATE PATCH REPORT
+############################################################
+
+- name: Generate patch report
+  hosts: localhost
+  gather_facts: no
+
+  tasks:
+
+    - name: Create HTML report
+      template:
+        src: templates/report.j2
+        dest: reports/patch_report.html

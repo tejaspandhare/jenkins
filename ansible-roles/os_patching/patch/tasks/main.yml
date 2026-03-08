@@ -1,0 +1,13 @@
+- name: Debian patch
+  apt:
+    update_cache: yes
+    upgrade: dist
+  when: ansible_os_family == "Debian"
+  register: upgrade_result
+
+- name: RHEL patch
+  dnf:
+    name: "*"
+    state: latest
+  when: ansible_os_family == "RedHat"
+  register: upgrade_result
