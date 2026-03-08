@@ -1,8 +1,0 @@
-- name: Capture old kernel
-  command: uname -r
-  register: old_kernel
-  changed_when: false
-
-- name: Show patch start
-  debug:
-    msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }})"
