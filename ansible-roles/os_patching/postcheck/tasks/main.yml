@@ -1,0 +1,9 @@
+- name: Save patch result
+  set_fact:
+    patch_result:
+      host: "{{ inventory_hostname }}"
+      os: "{{ ansible_distribution }}"
+      old_kernel: "{{ old_kernel.stdout }}"
+      new_kernel: "{{ new_kernel.stdout }}"
+      updated: "{{ upgrade_result.changed | default(false) }}"
+      reboot: "{{ reboot_required }}"
