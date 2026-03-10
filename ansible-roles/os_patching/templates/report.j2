@@ -1,0 +1,24 @@
+<h2>Linux Patch Report</h2>
+
+<table border="1">
+<tr>
+<th>Server</th>
+<th>OS</th>
+<th>Old Kernel</th>
+<th>New Kernel</th>
+<th>Updated</th>
+<th>Reboot</th>
+</tr>
+
+{% for host in groups['all'] %}
+<tr>
+<td>{{ hostvars[host].patch_result.host }}</td>
+<td>{{ hostvars[host].patch_result.os }}</td>
+<td>{{ hostvars[host].patch_result.old_kernel }}</td>
+<td>{{ hostvars[host].patch_result.new_kernel }}</td>
+<td>{{ hostvars[host].patch_result.updated }}</td>
+<td>{{ hostvars[host].patch_result.reboot }}</td>
+</tr>
+{% endfor %}
+
+</table>
