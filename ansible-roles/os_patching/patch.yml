@@ -4,10 +4,16 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  hosts: "{{ hosts }}"
-  become: yes
-  serial: 5
-  gather_facts: yes
+  hosts: "{{ hosts.split(';') | join(':') }}"
+  gather_facts: true
+
+  vars:
+    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
+    exclude_packages_list: >-
+      {{ EXCLUDE_PKGS.split(';')
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
 
   roles:
     - precheck
