@@ -1,3 +1,5 @@
+---
+
 - name: Capture old kernel
   command: uname -r
   register: old_kernel
@@ -6,3 +8,7 @@
 - name: Show patch start
   debug:
     msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }})"
+
+- name: Initialize reboot flag
+  set_fact:
+    reboot_required: false
