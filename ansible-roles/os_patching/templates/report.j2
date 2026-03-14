@@ -1,39 +1,33 @@
-<style>
-    table { border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; }
-    th { background-color: #f2f2f2; text-align: left; padding: 12px; }
-    td { border: 1px solid #ddd; padding: 8px; }
-    tr:nth-child(even) { background-color: #f9f9f9; }
-    .status-yes { color: green; font-weight: bold; }
-    .status-no { color: red; }
-</style>
+<html>
+<head>
+<title>Patching Report</title>
+</head>
+<body>
 
-<h2>Linux Patching Summary Report</h2>
+<h2>Server Patch Report</h2>
 
-<table>
-    <thead>
-        <tr>
-            <th>Server</th>
-            <th>OS</th>
-            <th>Old Kernel</th>
-            <th>New Kernel</th>
-            <th>Updated</th>
-            <th>Reboot Required</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for host in groups['all'] %}
-        {% if hostvars[host].patch_result is defined %}
-        <tr>
-            <td>{{ hostvars[host].inventory_hostname }}</td>
-            <td>{{ hostvars[host].patch_result.os }}</td>
-            <td>{{ hostvars[host].patch_result.old_kernel }}</td>
-            <td>{{ hostvars[host].patch_result.new_kernel }}</td>
-            <td class="{{ 'status-yes' if hostvars[host].patch_result.updated else 'status-no' }}">
-                {{ hostvars[host].patch_result.updated }}
-            </td>
-            <td>{{ hostvars[host].patch_result.reboot }}</td>
-        </tr>
-        {% endif %}
-    {% endfor %}
-    </tbody>
+<table border="1">
+<tr>
+<th>Host</th>
+<th>OS</th>
+<th>Old Kernel</th>
+<th>New Kernel</th>
+<th>Updated</th>
+<th>Reboot</th>
+</tr>
+
+{% for r in results %}
+<tr>
+<td>{{ r.host }}</td>
+<td>{{ r.os }}</td>
+<td>{{ r.old_kernel }}</td>
+<td>{{ r.new_kernel }}</td>
+<td>{{ r.updated }}</td>
+<td>{{ r.reboot }}</td>
+</tr>
+{% endfor %}
+
 </table>
+
+</body>
+</html>
