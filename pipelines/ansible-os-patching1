@@ -17,18 +17,21 @@ pipeline {
 
         stage('Run OS Patching') {
             steps {
+
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
 
                     script {
 
+                        if (!params.SERVER_NAME?.trim()) {
+                            error("SERVER_NAME parameter cannot be empty")
+                        }
+
                         def hosts = params.SERVER_NAME.replace(";", ",")
 
+                        echo "Running patch on hosts: ${hosts}"
+
                         sh """
-                        ansible-playbook \
-                          -i inventory/hosts \
-                          ansible-roles/os_patching/patch.yml \
-                          --private-key=${ANSIBLE_KEY_FILE} \
-                          -e "hosts=${hosts}"
+                        ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch.yml --private-key=${ANSIBLE_KEY_FILE} -e hosts=${hosts} -vv
                         """
 
                     }
