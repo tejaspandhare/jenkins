@@ -24,7 +24,14 @@
   hosts: localhost
   gather_facts: no
 
+  vars:
+    target_hosts: "{{ hosts }}"
+
   tasks:
+
+    - name: Collect patch results from hosts
+      set_fact:
+        results: "{{ groups[target_hosts] | map('extract', hostvars, 'patch_result') | list }}"
 
     - name: Create HTML report
       template:
