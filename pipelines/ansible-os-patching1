@@ -5,17 +5,14 @@ pipeline {
         string(
             name: 'SERVER_NAME',
             defaultValue: '',
-            description: 'Hosts separated by ; (example: server1;server2)'
+            description: 'Servers separated by ;'
         )
-    }
-
-    environment {
-        ANSIBLE_FORCE_COLOR = 'true'
     }
 
     stages {
 
-        stage('Run OS Patching') {
+        stage('Run Patch') {
+
             steps {
 
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
@@ -28,10 +25,11 @@ pipeline {
 
                         def hosts = params.SERVER_NAME.replace(";", ",")
 
-                        echo "Running patch on hosts: ${hosts}"
+                        echo "Selected hosts: ${hosts}"
 
                         sh """
-                        ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch.yml --private-key=${ANSIBLE_KEY_FILE} -e hosts=${hosts} -vv
+                        chmod 600 ${ANSIBLE_KEY_FILE}
+                        ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch.yml --private-key ${ANSIBLE_KEY_FILE} -e hosts=${hosts} -vv
                         """
 
                     }
