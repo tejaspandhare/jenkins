@@ -1,3 +1,10 @@
+---
+
+- name: Capture new kernel
+  command: uname -r
+  register: new_kernel
+  changed_when: false
+
 - name: Save patch result
   set_fact:
     patch_result:
@@ -6,4 +13,4 @@
       old_kernel: "{{ old_kernel.stdout }}"
       new_kernel: "{{ new_kernel.stdout }}"
       updated: "{{ upgrade_result.changed | default(false) }}"
-      reboot: "{{ reboot_required }}"
+      reboot: "{{ reboot_required | default(false) }}"
