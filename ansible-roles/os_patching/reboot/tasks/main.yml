@@ -1,18 +1,15 @@
-- name: Capture new kernel
-  command: uname -r
-  register: new_kernel
-  changed_when: false
+---
 
-- name: Detect kernel change
+- name: Check if reboot required
   set_fact:
-    reboot_required: "{{ old_kernel.stdout != new_kernel.stdout }}"
+    reboot_required: "{{ upgrade_result.changed | default(false) }}"
 
-- name: Reboot server
+- name: Reboot server if required
   reboot:
     reboot_timeout: 600
   when: reboot_required
 
-- name: Wait for connection
+- name: Wait for connection after reboot
   wait_for_connection:
     delay: 10
     timeout: 300
