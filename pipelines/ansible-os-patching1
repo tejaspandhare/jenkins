@@ -5,7 +5,7 @@ pipeline {
         string(
             name: 'SERVER_NAME',
             defaultValue: '',
-            description: 'List of hosts separated by ;  (example: server1;server2)'
+            description: 'Hosts separated by ; (example: server1;server2)'
         )
     }
 
@@ -17,12 +17,10 @@ pipeline {
 
         stage('Run OS Patching') {
             steps {
-
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
 
                     script {
 
-                        // convert ; → ,
                         def hosts = params.SERVER_NAME.replace(";", ",")
 
                         sh """
