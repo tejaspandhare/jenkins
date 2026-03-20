@@ -8,7 +8,7 @@
   gather_facts: true
 
   vars:
-    EXCLUDE_PKGS: "{{ lookup('env', 'EXCLUDE_PKGS') | default('') }}"
+    EXCLUDE_PKGS: "{{ EXCLUDE_PKGS | default('') }}"
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS.split(';')
          | map('trim')
@@ -34,15 +34,15 @@
     target_hosts: "{{ hosts.split(';') }}"
 
   tasks:
+
     - name: Initialize results list
       set_fact:
         results: []
 
-    - name: Collect patch results from hosts
+    - name: Collect patch results
       set_fact:
         results: "{{ results + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
       loop: "{{ target_hosts }}"
-      when: hostvars[item] is defined
 
     - name: Ensure reports directory exists
       file:
@@ -57,4 +57,4 @@
 
     - name: Show report path
       debug:
-        msg: "Patch report generated at reports/patch_report.html"
+        msg: "Report generated at reports/patch_report.html"
