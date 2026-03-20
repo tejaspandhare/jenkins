@@ -4,12 +4,10 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  # Hosts passed via Jenkins or CLI; default to localhost for testing
   hosts: "{{ hosts | default('localhost') | split(';') | join(':') }}"
   gather_facts: true
 
   vars:
-    # Packages to exclude, passed via Jenkins or CLI
     EXCLUDE_PKGS: "{{ EXCLUDE_PKGS | default('') }}"
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS.split(';')
@@ -33,9 +31,7 @@
   gather_facts: no
 
   vars:
-    # Target hosts list
     target_hosts: "{{ hosts | default('localhost') | split(';') }}"
-    # Use playbook_dir to ensure full paths
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
