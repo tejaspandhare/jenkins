@@ -4,10 +4,12 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  hosts: "{{ hosts.split(';') | join(':') }}"
+  # Hosts are passed via Jenkins or CLI; default to localhost for testing
+  hosts: "{{ hosts | default('localhost') | split(';') | join(':') }}"
   gather_facts: true
 
   vars:
+    # Packages to exclude, passed via Jenkins or CLI
     EXCLUDE_PKGS: "{{ EXCLUDE_PKGS | default('') }}"
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS.split(';')
@@ -31,17 +33,18 @@
   gather_facts: no
 
   vars:
-    target_hosts: "{{ hosts.split(';') }}"
+    target_hosts: "{{ hosts | default('localhost') | split(';') }}"
 
   tasks:
     - name: Initialize results list
       set_fact:
         results: []
 
-    - name: Collect patch results
+    - name: Collect patch results from hosts
       set_fact:
         results: "{{ results + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
       loop: "{{ target_hosts }}"
+      when: hostvars[item] is defined
 
     - name: Ensure reports directory exists
       file:
