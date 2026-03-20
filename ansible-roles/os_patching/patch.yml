@@ -34,7 +34,6 @@
     target_hosts: "{{ hosts.split(';') }}"
 
   tasks:
-
     - name: Initialize results list
       set_fact:
         results: []
