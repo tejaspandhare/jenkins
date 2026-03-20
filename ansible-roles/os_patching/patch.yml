@@ -34,7 +34,6 @@
     target_hosts: "{{ hosts.split(';') }}"
 
   tasks:
-
     - name: Initialize results list
       set_fact:
         results: []
@@ -56,6 +55,6 @@
         src: templates/report.j2
         dest: reports/patch_report.html
 
-    - name: Print report location
+    - name: Show report path
       debug:
         msg: "Patch report generated at reports/patch_report.html"
