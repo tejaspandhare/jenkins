@@ -27,7 +27,7 @@
 ############################################################
 
 - name: Generate patch report
-  hosts: localhost
+  #hosts: localhost
   gather_facts: no
 
   vars:
