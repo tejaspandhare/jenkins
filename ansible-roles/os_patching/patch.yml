@@ -4,7 +4,7 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  # Hosts are passed via Jenkins or CLI; default to localhost for testing
+  # Hosts passed via Jenkins or CLI; default to localhost for testing
   hosts: "{{ hosts | default('localhost') | split(';') | join(':') }}"
   gather_facts: true
 
@@ -33,7 +33,11 @@
   gather_facts: no
 
   vars:
+    # Target hosts list
     target_hosts: "{{ hosts | default('localhost') | split(';') }}"
+    # Use playbook_dir to ensure full paths
+    report_dir: "{{ playbook_dir }}/reports"
+    report_file: "{{ report_dir }}/patch_report.html"
 
   tasks:
     - name: Initialize results list
@@ -48,16 +52,15 @@
 
     - name: Ensure reports directory exists
       file:
-        path: reports
+        path: "{{ report_dir }}"
         state: directory
         mode: '0755'
-        
 
     - name: Create HTML report
       template:
         src: templates/report.j2
-        dest: reports/patch_report.html
+        dest: "{{ report_file }}"
 
     - name: Show report path
       debug:
-        msg: "Report generated at reports/patch_report.html"
+        msg: "Report generated at {{ report_file }}"
