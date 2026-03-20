@@ -27,19 +27,35 @@
 ############################################################
 
 - name: Generate patch report
-  #hosts: localhost
+  hosts: localhost
   gather_facts: no
 
   vars:
-    target_hosts: "{{ hosts }}"
+    target_hosts: "{{ hosts.split(';') }}"
 
   tasks:
 
+    - name: Initialize results list
+      set_fact:
+        results: []
+
     - name: Collect patch results from hosts
       set_fact:
-        results: "{{ groups[target_hosts] | map('extract', hostvars, 'patch_result') | list }}"
+        results: "{{ results + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
+      loop: "{{ target_hosts }}"
+      when: hostvars[item] is defined
+
+    - name: Ensure reports directory exists
+      file:
+        path: reports
+        state: directory
+        mode: '0755'
 
     - name: Create HTML report
       template:
         src: templates/report.j2
         dest: reports/patch_report.html
+
+    - name: Print report location
+      debug:
+        msg: "Patch report generated at reports/patch_report.html"
