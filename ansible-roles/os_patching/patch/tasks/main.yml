@@ -1,21 +1,21 @@
 ---
 
 - name: Debian/Ubuntu patch
-  ansible.builtin.apt:
+  apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
   register: upgrade_result
 
-- name: RHEL/CentOS/Rocky/Alma patch
-  ansible.builtin.dnf:
+- name: RHEL patch
+  dnf:
     name: "*"
     state: latest
   when: ansible_os_family == "RedHat"
   register: upgrade_result
 
 - name: SUSE patch
-  ansible.builtin.zypper:
+  zypper:
     name: "*"
     state: latest
   when: ansible_os_family == "Suse"
