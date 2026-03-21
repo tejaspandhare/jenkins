@@ -9,6 +9,7 @@
 
   vars:
     ansible_local_tmp: "/tmp/ansible_tmp"
+
     exclude_packages_list: >-
       {{ (EXCLUDE_PKGS | default('')).split(';')
          | map('trim')
@@ -21,6 +22,7 @@
     - role: reboot
     - role: postcheck
 
+
 ############################################################
 # GENERATE PATCH REPORT
 ############################################################
@@ -31,7 +33,14 @@
 
   vars:
     ansible_local_tmp: "/tmp/ansible_tmp"
-    target_hosts_list: "{{ (hosts | default('localhost')).split(';') | map('trim') | reject('equalto', '') | list }}"
+
+    target_hosts_list: >-
+      {{ (hosts | default('localhost'))
+         .split(';')
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
+
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
@@ -54,9 +63,17 @@
 
     - name: Collect patch results from hosts
       set_fact:
-        patch_results_summary: "{{ patch_results_summary + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
+        patch_results_summary: >-
+          {{ patch_results_summary
+             + [ hostvars[item].patch_result
+                 | default({'host': item, 'status': 'UNKNOWN'}) ] }}
       loop: "{{ target_hosts_list }}"
-      when: item in hostvars
+      when:
+        - hostvars[item] is defined
+
+    - name: Debug collected results (optional)
+      debug:
+        var: patch_results_summary
 
     - name: Create HTML report
       template:
