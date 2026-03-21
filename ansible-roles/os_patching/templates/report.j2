@@ -1,6 +1,43 @@
+<!DOCTYPE html>
 <html>
 <head>
-<title>Patch Report</title>
+    <title>Linux Patch Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        h2 {
+            color: #2e6c80;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 8px;
+        }
+        td {
+            padding: 8px;
+            text-align: center;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .ok {
+            color: green;
+            font-weight: bold;
+        }
+        .warn {
+            color: orange;
+            font-weight: bold;
+        }
+        .fail {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
 </head>
 
 <body>
@@ -8,25 +45,36 @@
 <h2>Linux Patch Report</h2>
 
 <table border="1">
-<tr>
-<th>Host</th>
-<th>OS</th>
-<th>Old Kernel</th>
-<th>New Kernel</th>
-<th>Packages Updated</th>
-<th>Reboot Performed</th>
-</tr>
+    <tr>
+        <th>Host</th>
+        <th>OS</th>
+        <th>Old Kernel</th>
+        <th>New Kernel</th>
+        <th>Packages Updated</th>
+        <th>Reboot Performed</th>
+        <th>Status</th>
+    </tr>
 
-{% for r in results %}
-<tr>
-<td>{{ r.host }}</td>
-<td>{{ r.os }}</td>
-<td>{{ r.old_kernel }}</td>
-<td>{{ r.new_kernel }}</td>
-<td>{{ r.updated }}</td>
-<td>{{ r.reboot }}</td>
-</tr>
-{% endfor %}
+    {% for r in patch_results_summary %}
+    <tr>
+        <td>{{ r.host | default('N/A') }}</td>
+        <td>{{ r.os | default('N/A') }}</td>
+        <td>{{ r.old_kernel | default('N/A') }}</td>
+        <td>{{ r.new_kernel | default('N/A') }}</td>
+        <td>{{ r.updated | default('0') }}</td>
+        <td>{{ r.reboot | default('No') }}</td>
+
+        <td>
+            {% if r.status is defined and r.status == 'FAILED' %}
+                <span class="fail">FAILED</span>
+            {% elif r.reboot | default('No') == 'Yes' %}
+                <span class="warn">REBOOTED</span>
+            {% else %}
+                <span class="ok">SUCCESS</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
 
 </table>
 
