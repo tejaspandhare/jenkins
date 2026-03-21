@@ -9,8 +9,14 @@
   set_fact:
     patch_result:
       host: "{{ inventory_hostname }}"
-      os: "{{ ansible_distribution }}"
+      os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
       old_kernel: "{{ old_kernel.stdout }}"
       new_kernel: "{{ new_kernel.stdout }}"
       updated: "{{ upgrade_result.changed | default(false) }}"
       reboot: "{{ reboot_required | default(false) }}"
+      status: >-
+        {% if upgrade_result is failed %}
+        FAILED
+        {% else %}
+        SUCCESS
+        {% endif %}
