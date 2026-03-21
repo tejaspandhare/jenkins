@@ -4,16 +4,14 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  # Handles the split more robustly to ensure a valid Ansible host pattern (e.g., host1:host2)
   hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
   gather_facts: true
 
   vars:
-    # Safely parses the semicolon-separated string into a clean list
     exclude_packages_list: >-
-      {{ (EXCLUDE_PKGS | default('')).split(';') 
-         | map('trim') 
-         | reject('equalto', '') 
+      {{ (EXCLUDE_PKGS | default('')).split(';')
+         | map('trim')
+         | reject('equalto', '')
          | list }}
 
   roles:
@@ -31,7 +29,6 @@
   gather_facts: false
 
   vars:
-    # Clean up the target list to ensure we don't iterate over empty strings
     target_hosts_list: "{{ (hosts | default('localhost')).split(';') | map('trim') | reject('equalto', '') | list }}"
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
@@ -43,16 +40,19 @@
         state: directory
         mode: '0755'
 
+    - name: Initialize patch results summary
+      set_fact:
+        patch_results_summary: []
+
     - name: Collect patch results from hosts
       set_fact:
-        patch_results_summary: >-
-          {% set results = [] %}
-          {% for h in target_hosts_list %}
-            {% if hostvars[h] is defined %}
-              {% set _ = results.append(hostvars[h].patch_result | default({'host': h, 'status': 'UNKNOWN'})) %}
-            {% endif %}
-          {% endfor %}
-          {{ results }}
+        patch_results_summary: "{{ patch_results_summary + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
+      loop: "{{ target_hosts_list }}"
+      when: item in hostvars
+
+    - name: Debug collected results (optional)
+      debug:
+        var: patch_results_summary
 
     - name: Create HTML report
       template:
