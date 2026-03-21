@@ -1,6 +1,6 @@
 ---
 
-- name: Check if reboot required
+- name: Set reboot requirement
   set_fact:
     reboot_required: "{{ upgrade_result.changed | default(false) }}"
 
