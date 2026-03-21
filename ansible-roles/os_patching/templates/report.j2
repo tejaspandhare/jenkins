@@ -1,22 +1,70 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Linux Patch Report</title>
     <style>
-        body { font-family: Arial, sans-serif; }
-        h2 { color: #2e6c80; }
-        table { border-collapse: collapse; width: 100%; }
-        th { background-color: #4CAF50; color: white; padding: 8px; }
-        td { padding: 8px; text-align: center; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .ok { color: green; font-weight: bold; }
-        .warn { color: orange; font-weight: bold; }
-        .fail { color: red; font-weight: bold; }
+        body { 
+            font-family: Arial, sans-serif; 
+            background-color: #f4f6f8;
+            margin: 20px;
+        }
+        h2 { text-align: center; color: #2e6c80; }
+
+        .summary {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .card {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 6px;
+            color: white;
+            font-weight: bold;
+        }
+        .ok { background-color: #28a745; }
+        .warn { background-color: #ffc107; color: black; }
+        .fail { background-color: #dc3545; }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+        }
+        td {
+            padding: 10px;
+            text-align: center;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        .status-ok { color: green; font-weight: bold; }
+        .status-warn { color: orange; font-weight: bold; }
+        .status-fail { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <h2>Linux Patch Report</h2>
+
+{% set total = patch_results_summary | length %}
+{% set failed = patch_results_summary | selectattr('status','equalto','FAILED') | list | length %}
+{% set rebooted = patch_results_summary | selectattr('reboot') | list | length %}
+{% set updated = patch_results_summary | selectattr('updated') | list | length %}
+
+<div class="summary">
+    <div class="card ok">Total: {{ total }}</div>
+    <div class="card ok">Updated: {{ updated }}</div>
+    <div class="card warn">Rebooted: {{ rebooted }}</div>
+    <div class="card fail">Failed: {{ failed }}</div>
+</div>
 
 <table border="1">
 <tr>
@@ -25,7 +73,7 @@
     <th>Old Kernel</th>
     <th>New Kernel</th>
     <th>Packages Updated</th>
-    <th>Reboot Performed</th>
+    <th>Reboot</th>
     <th>Status</th>
 </tr>
 
@@ -35,22 +83,27 @@
     <td>{{ r.os | default('N/A') }}</td>
     <td>{{ r.old_kernel | default('N/A') }}</td>
     <td>{{ r.new_kernel | default('N/A') }}</td>
-    <td>{% if r.updated | default(false) %}Yes{% else %}No{% endif %}</td>
-    <td>{% if r.reboot | default(false) %}Yes{% else %}No{% endif %}</td>
+    <td>{{ r.packages_updated | default(0) }}</td>
+    <td>{{ 'Yes' if r.reboot | default(false) else 'No' }}</td>
     <td>
-        {% if r.status is defined and r.status == 'FAILED' %}
-            <span class="fail">FAILED</span>
-        {% elif r.reboot | default(false) %}
-            <span class="warn">REBOOTED</span>
-        {% elif r.updated | default(false) %}
-            <span class="ok">UPDATED</span>
+        {% if r.status == 'FAILED' %}
+            <span class="status-fail">FAILED</span>
+        {% elif r.reboot %}
+            <span class="status-warn">REBOOTED</span>
+        {% elif r.updated %}
+            <span class="status-ok">UPDATED</span>
         {% else %}
-            <span class="ok">NO CHANGE</span>
+            <span class="status-ok">NO CHANGE</span>
         {% endif %}
     </td>
 </tr>
 {% endfor %}
 
 </table>
+
+<p style="text-align:center; margin-top:20px;">
+Generated on {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+</p>
+
 </body>
 </html>
