@@ -6,23 +6,14 @@
         body { font-family: Arial, sans-serif; }
         h2 { color: #2e6c80; }
         table { border-collapse: collapse; width: 100%; }
-        th {
-            background-color: #4CAF50;
-            color: white;
-            padding: 8px;
-        }
-        td {
-            padding: 8px;
-            text-align: center;
-        }
+        th { background-color: #4CAF50; color: white; padding: 8px; }
+        td { padding: 8px; text-align: center; }
         tr:nth-child(even) { background-color: #f2f2f2; }
-
         .ok { color: green; font-weight: bold; }
         .warn { color: orange; font-weight: bold; }
         .fail { color: red; font-weight: bold; }
     </style>
 </head>
-
 <body>
 
 <h2>Linux Patch Report</h2>
@@ -44,23 +35,8 @@
     <td>{{ r.os | default('N/A') }}</td>
     <td>{{ r.old_kernel | default('N/A') }}</td>
     <td>{{ r.new_kernel | default('N/A') }}</td>
-
-    <td>
-        {% if r.updated | default(false) %}
-            Yes
-        {% else %}
-            No
-        {% endif %}
-    </td>
-
-    <td>
-        {% if r.reboot | default(false) %}
-            Yes
-        {% else %}
-            No
-        {% endif %}
-    </td>
-
+    <td>{% if r.updated | default(false) %}Yes{% else %}No{% endif %}</td>
+    <td>{% if r.reboot | default(false) %}Yes{% else %}No{% endif %}</td>
     <td>
         {% if r.status is defined and r.status == 'FAILED' %}
             <span class="fail">FAILED</span>
@@ -76,6 +52,5 @@
 {% endfor %}
 
 </table>
-
 </body>
 </html>
