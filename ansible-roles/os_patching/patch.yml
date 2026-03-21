@@ -34,7 +34,7 @@
 
   tasks:
 
-    - name: Ensure temp directory exists (Jenkins fix)
+    - name: Ensure temp directory exists
       file:
         path: "/tmp/ansible_tmp"
         state: directory
