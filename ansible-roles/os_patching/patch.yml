@@ -8,6 +8,7 @@
   gather_facts: true
 
   vars:
+    ansible_local_tmp: "/tmp/ansible_tmp"
     exclude_packages_list: >-
       {{ (EXCLUDE_PKGS | default('')).split(';')
          | map('trim')
@@ -29,11 +30,18 @@
   gather_facts: false
 
   vars:
+    ansible_local_tmp: "/tmp/ansible_tmp"
     target_hosts_list: "{{ (hosts | default('localhost')).split(';') | map('trim') | reject('equalto', '') | list }}"
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
   tasks:
+    - name: Ensure temp directory exists (Jenkins fix)
+      file:
+        path: "/tmp/ansible_tmp"
+        state: directory
+        mode: '0777'
+
     - name: Ensure reports directory exists
       file:
         path: "{{ report_dir }}"
@@ -49,10 +57,6 @@
         patch_results_summary: "{{ patch_results_summary + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
       loop: "{{ target_hosts_list }}"
       when: item in hostvars
-
-    - name: Debug collected results (optional)
-      debug:
-        var: patch_results_summary
 
     - name: Create HTML report
       template:
