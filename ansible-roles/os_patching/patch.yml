@@ -9,12 +9,7 @@
 
   vars:
     ansible_local_tmp: "/tmp/ansible_tmp"
-
-    exclude_packages_list: >-
-      {{ (EXCLUDE_PKGS | default('')).split(';')
-         | map('trim')
-         | reject('equalto', '')
-         | list }}
+    exclude_packages_list: "{{ EXCLUDE_PKGS | default('') | split(';') | map('trim') | reject('equalto', '') | list }}"
 
   roles:
     - role: precheck
@@ -33,18 +28,12 @@
 
   vars:
     ansible_local_tmp: "/tmp/ansible_tmp"
-
-    target_hosts_list: >-
-      {{ (hosts | default('localhost'))
-         .split(';')
-         | map('trim')
-         | reject('equalto', '')
-         | list }}
-
+    target_hosts_list: "{{ hosts | default('localhost') | split(';') | map('trim') | reject('equalto', '') | list }}"
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
   tasks:
+
     - name: Ensure temp directory exists (Jenkins fix)
       file:
         path: "/tmp/ansible_tmp"
@@ -63,15 +52,11 @@
 
     - name: Collect patch results from hosts
       set_fact:
-        patch_results_summary: >-
-          {{ patch_results_summary
-             + [ hostvars[item].patch_result
-                 | default({'host': item, 'status': 'UNKNOWN'}) ] }}
+        patch_results_summary: "{{ patch_results_summary + [ (hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'})) ] }}"
       loop: "{{ target_hosts_list }}"
-      when:
-        - hostvars[item] is defined
+      when: hostvars[item] is defined
 
-    - name: Debug collected results (optional)
+    - name: Debug collected results
       debug:
         var: patch_results_summary
 
