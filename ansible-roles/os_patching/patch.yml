@@ -4,23 +4,23 @@
 ############################################################
 
 - name: Enterprise Linux Patching
-  hosts: "{{ hosts | default('localhost') | split(';') | join(':') }}"
+  # Handles the split more robustly to ensure a valid Ansible host pattern (e.g., host1:host2)
+  hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
   gather_facts: true
 
   vars:
-    EXCLUDE_PKGS: "{{ EXCLUDE_PKGS | default('') }}"
+    # Safely parses the semicolon-separated string into a clean list
     exclude_packages_list: >-
-      {{ EXCLUDE_PKGS.split(';')
-         | map('trim')
-         | reject('equalto', '')
+      {{ (EXCLUDE_PKGS | default('')).split(';') 
+         | map('trim') 
+         | reject('equalto', '') 
          | list }}
 
   roles:
-    - precheck
-    - patch
-    - reboot
-    - postcheck
-
+    - role: precheck
+    - role: patch
+    - role: reboot
+    - role: postcheck
 
 ############################################################
 # GENERATE PATCH REPORT
@@ -28,29 +28,31 @@
 
 - name: Generate patch report
   hosts: localhost
-  gather_facts: no
+  gather_facts: false
 
   vars:
-    target_hosts: "{{ hosts | default('localhost') | split(';') }}"
+    # Clean up the target list to ensure we don't iterate over empty strings
+    target_hosts_list: "{{ (hosts | default('localhost')).split(';') | map('trim') | reject('equalto', '') | list }}"
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
   tasks:
-    - name: Initialize results list
-      set_fact:
-        results: []
-
-    - name: Collect patch results from hosts
-      set_fact:
-        results: "{{ results + [ hostvars[item].patch_result | default({'host': item, 'status': 'UNKNOWN'}) ] }}"
-      loop: "{{ target_hosts }}"
-      when: hostvars[item] is defined
-
     - name: Ensure reports directory exists
       file:
         path: "{{ report_dir }}"
         state: directory
         mode: '0755'
+
+    - name: Collect patch results from hosts
+      set_fact:
+        patch_results_summary: >-
+          {% set results = [] %}
+          {% for h in target_hosts_list %}
+            {% if hostvars[h] is defined %}
+              {% set _ = results.append(hostvars[h].patch_result | default({'host': h, 'status': 'UNKNOWN'})) %}
+            {% endif %}
+          {% endfor %}
+          {{ results }}
 
     - name: Create HTML report
       template:
