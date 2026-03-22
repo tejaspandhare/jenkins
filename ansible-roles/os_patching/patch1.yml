@@ -1,9 +1,9 @@
 ---
 ############################################################
-# ENTERPRISE LINUX PATCHING
+# ENTERPRISE LINUX PATCHING + REPORT (SINGLE PLAY)
 ############################################################
 
-- name: Enterprise Linux Patching
+- name: Enterprise Linux Patching and Reporting
   hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
   gather_facts: true
 
@@ -14,85 +14,71 @@
       {{ EXCLUDE_PKGS | default('') | split(';')
       | map('trim') | reject('equalto', '') | list }}
 
+    report_dir: "{{ playbook_dir }}/reports"
+    report_file: "{{ report_dir }}/patch_report.html"
+
   roles:
     - role: precheck
     - role: patch
     - role: reboot
     - role: postcheck
 
-
-############################################################
-# GENERATE PATCH REPORT
-############################################################
-
-- name: Generate patch report
-  hosts: localhost
-  gather_facts: false
-
-  vars:
-    ansible_remote_tmp: "/tmp/ansible_tmp"
-    ansible_local_tmp: "/tmp/ansible_tmp"
-
-    target_hosts_list: >-
-      {{ hosts | default('localhost') | split(';')
-      | map('trim') | reject('equalto', '') | list }}
-
-    report_dir: "{{ playbook_dir }}/reports"
-    report_file: "{{ report_dir }}/patch_report.html"
-
   tasks:
 
-    - name: Ensure temp directory is clean
-      file:
-        path: "{{ ansible_local_tmp }}"
-        state: absent
+    ############################################################
+    # GENERATE REPORT (RUN ONLY ONCE, NO LOCALHOST IN RECAP)
+    ############################################################
 
-    - name: Recreate temp directory
-      file:
-        path: "{{ ansible_local_tmp }}"
-        state: directory
-        mode: '0777'
+    - name: Generate patch report on controller
+      run_once: true
+      delegate_to: localhost
 
-    - name: Ensure reports directory exists
-      file:
-        path: "{{ report_dir }}"
-        state: directory
-        mode: '0755'
+      block:
 
-    - name: Initialize patch results summary
-      set_fact:
-        patch_results_summary: []
+        - name: Ensure temp directory is clean
+          file:
+            path: "/tmp/ansible_tmp"
+            state: absent
 
-    - name: Collect patch results from hosts
-      set_fact:
-        patch_results_summary: >-
-          {{ patch_results_summary + [
-            hostvars[item].patch_result
-            | default({'host': item, 'status': 'UNKNOWN'})
-          ] }}
-      loop: "{{ target_hosts_list }}"
-      when: hostvars[item] is defined
+        - name: Recreate temp directory
+          file:
+            path: "/tmp/ansible_tmp"
+            state: directory
+            mode: '0777'
 
-    # ✅ CLEAN CONSOLE OUTPUT
-    - name: Print patch summary (clean format)
-      debug:
-        msg: |
-          ================= PATCH SUMMARY =================
-          {% for host in patch_results_summary %}
-          Host      : {{ host.host }}
-          OS        : {{ host.os | default('N/A') }}
-          Kernel    : {{ host.old_kernel | default('N/A') }} → {{ host.new_kernel | default('N/A') }}
-          Updated   : {{ host.updated | default('N/A') }}
-          Reboot    : {{ host.reboot | default('N/A') }}
-          Status    : {{ host.status | default('UNKNOWN') }}
-          -------------------------------------------------
-          {% endfor %}
+        - name: Ensure reports directory exists
+          file:
+            path: "{{ report_dir }}"
+            state: directory
+            mode: '0755'
 
-    - name: Create HTML report
-      template:
-        src: "{{ playbook_dir }}/templates/report.j2"
-        dest: "{{ report_file }}"
+        - name: Build patch results summary
+          set_fact:
+            patch_results_summary: >-
+              {{ groups['all']
+              | map('extract', hostvars, 'patch_result')
+              | select('defined')
+              | list }}
 
-    - name: Show report path
-      debug:
-        msg: "Report generated at {{ report_file }}"
+        - name: Print patch summary (clean)
+          debug:
+            msg: |
+              ================= PATCH SUMMARY =================
+              {% for host in patch_results_summary %}
+              Host      : {{ host.host }}
+              OS        : {{ host.os | default('N/A') }}
+              Kernel    : {{ host.old_kernel | default('N/A') }} → {{ host.new_kernel | default('N/A') }}
+              Updated   : {{ host.updated | default('N/A') }}
+              Reboot    : {{ host.reboot | default('N/A') }}
+              Status    : {{ host.status | default('UNKNOWN') }}
+              -------------------------------------------------
+              {% endfor %}
+
+        - name: Create HTML report
+          template:
+            src: "{{ playbook_dir }}/templates/report.j2"
+            dest: "{{ report_file }}"
+
+        - name: Show report path
+          debug:
+            msg: "Report generated at {{ report_file }}"
