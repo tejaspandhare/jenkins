@@ -1,0 +1,90 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        ansiColor('xterm')   // ✅ Fix color output
+    }
+
+    parameters {
+        string(
+            name: 'SERVER_NAME',
+            defaultValue: '',
+            description: 'Enter servers (semicolon separated): server1;server2'
+        )
+
+        string(
+            name: 'EXCLUDE_PKGS',
+            defaultValue: '',
+            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
+        )
+    }
+
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_STDOUT_CALLBACK = 'yaml'   // ✅ Clean structured logs
+        ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
+        ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+    }
+
+    stages {
+
+        stage('Validate Input') {
+            steps {
+                script {
+                    if (!params.SERVER_NAME?.trim()) {
+                        error("SERVER_NAME cannot be empty")
+                    }
+                }
+            }
+        }
+
+        stage('Run Ansible Patching') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
+                    script {
+                        sh """
+                            echo "========== PATCH EXECUTION =========="
+                            echo "Running patching on: ${params.SERVER_NAME}"
+                            echo "Excluding packages: ${params.EXCLUDE_PKGS}"
+
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                ansible-roles/os_patching/patch1.yml \
+                                --private-key="$ANSIBLE_KEY_FILE" \
+                                -e "hosts=${params.SERVER_NAME}" \
+                                -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Archive Report') {
+            steps {
+                script {
+                    echo "========== REPORT FILE =========="
+                    sh 'ls -l ansible-roles/os_patching/reports || true'
+                }
+
+                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Patching completed successfully"
+        }
+
+        failure {
+            echo "❌ Patching failed"
+        }
+
+        always {
+            cleanWs()
+        }
+    }
+}
