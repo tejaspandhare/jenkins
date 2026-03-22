@@ -60,10 +60,10 @@ pipeline {
         stage('Archive Report') {
             steps {
                 script {
-                    sh 'ls -l reports || true'
+                    sh 'ls -l ansible-roles/os_patching/reports || true'
                 }
 
-                archiveArtifacts artifacts: 'reports/*.html', fingerprint: true
+                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
             }
         }
     }
