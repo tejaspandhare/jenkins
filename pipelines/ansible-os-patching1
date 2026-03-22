@@ -3,7 +3,6 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')   // Enable ANSI colors in console
     }
 
     parameters {
@@ -22,7 +21,6 @@ pipeline {
 
     environment {
         ANSIBLE_FORCE_COLOR = 'true'
-        REPORT_PATH = 'ansible-roles/os_patching/reports/patch_report.html'
     }
 
     stages {
@@ -44,11 +42,6 @@ pipeline {
                 ]) {
                     script {
                         sh """
-                            export ANSIBLE_FORCE_COLOR=true
-                            export PY_COLORS=1
-                            export ANSIBLE_STDOUT_CALLBACK=yaml
-                            export ANSIBLE_DISPLAY_FAILED_STDERR=yes
-
                             echo "Running patching on: ${params.SERVER_NAME}"
                             echo "Excluding packages: ${params.EXCLUDE_PKGS}"
 
@@ -66,55 +59,22 @@ pipeline {
 
         stage('Archive Report') {
             steps {
-                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
-            }
-        }
-
-        stage('Show Report (Clickable)') {
-            steps {
-                publishHTML([
-                    reportDir: 'ansible-roles/os_patching/reports',
-                    reportFiles: 'patch_report.html',
-                    reportName: 'Linux Patch Report',
-                    keepAll: true,
-                    alwaysLinkToLastBuild: true,
-                    allowMissing: true     // ✅ Required in newer plugin versions
-                ])
-            }
-        }
-
-        stage('Summary') {
-            steps {
                 script {
-                    echo "\033[1;34m====================================\033[0m"
-                    echo "\033[1;32m✔ Patching Completed\033[0m"
-                    echo "\033[1;34m====================================\033[0m"
-                    echo "\033[1;33mServers: ${params.SERVER_NAME}\033[0m"
-                    echo "\033[1;36mReport: ${env.BUILD_URL}HTML_20Report/\033[0m"
+                    sh 'ls -l ansible-roles/os_patching/reports || true'
                 }
+
+                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
             }
         }
     }
 
     post {
         success {
-            script {
-                slackSend (
-                    channel: '#patching',
-                    color: 'good',
-                    message: "✅ SUCCESS: Job ${env.JOB_NAME} #${env.BUILD_NUMBER}\nReport: ${env.BUILD_URL}HTML_20Report/"
-                )
-            }
+            echo "✅ Patching completed successfully"
         }
 
         failure {
-            script {
-                slackSend (
-                    channel: '#patching',
-                    color: 'danger',
-                    message: "❌ FAILED: Job ${env.JOB_NAME} #${env.BUILD_NUMBER}\nCheck logs: ${env.BUILD_URL}"
-                )
-            }
+            echo "❌ Patching failed"
         }
 
         always {
