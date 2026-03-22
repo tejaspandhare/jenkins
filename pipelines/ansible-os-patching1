@@ -3,7 +3,7 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')
+        ansiColor('xterm')   // Enable ANSI colors in console
     }
 
     parameters {
@@ -77,7 +77,8 @@ pipeline {
                     reportFiles: 'patch_report.html',
                     reportName: 'Linux Patch Report',
                     keepAll: true,
-                    alwaysLinkToLastBuild: true
+                    alwaysLinkToLastBuild: true,
+                    allowMissing: true     // ✅ Required in newer plugin versions
                 ])
             }
         }
