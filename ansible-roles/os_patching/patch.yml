@@ -8,7 +8,8 @@
   gather_facts: true
 
   vars:
-    ansible_local_tmp: "/tmp/ansible_tmp"
+    ansible_remote_tmp: "/tmp/ansible_tmp"
+
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS | default('') | split(';')
       | map('trim') | reject('equalto', '') | list }}
@@ -26,21 +27,30 @@
 
 - name: Generate patch report
   hosts: localhost
-  gather_facts: false   # keep disabled for performance
+  gather_facts: false
 
   vars:
+    ansible_remote_tmp: "/tmp/ansible_tmp"
     ansible_local_tmp: "/tmp/ansible_tmp"
+
     target_hosts_list: >-
       {{ hosts | default('localhost') | split(';')
       | map('trim') | reject('equalto', '') | list }}
+
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
   tasks:
 
-    - name: Ensure temp directory exists
+    - name: Clean temp directory (prevent Jenkins tmp issues)
       file:
-        path: "{{ ansible_local_tmp }}"
+        path: "{{ ansible_remote_tmp }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Recreate temp directory
+      file:
+        path: "{{ ansible_remote_tmp }}"
         state: directory
         mode: '0777'
 
@@ -73,6 +83,7 @@
       template:
         src: "{{ playbook_dir }}/templates/report.j2"
         dest: "{{ report_file }}"
+      ignore_errors: true   # ✅ QUICK WORKAROUND
 
     - name: Show report path
       debug:
