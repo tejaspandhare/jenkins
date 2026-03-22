@@ -26,7 +26,7 @@
 
 - name: Generate patch report
   hosts: localhost
-  gather_facts: false
+  gather_facts: false   # keep disabled for performance
 
   vars:
     ansible_local_tmp: "/tmp/ansible_tmp"
