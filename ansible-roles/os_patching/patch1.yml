@@ -76,7 +76,7 @@
 
         - name: Create HTML report
           template:
-            src: "{{ playbook_dir }}/templates/report.j2"
+            src: "{{ playbook_dir }}/templates/report1.j2"
             dest: "{{ report_file }}"
 
         - name: Show report path
