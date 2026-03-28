@@ -3,6 +3,7 @@ pipeline {
 
     options {
         timestamps()
+        ansiColor('xterm')
     }
 
     parameters {
@@ -20,7 +21,10 @@ pipeline {
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_FORCE_COLOR    = 'true'
+        ANSIBLE_STDOUT_CALLBACK = 'yaml'
+        ANSIBLE_LOCAL_TEMP     = '/tmp/ansible_tmp'
+        ANSIBLE_REMOTE_TEMP    = '/tmp/ansible_tmp'
     }
 
     stages {
@@ -29,7 +33,7 @@ pipeline {
             steps {
                 script {
                     if (!params.SERVER_NAME?.trim()) {
-                        error("SERVER_NAME cannot be empty")
+                        error('SERVER_NAME cannot be empty')
                     }
                 }
             }
@@ -40,30 +44,31 @@ pipeline {
                 withCredentials([
                     file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
                 ]) {
-                    script {
-                        sh """
-                            echo "Running patching on: ${params.SERVER_NAME}"
-                            echo "Excluding packages: ${params.EXCLUDE_PKGS}"
+                    sh """
+                        echo "========== PATCH EXECUTION =========="
+                        echo "Running patching on: ${params.SERVER_NAME}"
+                        echo "Excluding packages: ${params.EXCLUDE_PKGS}"
 
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/os_patching/patch.yml \
-                                --private-key="$ANSIBLE_KEY_FILE" \
-                                -e "hosts=${params.SERVER_NAME}" \
-                                -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
-                        """
-                    }
+                        ansible-playbook \\
+                          -i inventory/hosts \\
+                          ansible-roles/os_patching/patch1.yml \\
+                          --private-key="\$ANSIBLE_KEY_FILE" \\
+                          -e "hosts=${params.SERVER_NAME}" \\
+                          -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
+                    """
                 }
             }
         }
 
         stage('Archive Report') {
             steps {
-                script {
-                    sh 'ls -l ansible-roles/os_patching/reports || true'
-                }
+                echo "========== REPORT FILE =========="
+                sh 'ls -l ansible-roles/os_patching/reports || true'
 
-                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
+                archiveArtifacts(
+                    artifacts: 'ansible-roles/os_patching/reports/*.html',
+                    fingerprint: true
+                )
             }
         }
     }
@@ -72,11 +77,9 @@ pipeline {
         success {
             echo "✅ Patching completed successfully"
         }
-
         failure {
             echo "❌ Patching failed"
         }
-
         always {
             cleanWs()
         }
