@@ -61,11 +61,11 @@
 
               {% for h in patch_results_summary %}
               Host    : {{ h.host }}
-              OS      : {{ h.os | default('N/A') }}
-              Kernel  : {{ h.old_kernel | default('N/A') }} -> {{ h.new_kernel | default('N/A') }}
-              Updated : {{ h.updated | default('N/A') }}
-              Reboot  : {{ h.reboot | default('N/A') }}
-              Status  : {{ h.status | default('UNKNOWN') }}
+              OS      : {{ h.os }}
+              Kernel  : {{ h.old_kernel }} -> {{ h.new_kernel }}
+              Updated : {{ h.updated }}
+              Reboot  : {{ h.reboot }}
+              Status  : {{ h.status }}
               -------------------------------------------------
               {% endfor %}
 
