@@ -1,7 +1,10 @@
 ---
 # precheck/tasks/main.yml
 
-- name: Gather disk usage for critical partitions
+# ------------------------------
+# 1. Gather disk usage for critical partitions
+# ------------------------------
+- name: Gather disk usage for /boot, /, /usr, /var
   ansible.builtin.shell: df -BG / /usr /var /boot | tail -n +2
   register: disk_usage
   changed_when: false
@@ -17,24 +20,31 @@
     (item[5] in ['/','/usr','/var'] and (item[3] | regex_replace('G','') | int < 5))
 
 # ------------------------------
-# Clean /boot - Debian/Ubuntu
+# 2. Clean /boot - Debian/Ubuntu
 # ------------------------------
 - name: Clean /boot - remove old kernels (Debian/Ubuntu)
   ansible.builtin.shell: |
-    set -e
     current=$(uname -r)
     kernels=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#/boot/vmlinuz-##' | sort -V | grep -v "^$current$")
     keep=$(echo "$kernels" | tail -n 1)
-    for k in $kernels; do
-      if [ "$k" != "$keep" ]; then
-        echo "Removing kernel files for $k"
-        rm -f /boot/vmlinuz-$k /boot/initrd.img-$k /boot/System.map-$k /boot/config-$k || true
-      fi
-    done
+    if [ -n "$kernels" ]; then
+      for k in $kernels; do
+        if [ "$k" != "$keep" ]; then
+          echo "Removing kernel files for $k"
+          rm -f /boot/vmlinuz-$k /boot/initrd.img-$k /boot/System.map-$k /boot/config-$k || true
+        fi
+      done
+    else
+      echo "No old kernels to remove"
+    fi
   when: ansible_os_family == "Debian"
 
 - name: Fix broken dependencies on Debian/Ubuntu
-  ansible.builtin.command: apt-get -f install -y
+  ansible.builtin.apt:
+    update_cache: yes
+    upgrade: dist
+  register: fix_broken
+  ignore_errors: yes
   when: ansible_os_family == "Debian"
 
 - name: Autoremove packages on Debian/Ubuntu
@@ -44,20 +54,23 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# Clean /boot - RHEL/CentOS
+# 3. Clean /boot - RHEL/CentOS
 # ------------------------------
 - name: Clean /boot - remove old kernels (RHEL/CentOS)
   ansible.builtin.shell: |
-    set -e
     current=$(uname -r)
     kernels=$(rpm -q kernel | grep -v "$current" | sort -V)
     keep=$(echo "$kernels" | tail -n 1)
-    for k in $kernels; do
-      if [ "$k" != "$keep" ]; then
-        echo "Removing kernel package $k"
-        yum -y remove $k || true
-      fi
-    done
+    if [ -n "$kernels" ]; then
+      for k in $kernels; do
+        if [ "$k" != "$keep" ]; then
+          echo "Removing kernel package $k"
+          yum -y remove $k || true
+        fi
+      done
+    else
+      echo "No old kernels to remove"
+    fi
   when: ansible_os_family == "RedHat"
 
 - name: Autoremove packages on RHEL/CentOS
@@ -68,20 +81,23 @@
   when: ansible_os_family == "RedHat"
 
 # ------------------------------
-# Clean /boot - SUSE
+# 4. Clean /boot - SUSE
 # ------------------------------
 - name: Clean /boot - remove old kernels (SUSE)
   ansible.builtin.shell: |
-    set -e
     current=$(uname -r)
     kernels=$(rpm -q kernel-default | grep -v "$current" | sort -V)
     keep=$(echo "$kernels" | tail -n 1)
-    for k in $kernels; do
-      if [ "$k" != "$keep" ]; then
-        echo "Removing kernel package $k"
-        zypper -n rm $k || true
-      fi
-    done
+    if [ -n "$kernels" ]; then
+      for k in $kernels; do
+        if [ "$k" != "$keep" ]; then
+          echo "Removing kernel package $k"
+          zypper -n rm $k || true
+        fi
+      done
+    else
+      echo "No old kernels to remove"
+    fi
   when: ansible_os_family == "Suse"
 
 - name: Autoremove packages on SUSE
