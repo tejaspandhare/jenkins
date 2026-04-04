@@ -1,6 +1,6 @@
 ---
 # ------------------------------
-# 1. Gather disk usage for critical partitions
+# 1. Gather disk usage
 # ------------------------------
 - name: Gather disk usage for /boot, /, /usr, /var
   ansible.builtin.shell: df -BG / /usr /var /boot | tail -n +2
@@ -9,7 +9,7 @@
 
 - name: Fail if critical partitions have less than required free space
   ansible.builtin.fail:
-    msg: "Partition {{ item[5] }} has less than required free space ({{ item[3] }}), patching cannot continue!"
+    msg: "Partition {{ item[5] }} has less than required free space ({{ item[3] }})"
   loop: "{{ disk_usage.stdout_lines | map('split') | list }}"
   loop_control:
     label: "{{ item[5] }}"
@@ -18,16 +18,16 @@
     (item[5] in ['/','/usr','/var'] and (item[3] | regex_replace('G','') | int < 5))
 
 # ------------------------------
-# 2. Fix broken packages FIRST (Debian/Ubuntu)
+# 2. Fix broken packages
 # ------------------------------
 - name: Fix broken dependencies (Debian/Ubuntu)
   ansible.builtin.shell: apt-get -f install -y
-  register: fix_broken_result
-  changed_when: "'0 upgraded' not in fix_broken_result.stdout"
+  register: fix_broken
+  changed_when: false
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 3. Update apt cache
+# 3. Update cache
 # ------------------------------
 - name: Update apt cache
   ansible.builtin.apt:
@@ -35,15 +35,7 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 4. Perform dist upgrade
-# ------------------------------
-- name: Dist upgrade system
-  ansible.builtin.apt:
-    upgrade: dist
-  when: ansible_os_family == "Debian"
-
-# ------------------------------
-# 5. Remove old kernels SAFELY (keep latest 2)
+# 4. Clean old kernels safely
 # ------------------------------
 - name: Remove old kernels safely (Debian/Ubuntu)
   ansible.builtin.shell: |
@@ -59,64 +51,17 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 6. Autoremove unused packages
+# 5. Autoremove
 # ------------------------------
-- name: Autoremove packages on Debian/Ubuntu
+- name: Autoremove unused packages
   ansible.builtin.apt:
     autoremove: yes
     purge: yes
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 7. Clean /boot - RHEL/CentOS
+# 6. Capture running kernel baseline
 # ------------------------------
-- name: Clean /boot - remove old kernels (RHEL/CentOS)
-  ansible.builtin.shell: |
-    current=$(uname -r)
-    kernels=$(rpm -q kernel | grep -v "$current" | sort -V)
-    keep=$(echo "$kernels" | tail -n 1)
-    if [ -n "$kernels" ]; then
-      for k in $kernels; do
-        if [ "$k" != "$keep" ]; then
-          echo "Removing kernel package $k"
-          yum -y remove $k || true
-        fi
-      done
-    else
-      echo "No old kernels to remove"
-    fi
-  when: ansible_os_family == "RedHat"
-
-- name: Autoremove packages on RHEL/CentOS
-  ansible.builtin.yum:
-    name: '*'
-    state: latest
-    autoremove: yes
-  when: ansible_os_family == "RedHat"
-
-# ------------------------------
-# 8. Clean /boot - SUSE
-# ------------------------------
-- name: Clean /boot - remove old kernels (SUSE)
-  ansible.builtin.shell: |
-    current=$(uname -r)
-    kernels=$(rpm -q kernel-default | grep -v "$current" | sort -V)
-    keep=$(echo "$kernels" | tail -n 1)
-    if [ -n "$kernels" ]; then
-      for k in $kernels; do
-        if [ "$k" != "$keep" ]; then
-          echo "Removing kernel package $k"
-          zypper -n rm $k || true
-        fi
-      done
-    else
-      echo "No old kernels to remove"
-    fi
-  when: ansible_os_family == "Suse"
-
-- name: Autoremove packages on SUSE
-  ansible.builtin.zypper:
-    name: '*'
-    state: latest
-    autoremove: yes
-  when: ansible_os_family == "Suse"
+- name: Capture running kernel
+  ansible.builtin.set_fact:
+    running_kernel: "{{ ansible_kernel }}"
