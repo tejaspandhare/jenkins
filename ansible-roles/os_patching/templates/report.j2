@@ -101,8 +101,8 @@
         <td>{{ host.host }}</td>
         <td>{{ host.os | default('N/A') }}</td>
         <td>{{ host.old_kernel }} → {{ host.new_kernel }}</td>
-        <td>{{ host.updated }}</td>
-        <td>{{ host.reboot }}</td>
+        <td>{{ 'Yes' if host.updated else 'No' }}</td>
+        <td>{{ 'Yes' if host.reboot else 'No' }}</td>
         <td class="{% if host.status | trim == 'SUCCESS' %}ok{% else %}fail{% endif %}">
             {{ host.status | trim }}
         </td>
