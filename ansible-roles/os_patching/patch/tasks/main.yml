@@ -1,22 +1,33 @@
----
-
-- name: Debian/Ubuntu patch
+# Debian / Ubuntu
+- name: Patch Debian/Ubuntu
   apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
   register: upgrade_result
 
-- name: RHEL patch
+# RHEL / CentOS / Rocky / Alma
+- name: Patch RHEL
   dnf:
     name: "*"
     state: latest
   when: ansible_os_family == "RedHat"
   register: upgrade_result
 
-- name: SUSE patch
+# SUSE / SLES
+- name: Patch SUSE
   zypper:
     name: "*"
     state: latest
   when: ansible_os_family == "Suse"
   register: upgrade_result
+
+# Show patch result on console
+- name: Show patch result
+  debug:
+    msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed }}"
+
+# Update patch_result
+- name: Set patch_result updated flag
+  set_fact:
+    patch_result: "{{ patch_result | combine({'updated': upgrade_result.changed}) }}"
