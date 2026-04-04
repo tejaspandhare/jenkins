@@ -1,8 +1,4 @@
 ---
-############################################################
-# ENTERPRISE LINUX PATCHING + REPORT (SINGLE PLAY)
-############################################################
-
 - name: Enterprise Linux Patching and Reporting
   hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
   gather_facts: true
@@ -12,73 +8,142 @@
 
     exclude_packages_list: >-
       {{ EXCLUDE_PKGS | default('') | split(';')
-      | map('trim') | reject('equalto', '') | list }}
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
 
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
   roles:
-    - role: precheck
-    - role: patch
-    - role: reboot
-    - role: postcheck
+    - precheck
+    - patch
+    - reboot
+    - postcheck
 
   tasks:
 
-    ############################################################
-    # GENERATE REPORT (RUN ONLY ONCE, NO LOCALHOST IN RECAP)
-    ############################################################
+    # ------------------------------
+    # 1. Patch the system based on OS
+    # ------------------------------
+    - name: Patch Debian/Ubuntu
+      apt:
+        update_cache: yes
+        upgrade: dist
+      when: ansible_os_family == "Debian"
+      register: upgrade_result
 
-    - name: Generate patch report on controller
+    - name: Patch RHEL
+      dnf:
+        name: "*"
+        state: latest
+      when: ansible_os_family == "RedHat"
+      register: upgrade_result
+
+    - name: Patch SUSE
+      zypper:
+        name: "*"
+        state: latest
+      when: ansible_os_family == "Suse"
+      register: upgrade_result
+
+    - name: Show patch result
+      debug:
+        msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed }}"
+
+    - name: Set patch_result updated flag
+      set_fact:
+        patch_result: "{{ patch_result | default({}) | combine({'updated': upgrade_result.changed}) }}"
+
+    # ------------------------------
+    # 2. Post-check: Capture kernel & finalize facts
+    # ------------------------------
+    - name: Capture new kernel
+      command: uname -r
+      register: new_kernel
+      changed_when: false
+
+    - name: Update patch_result with kernel & status
+      set_fact:
+        patch_result: >-
+          {{ patch_result | combine({
+            'os': ansible_distribution ~ " " ~ ansible_distribution_version,
+            'old_kernel': patch_result.old_kernel | default(ansible_kernel),
+            'new_kernel': new_kernel.stdout,
+            'status': ('FAILED' if upgrade_result is failed else 'SUCCESS')
+          }) }}
+
+    # ------------------------------
+    # 3. Console-friendly Markdown table
+    # ------------------------------
+    - name: Generate console patch summary
       run_once: true
       delegate_to: localhost
-
       block:
-
-        - name: Ensure temp directory is clean
-          file:
-            path: "/tmp/ansible_tmp"
-            state: absent
-
-        - name: Recreate temp directory
-          file:
-            path: "/tmp/ansible_tmp"
-            state: directory
-            mode: '0777'
-
-        - name: Ensure reports directory exists
-          file:
-            path: "{{ report_dir }}"
-            state: directory
-            mode: '0755'
 
         - name: Build patch results summary
           set_fact:
             patch_results_summary: >-
               {{ groups['all']
-              | map('extract', hostvars, 'patch_result')
-              | select('defined')
-              | list }}
+                 | map('extract', hostvars, 'patch_result')
+                 | select('defined')
+                 | list }}
 
-        - name: Print patch summary (clean)
+        - name: Print Markdown table header
           debug:
             msg: |
-              ================= PATCH SUMMARY =================
-              {% for host in patch_results_summary %}
-              Host      : {{ host.host }}
-              OS        : {{ host.os | default('N/A') }}
-              Kernel    : {{ host.old_kernel | default('N/A') }} → {{ host.new_kernel | default('N/A') }}
-              Updated   : {{ host.updated | default('N/A') }}
-              Reboot    : {{ host.reboot | default('N/A') }}
-              Status    : {{ host.status | default('UNKNOWN') }}
-              -------------------------------------------------
-              {% endfor %}
+              | Host | OS | Old Kernel | New Kernel | Updated | Reboot | Status |
+              | ---- | -- | ---------- | ---------- | ------- | ------ | ------ |
 
-        - name: Create HTML report
-          template:
-            src: "{{ playbook_dir }}/templates/report1.j2"
-            dest: "{{ report_file }}"
-
-        - name: Show report path
+        - name: Print each host row
           debug:
-            msg: "Report generated at {{ report_file }}"
+            msg: "| {{ item.host }} | {{ item.os | default('N/A') }} | {{ item.old_kernel }} | {{ item.new_kernel }} | {{ 'Yes' if item.updated else 'No' }} | {{ 'Yes' if item.reboot else 'No' }} | {{ item.status }} |"
+          loop: "{{ patch_results_summary }}"
+          loop_control:
+            label: "{{ item.host }}"
+
+        - name: Print totals
+          debug:
+            msg: |
+              Total Hosts: {{ patch_results_summary | length }}
+              Success    : {{ patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length }}
+              Failed     : {{ patch_results_summary | selectattr('status','equalto','FAILED') | list | length }}
+
+    # ------------------------------
+    # 4. HTML report generation
+    # ------------------------------
+    - name: Reset temp directory
+      run_once: true
+      delegate_to: localhost
+      file:
+        path: /tmp/ansible_tmp
+        state: absent
+
+    - name: Create temp directory
+      run_once: true
+      delegate_to: localhost
+      file:
+        path: /tmp/ansible_tmp
+        state: directory
+        mode: '0777'
+
+    - name: Ensure reports directory exists
+      run_once: true
+      delegate_to: localhost
+      file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create HTML report
+      run_once: true
+      delegate_to: localhost
+      template:
+        src: "{{ playbook_dir }}/templates/report.j2"
+        dest: "{{ report_file }}"
+
+    - name: Show report path
+      run_once: true
+      delegate_to: localhost
+      debug:
+        msg: "HTML report generated at {{ report_file }}"
