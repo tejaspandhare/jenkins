@@ -6,17 +6,20 @@
   register: disk_usage
   changed_when: false
 
-- name: Fail if critical partitions have less than 5GB free
+- name: Fail if critical partitions have less than required free space
   ansible.builtin.fail:
-    msg: "Partition {{ item.mount }} has less than 5GB free ({{ item.avail }}), patching cannot continue!"
+    msg: "Partition {{ item[5] }} has less than required free space ({{ item[3] }}), patching cannot continue!"
   loop: "{{ disk_usage.stdout_lines | map('split') | list }}"
   loop_control:
     label: "{{ item[5] }}"
-  when: item[3] | regex_replace('G','') | int < 5
-  vars:
-    # item[0]: Filesystem, item[1]: Size, item[2]: Used, item[3]: Avail, item[4]: Use%, item[5]: Mounted
+  when: >
+    (item[5] == '/boot' and (item[3] | regex_replace('G','') | int < 1)) or
+    (item[5] in ['/','/usr','/var'] and (item[3] | regex_replace('G','') | int < 5))
 
-- name: Clean /boot - Debian/Ubuntu
+# ------------------------------
+# Clean /boot - Debian/Ubuntu
+# ------------------------------
+- name: Clean /boot - remove old kernels (Debian/Ubuntu)
   ansible.builtin.shell: |
     set -e
     current=$(uname -r)
@@ -40,7 +43,10 @@
     purge: yes
   when: ansible_os_family == "Debian"
 
-- name: Clean /boot - RHEL/CentOS
+# ------------------------------
+# Clean /boot - RHEL/CentOS
+# ------------------------------
+- name: Clean /boot - remove old kernels (RHEL/CentOS)
   ansible.builtin.shell: |
     set -e
     current=$(uname -r)
@@ -54,7 +60,17 @@
     done
   when: ansible_os_family == "RedHat"
 
-- name: Clean /boot - SUSE
+- name: Autoremove packages on RHEL/CentOS
+  ansible.builtin.yum:
+    name: '*'
+    state: latest
+    autoremove: yes
+  when: ansible_os_family == "RedHat"
+
+# ------------------------------
+# Clean /boot - SUSE
+# ------------------------------
+- name: Clean /boot - remove old kernels (SUSE)
   ansible.builtin.shell: |
     set -e
     current=$(uname -r)
@@ -67,13 +83,6 @@
       fi
     done
   when: ansible_os_family == "Suse"
-
-- name: Autoremove packages on RHEL/CentOS
-  ansible.builtin.yum:
-    name: '*'
-    state: latest
-    autoremove: yes
-  when: ansible_os_family == "RedHat"
 
 - name: Autoremove packages on SUSE
   ansible.builtin.zypper:
