@@ -47,6 +47,7 @@
 # ------------------------------
 - name: Remove old kernels safely (Debian/Ubuntu)
   ansible.builtin.shell: |
+    set -o pipefail
     dpkg -l 'linux-image-*' \
     | awk '/^ii/{ print $2 }' \
     | grep -v "$(uname -r)" \
@@ -54,7 +55,7 @@
     | head -n -2 \
     | xargs -r apt-get -y purge
   args:
-    warn: false
+    executable: /bin/bash
   when: ansible_os_family == "Debian"
 
 # ------------------------------
