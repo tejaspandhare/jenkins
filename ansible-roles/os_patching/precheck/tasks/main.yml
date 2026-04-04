@@ -26,10 +26,13 @@
 - name: Clean /boot - remove old kernels (Debian/Ubuntu)
   ansible.builtin.shell: |
     current=$(uname -r)
-    kernels=$(dpkg --list 'linux-image-*' | awk '{print $2}' | grep -v "$current" | sort -V)
-    remove=$(echo "$kernels" | head -n -1)
-    if [ ! -z "$remove" ]; then
-      apt-get -y purge $remove
+    packages=$(dpkg -l 'linux-image-*' 2>/dev/null \
+      | awk '/^ii/{print $2}' \
+      | grep -v "$current" \
+      | sort -V)
+    to_remove=$(echo "$packages" | head -n -1)
+    if [ ! -z "$to_remove" ]; then
+      apt-get -y purge $to_remove || true
     fi
   when: ansible_os_family == "Debian"
 
