@@ -1,58 +1,42 @@
----
-- name: Show patch start
-  debug:
-    msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
-
-- name: Capture current kernel
-  ansible.builtin.command:
-    cmd: uname -r
-  register: old_kernel
-  changed_when: false
-
-- name: Initialize patch_result
-  set_fact:
-    patch_result:
-      host: "{{ inventory_hostname }}"
-      os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-      old_kernel: "{{ old_kernel.stdout }}"
-      new_kernel: ""
-      updated: false
-      reboot: false
-      status: "Started"
-
-# ------------------------------
-# Cleanup /boot by removing old kernels
-# ------------------------------
 - name: Clean /boot - remove old kernels (Debian/Ubuntu)
   ansible.builtin.shell: |
     current=$(uname -r)
-    packages=$(dpkg -l 'linux-image-*' 2>/dev/null \
-      | awk '/^ii/{print $2}' \
-      | grep -v "$current" \
-      | sort -V)
+    packages=$(dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | grep -v "$current" | sort -V)
     to_remove=$(echo "$packages" | head -n -1)
     if [ ! -z "$to_remove" ]; then
       apt-get -y purge $to_remove || true
     fi
   when: ansible_os_family == "Debian"
 
-- name: Clean /boot - remove old kernels (RHEL family)
+- name: Fix broken dependencies on Debian/Ubuntu
+  ansible.builtin.apt:
+    upgrade: no
+    update_cache: yes
+    force: yes
+    dpkg_options: "force-confdef,force-confold"
+    install_recommends: yes
+    fix_broken: yes
+  when: ansible_os_family == "Debian"
+
+- name: Autoremove unnecessary packages on Debian/Ubuntu
+  ansible.builtin.apt:
+    autoremove: yes
+    purge: yes
+  when: ansible_os_family == "Debian"
+
+- name: Clean /boot - remove old kernels (RHEL)
   ansible.builtin.shell: |
     rpm -q kernel | sort -V | head -n -2 | xargs -r yum -y remove
+    package-cleanup -y --oldkernels --count=1
+    yum -y autoremove
   when: ansible_os_family == "RedHat"
 
 - name: Clean /boot - remove old kernels (SUSE)
   ansible.builtin.shell: |
     zypper --non-interactive se -s kernel | awk '/i/{print $3}' | sort -V | head -n -2 | xargs -r zypper --non-interactive rm
+    zypper --non-interactive clean --all
   when: ansible_os_family == "Suse"
 
-- name: Show /boot cleanup complete
-  debug:
-    msg: "/boot old kernels removed successfully on {{ inventory_hostname }}"
-
-# ------------------------------
-# Check disk space after /boot cleanup
-# ------------------------------
 - name: Check free space on / /usr /var /boot (in GB)
   ansible.builtin.command:
     cmd: df -BG --output=target,avail
