@@ -1,6 +1,4 @@
 ---
-# precheck/tasks/main.yml
-
 # ------------------------------
 # 1. Gather disk usage for critical partitions
 # ------------------------------
@@ -20,33 +18,48 @@
     (item[5] in ['/','/usr','/var'] and (item[3] | regex_replace('G','') | int < 5))
 
 # ------------------------------
-# 2. Clean /boot - Debian/Ubuntu
+# 2. Fix broken packages FIRST (Debian/Ubuntu)
 # ------------------------------
-- name: Clean /boot - remove old kernels (Debian/Ubuntu)
-  ansible.builtin.shell: |
-    current=$(uname -r)
-    kernels=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#/boot/vmlinuz-##' | sort -V | grep -v "^$current$")
-    keep=$(echo "$kernels" | tail -n 1)
-    if [ -n "$kernels" ]; then
-      for k in $kernels; do
-        if [ "$k" != "$keep" ]; then
-          echo "Removing kernel files for $k"
-          rm -f /boot/vmlinuz-$k /boot/initrd.img-$k /boot/System.map-$k /boot/config-$k || true
-        fi
-      done
-    else
-      echo "No old kernels to remove"
-    fi
+- name: Fix broken dependencies (Debian/Ubuntu)
+  ansible.builtin.shell: apt-get -f install -y
+  register: fix_broken_result
+  changed_when: "'0 upgraded' not in fix_broken_result.stdout"
   when: ansible_os_family == "Debian"
 
-- name: Fix broken dependencies on Debian/Ubuntu
+# ------------------------------
+# 3. Update apt cache
+# ------------------------------
+- name: Update apt cache
   ansible.builtin.apt:
     update_cache: yes
-    upgrade: dist
-  register: fix_broken
-  ignore_errors: yes
   when: ansible_os_family == "Debian"
 
+# ------------------------------
+# 4. Perform dist upgrade
+# ------------------------------
+- name: Dist upgrade system
+  ansible.builtin.apt:
+    upgrade: dist
+  when: ansible_os_family == "Debian"
+
+# ------------------------------
+# 5. Remove old kernels SAFELY (keep latest 2)
+# ------------------------------
+- name: Remove old kernels safely (Debian/Ubuntu)
+  ansible.builtin.shell: |
+    dpkg -l 'linux-image-*' \
+    | awk '/^ii/{ print $2 }' \
+    | grep -v "$(uname -r)" \
+    | sort -V \
+    | head -n -2 \
+    | xargs -r apt-get -y purge
+  args:
+    warn: false
+  when: ansible_os_family == "Debian"
+
+# ------------------------------
+# 6. Autoremove unused packages
+# ------------------------------
 - name: Autoremove packages on Debian/Ubuntu
   ansible.builtin.apt:
     autoremove: yes
@@ -54,7 +67,7 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 3. Clean /boot - RHEL/CentOS
+# 7. Clean /boot - RHEL/CentOS
 # ------------------------------
 - name: Clean /boot - remove old kernels (RHEL/CentOS)
   ansible.builtin.shell: |
@@ -81,7 +94,7 @@
   when: ansible_os_family == "RedHat"
 
 # ------------------------------
-# 4. Clean /boot - SUSE
+# 8. Clean /boot - SUSE
 # ------------------------------
 - name: Clean /boot - remove old kernels (SUSE)
   ansible.builtin.shell: |
