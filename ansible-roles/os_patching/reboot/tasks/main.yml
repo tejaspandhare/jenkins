@@ -1,11 +1,12 @@
 ---
 # ------------------------------
-# Get latest installed kernel
+# 1. Capture latest installed kernel (Debian/Ubuntu)
 # ------------------------------
 - name: Get latest installed kernel (Debian/Ubuntu)
   shell: |
     dpkg -l 'linux-image-*' \
     | awk '/^ii/{ print $2 }' \
+    | grep -v '\-dbg\|headers\|modules\|generic-lts' \
     | sed 's/linux-image-//' \
     | sort -V \
     | tail -n 1
@@ -16,39 +17,61 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# Decide reboot ONLY on kernel change
+# 2. Capture latest installed kernel (RHEL/CentOS)
+# ------------------------------
+- name: Get latest installed kernel (RHEL)
+  shell: rpm -q kernel | sort -V | tail -n 1
+  register: latest_kernel
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+# ------------------------------
+# 3. Capture latest installed kernel (SUSE)
+# ------------------------------
+- name: Get latest installed kernel (SUSE)
+  shell: rpm -q kernel-default | sort -V | tail -n 1
+  register: latest_kernel
+  changed_when: false
+  when: ansible_os_family == "Suse"
+
+# ------------------------------
+# 4. Determine if reboot required (kernel actually updated)
 # ------------------------------
 - name: Determine reboot requirement
   set_fact:
-    reboot_required: "{{ latest_kernel.stdout != running_kernel }}"
+    reboot_required: >-
+      {{
+        (patch_result.updated and latest_kernel.stdout != running_kernel)
+      }}
 
 # ------------------------------
-# Debug info
+# 5. Debug kernel & reboot info
 # ------------------------------
 - name: Show reboot decision
   debug:
     msg: |
       Running kernel : {{ running_kernel }}
-      Installed kernel: {{ latest_kernel.stdout }}
+      Latest kernel  : {{ latest_kernel.stdout }}
+      Kernel updated : {{ patch_result.updated }}
       Reboot required: {{ reboot_required }}
 
 # ------------------------------
-# Reboot if needed
+# 6. Reboot system if needed
 # ------------------------------
 - name: Reboot system if kernel updated
   reboot:
     reboot_timeout: 900
   when: reboot_required
 
-- name: Wait for system
+- name: Wait for system to come back
   wait_for_connection:
     delay: 10
     timeout: 300
   when: reboot_required
 
 # ------------------------------
-# Update patch_result
+# 7. Update patch_result reboot flag
 # ------------------------------
-- name: Update reboot flag
+- name: Update patch_result reboot flag
   set_fact:
     patch_result: "{{ patch_result | combine({'reboot': reboot_required}) }}"
