@@ -1,6 +1,7 @@
+---
 - name: Show patch start
   debug:
-    msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }})"
+    msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
 
 - name: Capture current kernel
   command: uname -r
@@ -11,9 +12,109 @@
   set_fact:
     patch_result:
       host: "{{ inventory_hostname }}"
-      os: "{{ ansible_distribution }}"
+      os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
       old_kernel: "{{ old_kernel.stdout }}"
       new_kernel: ""
       updated: false
       reboot: false
       status: "Started"
+
+# ------------------------------
+# Check disk usage before patch
+# ------------------------------
+- name: Check free space on / /usr /var /boot
+  command: df -h --output=source,pcent,target
+  register: disk_usage
+  changed_when: false
+
+- name: Show disk usage
+  debug:
+    msg: "{{ disk_usage.stdout_lines }}"
+
+- name: Fail if /boot is above 90% used
+  fail:
+    msg: "/boot usage is above 90% ({{ boot_use }}), cleanup required before patching!"
+  vars:
+    boot_use: "{{ (disk_usage.stdout_lines | select('search','/boot') | first).split()[1].replace('%','') | int }}"
+  when: boot_use > 90
+
+- name: Fail if / is above 90% used
+  fail:
+    msg: "/ usage is above 90% ({{ root_use }}), cleanup required before patching!"
+  vars:
+    root_use: "{{ (disk_usage.stdout_lines | select('search',' /$') | first).split()[1].replace('%','') | int }}"
+  when: root_use > 90
+
+- name: Fail if /usr is above 90% used
+  fail:
+    msg: "/usr usage is above 90% ({{ usr_use }}), cleanup required before patching!"
+  vars:
+    usr_use: "{{ (disk_usage.stdout_lines | select('search','/usr') | first).split()[1].replace('%','') | int }}"
+  when: usr_use > 90
+
+- name: Fail if /var is above 90% used
+  fail:
+    msg: "/var usage is above 90% ({{ var_use }}), cleanup required before patching!"
+  vars:
+    var_use: "{{ (disk_usage.stdout_lines | select('search','/var') | first).split()[1].replace('%','') | int }}"
+  when: var_use > 90
+
+# ------------------------------
+# Cleanup old kernels and unused packages before patch
+# ------------------------------
+- name: Show starting pre-patch cleanup
+  debug:
+    msg: "Performing pre-patch cleanup on {{ inventory_hostname }}"
+
+# Debian / Ubuntu cleanup
+- name: Keep latest 2 kernels on Debian/Ubuntu
+  shell: |
+    current=$(uname -r)
+    kernels=$(dpkg --list 'linux-image-*' | awk '{print $2}' | grep -v "$current" | sort -V)
+    remove=$(echo "$kernels" | head -n -1)
+    if [ ! -z "$remove" ]; then
+      apt-get -y purge $remove
+    fi
+  args:
+    warn: false
+  when: ansible_os_family == "Debian"
+
+- name: Fix broken packages (Debian/Ubuntu)
+  apt:
+    fix_broken: yes
+  when: ansible_os_family == "Debian"
+
+- name: Auto-remove unused packages (Debian/Ubuntu)
+  apt:
+    autoremove: yes
+    purge: yes
+  when: ansible_os_family == "Debian"
+
+# RHEL / CentOS / Rocky / Alma cleanup
+- name: Remove old kernels (keep latest 2) on RHEL family
+  shell: |
+    rpm -q kernel | sort -V | head -n -2 | xargs -r yum -y remove
+  when: ansible_os_family == "RedHat"
+
+- name: Clean yum cache on RHEL family
+  yum:
+    name: '*'
+    state: latest
+    update_cache: yes
+  when: ansible_os_family == "RedHat"
+
+# SUSE / SLES cleanup
+- name: Remove old kernels (keep latest 2) on SUSE
+  shell: |
+    zypper --non-interactive se -s kernel | awk '/i/{print $3}' | sort -V | head -n -2 | xargs -r zypper --non-interactive rm
+  when: ansible_os_family == "Suse"
+
+- name: Clean zypper cache on SUSE
+  zypper:
+    name: "*"
+    state: latest
+  when: ansible_os_family == "Suse"
+
+- name: Show cleanup complete
+  debug:
+    msg: "Pre-patch cleanup completed on {{ inventory_hostname }}"
