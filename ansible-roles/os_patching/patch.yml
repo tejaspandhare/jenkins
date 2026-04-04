@@ -18,7 +18,6 @@
   roles:
     - precheck
     - patch
-    - patch_cleanup
     - reboot
     - postcheck
 
@@ -66,8 +65,8 @@
               Host    : {{ h.host }}
               OS      : {{ h.os }}
               Kernel  : {{ h.old_kernel }} → {{ h.new_kernel }}
-              Updated : {{ 'Yes' if h.updated else 'No' }}
-              Reboot  : {{ 'Yes' if h.reboot else 'No' }}
+              Updated : {{ h.updated }}
+              Reboot  : {{ h.reboot }}
               Status  : {{ h.status }}
               -------------------------------------------------
               {% endfor %}
