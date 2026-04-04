@@ -4,7 +4,8 @@
     msg: "Starting patch on {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
 
 - name: Capture current kernel
-  command: uname -r
+  ansible.builtin.command:
+    cmd: uname -r
   register: old_kernel
   changed_when: false
 
@@ -23,24 +24,22 @@
 # Cleanup /boot by removing old kernels
 # ------------------------------
 - name: Clean /boot - remove old kernels (Debian/Ubuntu)
-  shell: |
+  ansible.builtin.shell: |
     current=$(uname -r)
     kernels=$(dpkg --list 'linux-image-*' | awk '{print $2}' | grep -v "$current" | sort -V)
     remove=$(echo "$kernels" | head -n -1)
     if [ ! -z "$remove" ]; then
       apt-get -y purge $remove
     fi
-  args:
-    warn: false
   when: ansible_os_family == "Debian"
 
 - name: Clean /boot - remove old kernels (RHEL family)
-  shell: |
+  ansible.builtin.shell: |
     rpm -q kernel | sort -V | head -n -2 | xargs -r yum -y remove
   when: ansible_os_family == "RedHat"
 
 - name: Clean /boot - remove old kernels (SUSE)
-  shell: |
+  ansible.builtin.shell: |
     zypper --non-interactive se -s kernel | awk '/i/{print $3}' | sort -V | head -n -2 | xargs -r zypper --non-interactive rm
   when: ansible_os_family == "Suse"
 
@@ -52,7 +51,8 @@
 # Check disk space after /boot cleanup
 # ------------------------------
 - name: Check free space on / /usr /var /boot (in GB)
-  command: df -BG --output=target,avail
+  ansible.builtin.command:
+    cmd: df -BG --output=target,avail
   register: disk_space
   changed_when: false
 
