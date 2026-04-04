@@ -1,33 +1,58 @@
-# Debian / Ubuntu
+---
+# ------------------------------
+# 0. Initialize patch result (MANDATORY)
+# ------------------------------
+- name: Initialize patch result structure
+  ansible.builtin.set_fact:
+    patch_result:
+      host: "{{ inventory_hostname }}"
+      os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+      old_kernel: "{{ ansible_kernel }}"
+      new_kernel: ""
+      updated: false
+      reboot: false
+      status: "IN_PROGRESS"
+
+# ------------------------------
+# 1. Patch Debian / Ubuntu
+# ------------------------------
 - name: Patch Debian/Ubuntu
-  apt:
+  ansible.builtin.apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
   register: upgrade_result
 
-# RHEL / CentOS / Rocky / Alma
+# ------------------------------
+# 2. Patch RHEL / CentOS / Rocky / Alma
+# ------------------------------
 - name: Patch RHEL
-  dnf:
+  ansible.builtin.dnf:
     name: "*"
     state: latest
   when: ansible_os_family == "RedHat"
   register: upgrade_result
 
-# SUSE / SLES
+# ------------------------------
+# 3. Patch SUSE / SLES
+# ------------------------------
 - name: Patch SUSE
-  zypper:
+  ansible.builtin.zypper:
     name: "*"
     state: latest
   when: ansible_os_family == "Suse"
   register: upgrade_result
 
-# Show patch result on console
+# ------------------------------
+# 4. Show patch result
+# ------------------------------
 - name: Show patch result
-  debug:
-    msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed }}"
+  ansible.builtin.debug:
+    msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed | default(false) }}"
 
-# Update patch_result
+# ------------------------------
+# 5. Update patch_result safely
+# ------------------------------
 - name: Set patch_result updated flag
-  set_fact:
-    patch_result: "{{ patch_result | combine({'updated': upgrade_result.changed}) }}"
+  ansible.builtin.set_fact:
+    patch_result: "{{ patch_result | combine({'updated': upgrade_result.changed | default(false)}) }}"
