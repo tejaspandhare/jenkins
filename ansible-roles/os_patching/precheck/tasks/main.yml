@@ -1,70 +1,83 @@
-- name: Clean /boot - remove old kernels (Debian/Ubuntu)
+---
+# precheck/tasks/main.yml
+
+- name: Gather disk usage for critical partitions
+  ansible.builtin.shell: df -BG / /usr /var /boot | tail -n +2
+  register: disk_usage
+  changed_when: false
+
+- name: Fail if critical partitions have less than 5GB free
+  ansible.builtin.fail:
+    msg: "Partition {{ item.mount }} has less than 5GB free ({{ item.avail }}), patching cannot continue!"
+  loop: "{{ disk_usage.stdout_lines | map('split') | list }}"
+  loop_control:
+    label: "{{ item[5] }}"
+  when: item[3] | regex_replace('G','') | int < 5
+  vars:
+    # item[0]: Filesystem, item[1]: Size, item[2]: Used, item[3]: Avail, item[4]: Use%, item[5]: Mounted
+
+- name: Clean /boot - Debian/Ubuntu
   ansible.builtin.shell: |
+    set -e
     current=$(uname -r)
-    packages=$(dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/{print $2}' | grep -v "$current" | sort -V)
-    to_remove=$(echo "$packages" | head -n -1)
-    if [ ! -z "$to_remove" ]; then
-      apt-get -y purge $to_remove || true
-    fi
+    kernels=$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#/boot/vmlinuz-##' | sort -V | grep -v "^$current$")
+    keep=$(echo "$kernels" | tail -n 1)
+    for k in $kernels; do
+      if [ "$k" != "$keep" ]; then
+        echo "Removing kernel files for $k"
+        rm -f /boot/vmlinuz-$k /boot/initrd.img-$k /boot/System.map-$k /boot/config-$k || true
+      fi
+    done
   when: ansible_os_family == "Debian"
 
 - name: Fix broken dependencies on Debian/Ubuntu
-  ansible.builtin.apt:
-    upgrade: no
-    update_cache: yes
-    force: yes
-    dpkg_options: "force-confdef,force-confold"
-    install_recommends: yes
-    fix_broken: yes
+  ansible.builtin.command: apt-get -f install -y
   when: ansible_os_family == "Debian"
 
-- name: Autoremove unnecessary packages on Debian/Ubuntu
+- name: Autoremove packages on Debian/Ubuntu
   ansible.builtin.apt:
     autoremove: yes
     purge: yes
   when: ansible_os_family == "Debian"
 
-- name: Clean /boot - remove old kernels (RHEL)
+- name: Clean /boot - RHEL/CentOS
   ansible.builtin.shell: |
-    rpm -q kernel | sort -V | head -n -2 | xargs -r yum -y remove
-    package-cleanup -y --oldkernels --count=1
-    yum -y autoremove
+    set -e
+    current=$(uname -r)
+    kernels=$(rpm -q kernel | grep -v "$current" | sort -V)
+    keep=$(echo "$kernels" | tail -n 1)
+    for k in $kernels; do
+      if [ "$k" != "$keep" ]; then
+        echo "Removing kernel package $k"
+        yum -y remove $k || true
+      fi
+    done
   when: ansible_os_family == "RedHat"
 
-- name: Clean /boot - remove old kernels (SUSE)
+- name: Clean /boot - SUSE
   ansible.builtin.shell: |
-    zypper --non-interactive se -s kernel | awk '/i/{print $3}' | sort -V | head -n -2 | xargs -r zypper --non-interactive rm
-    zypper --non-interactive clean --all
+    set -e
+    current=$(uname -r)
+    kernels=$(rpm -q kernel-default | grep -v "$current" | sort -V)
+    keep=$(echo "$kernels" | tail -n 1)
+    for k in $kernels; do
+      if [ "$k" != "$keep" ]; then
+        echo "Removing kernel package $k"
+        zypper -n rm $k || true
+      fi
+    done
   when: ansible_os_family == "Suse"
 
-- name: Check free space on / /usr /var /boot (in GB)
-  ansible.builtin.command:
-    cmd: df -BG --output=target,avail
-  register: disk_space
-  changed_when: false
+- name: Autoremove packages on RHEL/CentOS
+  ansible.builtin.yum:
+    name: '*'
+    state: latest
+    autoremove: yes
+  when: ansible_os_family == "RedHat"
 
-- name: Parse free space
-  set_fact:
-    free_space: >-
-      {{
-        dict(
-          disk_space.stdout_lines[1:] 
-          | map('split') 
-          | map('reverse') 
-          | map('map', 'regex_replace', 'G','') 
-          | map('map','int') 
-          | map('reverse') 
-          | map('list') 
-          | list
-        )
-      }}
-
-- name: Fail if /, /usr, /var have less than 5GB free
-  fail:
-    msg: "Partition {{ item.key }} has less than 5GB free ({{ item.value }} GB), cannot continue patching!"
-  loop: "{{ free_space | dict2items }}"
-  when: item.key in ['/', '/usr', '/var'] and item.value < 5
-
-- name: Show disk space check passed
-  debug:
-    msg: "Sufficient disk space available on {{ inventory_hostname }}"
+- name: Autoremove packages on SUSE
+  ansible.builtin.zypper:
+    name: '*'
+    state: latest
+    autoremove: yes
+  when: ansible_os_family == "Suse"
