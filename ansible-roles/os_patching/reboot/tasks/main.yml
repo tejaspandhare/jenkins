@@ -1,55 +1,54 @@
-# Debian reboot check
-- name: Check reboot required (Debian)
-  stat:
-    path: /var/run/reboot-required
-  register: debian_reboot
+---
+# ------------------------------
+# Get latest installed kernel
+# ------------------------------
+- name: Get latest installed kernel (Debian/Ubuntu)
+  shell: |
+    dpkg -l 'linux-image-*' \
+    | awk '/^ii/{ print $2 }' \
+    | sed 's/linux-image-//' \
+    | sort -V \
+    | tail -n 1
+  args:
+    executable: /bin/bash
+  register: latest_kernel
+  changed_when: false
   when: ansible_os_family == "Debian"
 
-# RHEL reboot check
-- name: Check reboot required (RHEL)
-  command: needs-restarting -r
-  register: rhel_reboot
-  failed_when: false
-  changed_when: false
-  when: ansible_os_family == "RedHat"
-
-# SUSE reboot check
-- name: Check reboot required (SUSE)
-  command: zypper ps -s
-  register: suse_reboot
-  changed_when: false
-  when: ansible_os_family == "Suse"
-
-# Decide reboot
-- name: Set reboot_required
+# ------------------------------
+# Decide reboot ONLY on kernel change
+# ------------------------------
+- name: Determine reboot requirement
   set_fact:
-    reboot_required: >-
-      {{
-        (ansible_os_family == "Debian" and debian_reboot.stat.exists)
-        or
-        (ansible_os_family == "RedHat" and rhel_reboot.rc != 0)
-        or
-        (ansible_os_family == "Suse" and 'reboot' in suse_reboot.stdout | lower)
-      }}
+    reboot_required: "{{ latest_kernel.stdout != running_kernel }}"
 
-# Show reboot decision
+# ------------------------------
+# Debug info
+# ------------------------------
 - name: Show reboot decision
   debug:
-    msg: "Reboot required on {{ inventory_hostname }}: {{ reboot_required }}"
+    msg: |
+      Running kernel : {{ running_kernel }}
+      Installed kernel: {{ latest_kernel.stdout }}
+      Reboot required: {{ reboot_required }}
 
+# ------------------------------
 # Reboot if needed
-- name: Reboot system if required
+# ------------------------------
+- name: Reboot system if kernel updated
   reboot:
     reboot_timeout: 900
   when: reboot_required
 
-- name: Wait for system to come back
+- name: Wait for system
   wait_for_connection:
     delay: 10
     timeout: 300
   when: reboot_required
 
+# ------------------------------
 # Update patch_result
-- name: Update patch_result reboot flag
+# ------------------------------
+- name: Update reboot flag
   set_fact:
     patch_result: "{{ patch_result | combine({'reboot': reboot_required}) }}"
