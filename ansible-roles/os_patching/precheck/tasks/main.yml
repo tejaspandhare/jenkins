@@ -71,7 +71,7 @@
           | list
         )
       }}
-      
+
 - name: Fail if /, /usr, /var have less than 5GB free
   fail:
     msg: "Partition {{ item.key }} has less than 5GB free ({{ item.value }} GB), cannot continue patching!"
