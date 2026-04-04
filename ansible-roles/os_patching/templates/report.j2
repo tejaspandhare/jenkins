@@ -13,34 +13,46 @@
         tr:nth-child(odd) { background-color: #ffffff; }
         .ok { color: #2ecc71; font-weight: bold; }
         .fail { color: #e74c3c; font-weight: bold; }
+        .summary { margin-bottom: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <h2>🚀 Linux Patch Report</h2>
 
-<table>
-    <tr>
-        <th>Host</th>
-        <th>OS</th>
-        <th>Old Kernel</th>
-        <th>New Kernel</th>
-        <th>Updated</th>
-        <th>Reboot</th>
-        <th>Status</th>
-    </tr>
+{% set total = patch_results_summary | length %}
+{% set success = patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length %}
+{% set failed = total - success %}
 
+<div class="summary">
+    Total Hosts: {{ total }} | Success: {{ success }} | Failed: {{ failed }}
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Host</th>
+            <th>OS</th>
+            <th>Old Kernel</th>
+            <th>New Kernel</th>
+            <th>Updated</th>
+            <th>Reboot</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
     {% for host in patch_results_summary %}
-    <tr>
-        <td>{{ host.host }}</td>
-        <td>{{ host.os | default('N/A') }}</td>
-        <td>{{ host.old_kernel | default('N/A') }}</td>
-        <td>{{ host.new_kernel | default('N/A') }}</td>
-        <td>{{ 'Yes' if host.updated else 'No' }}</td>
-        <td>{{ 'Yes' if host.reboot else 'No' }}</td>
-        <td class="{% if host.status == 'SUCCESS' %}ok{% else %}fail{% endif %}">{{ host.status }}</td>
-    </tr>
+        <tr>
+            <td>{{ host.host }}</td>
+            <td>{{ host.os | default('N/A') }}</td>
+            <td>{{ host.old_kernel | default('N/A') }}</td>
+            <td>{{ host.new_kernel | default('N/A') }}</td>
+            <td>{{ 'Yes' if host.updated else 'No' }}</td>
+            <td>{{ 'Yes' if host.reboot else 'No' }}</td>
+            <td class="{% if host.status == 'SUCCESS' %}ok{% else %}fail{% endif %}">{{ host.status }}</td>
+        </tr>
     {% endfor %}
+    </tbody>
 </table>
 
 <p style="text-align:center; margin-top:20px;">
