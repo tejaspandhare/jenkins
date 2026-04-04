@@ -26,7 +26,7 @@
   when: ansible_os_family == "RedHat"
 
 # ------------------------------
-# 3. Capture latest installed kernel (SUSE)
+# 3. Capture latest installed kernel (SUSE/SLES)
 # ------------------------------
 - name: Get latest installed kernel (SUSE)
   shell: rpm -q kernel-default | sort -V | tail -n 1
@@ -41,7 +41,8 @@
   set_fact:
     reboot_required: >-
       {{
-        (patch_result.updated and latest_kernel.stdout != running_kernel)
+        patch_result.updated
+        and (latest_kernel.stdout | default(latest_kernel) != running_kernel)
       }}
 
 # ------------------------------
@@ -51,12 +52,12 @@
   debug:
     msg: |
       Running kernel : {{ running_kernel }}
-      Latest kernel  : {{ latest_kernel.stdout }}
+      Latest kernel  : {{ latest_kernel.stdout | default(latest_kernel) }}
       Kernel updated : {{ patch_result.updated }}
       Reboot required: {{ reboot_required }}
 
 # ------------------------------
-# 6. Reboot system if needed
+# 6. Reboot system if kernel updated
 # ------------------------------
 - name: Reboot system if kernel updated
   reboot:
