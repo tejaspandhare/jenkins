@@ -4,15 +4,19 @@
     <meta charset="UTF-8">
     <title>Linux Patch Report</title>
     <style>
-        body { font-family: Arial; margin:20px; background:#f4f6f8;}
-        h1 { text-align:center; color:#2c3e50;}
-        table { width:100%; border-collapse: collapse; background:white; box-shadow:0 2px 5px rgba(0,0,0,0.1);}
-        th, td { border:1px solid #ddd; padding:8px; text-align:center;}
-        th { background:#34495e; color:white; }
-        td.ok { color:#2ecc71; font-weight:bold; }
-        td.fail { color:#e74c3c; font-weight:bold; }
-        .summary { text-align:center; margin-bottom:15px; }
-        .footer { text-align:center; margin-top:15px; color:#888; }
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f8; }
+        h1 { text-align: center; color: #2c3e50; }
+        .summary { display: flex; justify-content: center; margin-bottom: 20px; }
+        .card { padding: 15px 25px; margin: 10px; border-radius: 8px; color: white; font-weight: bold; }
+        .total { background-color: #3498db; }
+        .success { background-color: #2ecc71; }
+        .failed { background-color: #e74c3c; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        th { background-color: #34495e; color: white; padding: 10px; }
+        td { padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }
+        .ok { color: #2ecc71; font-weight: bold; }
+        .fail { color: #e74c3c; font-weight: bold; }
+        .footer { margin-top: 20px; text-align: center; color: #888; }
     </style>
 </head>
 <body>
@@ -20,13 +24,13 @@
 <h1>🚀 Linux Patch Report</h1>
 
 {% set total = patch_results_summary | length %}
-{% set success = patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length %}
+{% set success = patch_results_summary | selectattr('status','search','SUCCESS') | list | length %}
 {% set failed = total - success %}
 
 <div class="summary">
-    <strong>Total Hosts:</strong> {{ total }} | 
-    <strong>Success:</strong> {{ success }} | 
-    <strong>Failed:</strong> {{ failed }}
+    <div class="card total">Total: {{ total }}</div>
+    <div class="card success">Success: {{ success }}</div>
+    <div class="card failed">Failed: {{ failed }}</div>
 </div>
 
 <table>
@@ -39,15 +43,18 @@
         <th>Reboot</th>
         <th>Status</th>
     </tr>
+
     {% for host in patch_results_summary %}
     <tr>
         <td>{{ host.host }}</td>
-        <td>{{ host.os }}</td>
+        <td>{{ host.os | default('N/A') }}</td>
         <td>{{ host.old_kernel }}</td>
         <td>{{ host.new_kernel }}</td>
         <td>{{ 'Yes' if host.updated else 'No' }}</td>
         <td>{{ 'Yes' if host.reboot else 'No' }}</td>
-        <td class="{% if host.status=='SUCCESS' %}ok{% else %}fail{% endif %}">{{ host.status }}</td>
+        <td class="{% if host.status | trim == 'SUCCESS' %}ok{% else %}fail{% endif %}">
+            {{ host.status | trim }}
+        </td>
     </tr>
     {% endfor %}
 </table>
