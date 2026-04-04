@@ -58,6 +58,12 @@
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #eef2f7; }
 
+        /* Kernel highlighting */
+        .kernel-new {
+            color: #2ecc71;
+            font-weight: bold;
+        }
+
         .ok {
             color: #2ecc71;
             font-weight: bold;
@@ -94,7 +100,8 @@
     <tr>
         <th>Host</th>
         <th>OS</th>
-        <th>Kernel</th>
+        <th>Old Kernel</th>
+        <th>New Kernel</th>
         <th>Updated</th>
         <th>Reboot</th>
         <th>Status</th>
@@ -104,10 +111,12 @@
     <tr>
         <td>{{ host.host }}</td>
         <td>{{ host.os | default('N/A') }}</td>
+        <td>{{ host.old_kernel | default('N/A') }}</td>
         <td>
-            {{ host.old_kernel | default('N/A') }}
             {% if host.new_kernel is defined and host.new_kernel != host.old_kernel %}
-                → {{ host.new_kernel }}
+                <span class="kernel-new">{{ host.new_kernel }}</span>
+            {% else %}
+                {{ host.new_kernel | default(host.old_kernel | default('N/A')) }}
             {% endif %}
         </td>
         <td>{{ 'Yes' if host.updated | default(false) else 'No' }}</td>
