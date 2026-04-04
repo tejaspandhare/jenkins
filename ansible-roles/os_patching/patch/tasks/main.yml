@@ -1,9 +1,9 @@
 ---
 # ------------------------------
-# 0. Initialize patch result (MANDATORY)
+# 0. Initialize patch result
 # ------------------------------
-- name: Initialize patch result structure
-  ansible.builtin.set_fact:
+- name: Initialize patch result
+  set_fact:
     patch_result:
       host: "{{ inventory_hostname }}"
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
@@ -14,7 +14,7 @@
       status: "IN_PROGRESS"
 
 # ------------------------------
-# 1. Patch Debian / Ubuntu
+# 1. Patch Debian/Ubuntu
 # ------------------------------
 - name: Patch Debian/Ubuntu
   ansible.builtin.apt:
@@ -24,7 +24,7 @@
   register: upgrade_result
 
 # ------------------------------
-# 2. Patch RHEL / CentOS / Rocky / Alma
+# 2. Patch RHEL
 # ------------------------------
 - name: Patch RHEL
   ansible.builtin.dnf:
@@ -34,7 +34,7 @@
   register: upgrade_result
 
 # ------------------------------
-# 3. Patch SUSE / SLES
+# 3. Patch SUSE
 # ------------------------------
 - name: Patch SUSE
   ansible.builtin.zypper:
@@ -44,15 +44,15 @@
   register: upgrade_result
 
 # ------------------------------
-# 4. Show patch result
+# 4. Show result
 # ------------------------------
 - name: Show patch result
-  ansible.builtin.debug:
-    msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed | default(false) }}"
+  debug:
+    msg: "Patching done on {{ inventory_hostname }} | Changed: {{ upgrade_result.changed | default(false) }}"
 
 # ------------------------------
-# 5. Update patch_result safely
+# 5. Update patch_result
 # ------------------------------
-- name: Set patch_result updated flag
-  ansible.builtin.set_fact:
+- name: Update patch_result updated flag
+  set_fact:
     patch_result: "{{ patch_result | combine({'updated': upgrade_result.changed | default(false)}) }}"
