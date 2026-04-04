@@ -23,10 +23,12 @@
 
   tasks:
 
+    # ------------------------------
+    # Generate summary and report
+    # ------------------------------
     - name: Generate patch report on controller
       run_once: true
       delegate_to: localhost
-
       block:
 
         - name: Reset temp directory
@@ -62,7 +64,7 @@
               {% for h in patch_results_summary %}
               Host    : {{ h.host }}
               OS      : {{ h.os }}
-              Kernel  : {{ h.old_kernel }} -> {{ h.new_kernel }}
+              Kernel  : {{ h.old_kernel }} → {{ h.new_kernel }}
               Updated : {{ h.updated }}
               Reboot  : {{ h.reboot }}
               Status  : {{ h.status }}
