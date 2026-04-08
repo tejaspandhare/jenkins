@@ -1,33 +1,45 @@
 ---
 # ------------------------------
-# 1. Gather disk usage
+# 1. Gather disk usage (SAFE PARSING)
 # ------------------------------
 - name: Gather disk usage for /boot, /, /usr, /var
-  ansible.builtin.shell: df -BG / /usr /var /boot | tail -n +2
+  ansible.builtin.command: df -BG / /usr /var /boot
   register: disk_usage
   changed_when: false
 
-- name: Fail if critical partitions have less than required free space
+- name: Parse disk usage
+  set_fact:
+    disk_parsed: >-
+      {{
+        disk_usage.stdout_lines[1:]
+        | map('split')
+        | list
+      }}
+
+# ------------------------------
+# 2. Fail if critical partitions low on space
+# ------------------------------
+- name: Validate free space
   ansible.builtin.fail:
-    msg: "Partition {{ item[5] }} has less than required free space ({{ item[3] }})"
-  loop: "{{ disk_usage.stdout_lines | map('split') | list }}"
+    msg: "Partition {{ item[5] }} has low free space ({{ item[3] }})"
+  loop: "{{ disk_parsed }}"
   loop_control:
     label: "{{ item[5] }}"
   when: >
     (item[5] == '/boot' and (item[3] | regex_replace('G','') | int < 1)) or
-    (item[5] in ['/','/usr','/var'] and (item[3] | regex_replace('G','') | int < 5))
+    (item[5] in ['/', '/usr', '/var'] and (item[3] | regex_replace('G','') | int < 5))
 
 # ------------------------------
-# 2. Fix broken packages
+# 3. Fix broken packages (Debian)
 # ------------------------------
 - name: Fix broken dependencies (Debian/Ubuntu)
-  ansible.builtin.shell: apt-get -f install -y
+  ansible.builtin.command: apt-get -f install -y
   register: fix_broken
-  changed_when: false
+  changed_when: "'0 upgraded' not in fix_broken.stdout"
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 3. Update cache
+# 4. Update apt cache
 # ------------------------------
 - name: Update apt cache
   ansible.builtin.apt:
@@ -35,23 +47,45 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 4. Clean old kernels safely
+# 5. Remove old kernels safely (IMPROVED)
 # ------------------------------
-- name: Remove old kernels safely (Debian/Ubuntu)
+- name: Get installed kernels
   ansible.builtin.shell: |
-    set -o pipefail
     dpkg -l 'linux-image-*' \
     | awk '/^ii/{ print $2 }' \
-    | grep -v "$(uname -r)" \
-    | sort -V \
-    | head -n -2 \
-    | xargs -r apt-get -y purge
+    | sed 's/linux-image-//' \
+    | sort -V
   args:
     executable: /bin/bash
+  register: installed_kernels
+  changed_when: false
   when: ansible_os_family == "Debian"
 
+- name: Determine kernels to remove (keep last 2 + running)
+  set_fact:
+    kernels_to_remove: >-
+      {{
+        installed_kernels.stdout_lines
+        | difference([ansible_kernel])
+        | sort
+        | reverse
+        | list
+        | slice(2, 100)
+        | flatten
+      }}
+  when: ansible_os_family == "Debian"
+
+- name: Remove old kernels
+  ansible.builtin.apt:
+    name: "{{ kernels_to_remove | map('regex_replace', '^(.*)$', 'linux-image-\\1') | list }}"
+    state: absent
+    purge: yes
+  when:
+    - ansible_os_family == "Debian"
+    - kernels_to_remove | length > 0
+
 # ------------------------------
-# 5. Autoremove
+# 6. Autoremove unused packages
 # ------------------------------
 - name: Autoremove unused packages
   ansible.builtin.apt:
@@ -60,8 +94,19 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 6. Capture running kernel baseline
+# 7. Capture running kernel baseline
 # ------------------------------
 - name: Capture running kernel
-  ansible.builtin.set_fact:
+  set_fact:
     running_kernel: "{{ ansible_kernel }}"
+
+# ------------------------------
+# 8. Debug precheck summary (optional)
+# ------------------------------
+- name: Show precheck summary
+  debug:
+    msg: |
+      Precheck completed on {{ inventory_hostname }}
+      Running Kernel : {{ running_kernel }}
+      Disk Checked   : OK
+      Old Kernels    : {{ kernels_to_remove | default([]) }}
