@@ -1,55 +1,42 @@
 ---
 # ------------------------------
-# 1. Capture the new running kernel after patch/reboot
+# 1. Capture running kernel AFTER patch/reboot
 # ------------------------------
-- name: Capture new running kernel
+- name: Capture running kernel
   command: uname -r
-  register: new_kernel
+  register: running_kernel_after
   changed_when: false
 
 # ------------------------------
-# 2. Show old → new kernel on console
+# 2. Display kernel transition
 # ------------------------------
 - name: Display kernel transition
   debug:
-    msg: "Kernel on {{ inventory_hostname }}: {{ patch_result.old_kernel }} → {{ new_kernel.stdout }}"
+    msg: |
+      Kernel on {{ inventory_hostname }}:
+      Old Kernel       : {{ patch_result.old_kernel }}
+      Installed Kernel : {{ patch_result.new_kernel }}
+      Running Kernel   : {{ running_kernel_after.stdout }}
 
 # ------------------------------
-# 3. Update patch_result with new kernel and status
+# 3. Finalize patch_result (DO NOT overwrite installed kernel)
 # ------------------------------
-- name: Finalize patch_result with kernel and status
+- name: Finalize patch_result
   set_fact:
-    patch_result: >-
-      {{
-        (patch_result | default({})) | combine({
-          'new_kernel': new_kernel.stdout,
-          'status': ('FAILED' if upgrade_result is failed else 'SUCCESS')
-        })
-      }}
+    patch_result: "{{ patch_result | combine({
+      'status': ('FAILED' if (upgrade_result is failed) else 'SUCCESS')
+    }) }}"
 
 # ------------------------------
-# 4. Correctly set reboot flag
-#    Only reboot if kernel actually changed and update applied
-# ------------------------------
-- name: Update patch_result reboot flag
-  set_fact:
-    patch_result: >-
-      {{
-        patch_result | combine({
-          'reboot': ((patch_result.old_kernel | default('')) != new_kernel.stdout) 
-                    and (patch_result.updated | default(false))
-        })
-      }}
-
-# ------------------------------
-# 5. Optional debug for reporting
+# 4. Optional debug
 # ------------------------------
 - name: Show finalized patch_result
   debug:
     msg: |
       Host    : {{ inventory_hostname }}
-      OS      : {{ patch_result.os | default(ansible_distribution ~ ' ' ~ ansible_distribution_version) }}
+      OS      : {{ patch_result.os }}
       Kernel  : {{ patch_result.old_kernel }} → {{ patch_result.new_kernel }}
-      Updated : {{ patch_result.updated | default(false) }}
+      Running : {{ running_kernel_after.stdout }}
+      Updated : {{ patch_result.updated }}
       Reboot  : {{ patch_result.reboot }}
       Status  : {{ patch_result.status }}
