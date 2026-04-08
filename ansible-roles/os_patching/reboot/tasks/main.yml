@@ -1,63 +1,23 @@
 ---
 # ------------------------------
-# 1. Capture latest installed kernel (Debian/Ubuntu)
-# ------------------------------
-- name: Get latest installed kernel (Debian/Ubuntu)
-  shell: |
-    dpkg -l 'linux-image-*' \
-    | awk '/^ii/{ print $2 }' \
-    | grep -v '\-dbg\|headers\|modules\|generic-lts' \
-    | sed 's/linux-image-//' \
-    | sort -V \
-    | tail -n 1
-  args:
-    executable: /bin/bash
-  register: latest_kernel
-  changed_when: false
-  when: ansible_os_family == "Debian"
-
-# ------------------------------
-# 2. Capture latest installed kernel (RHEL/CentOS)
-# ------------------------------
-- name: Get latest installed kernel (RHEL)
-  shell: rpm -q kernel | sort -V | tail -n 1
-  register: latest_kernel
-  changed_when: false
-  when: ansible_os_family == "RedHat"
-
-# ------------------------------
-# 3. Capture latest installed kernel (SUSE/SLES)
-# ------------------------------
-- name: Get latest installed kernel (SUSE)
-  shell: rpm -q kernel-default | sort -V | tail -n 1
-  register: latest_kernel
-  changed_when: false
-  when: ansible_os_family == "Suse"
-
-# ------------------------------
-# 4. Determine if reboot required (kernel actually updated)
+# 1. Determine reboot requirement (FIXED)
 # ------------------------------
 - name: Determine reboot requirement
   set_fact:
-    reboot_required: >-
-      {{
-        patch_result.updated
-        and (latest_kernel.stdout | default(latest_kernel) != running_kernel)
-      }}
+    reboot_required: "{{ patch_result.new_kernel != patch_result.old_kernel }}"
 
 # ------------------------------
-# 5. Debug kernel & reboot info
+# 2. Show decision
 # ------------------------------
 - name: Show reboot decision
   debug:
     msg: |
-      Running kernel : {{ running_kernel }}
-      Latest kernel  : {{ latest_kernel.stdout | default(latest_kernel) }}
-      Kernel updated : {{ patch_result.updated }}
+      Running kernel : {{ patch_result.old_kernel }}
+      Installed kernel: {{ patch_result.new_kernel }}
       Reboot required: {{ reboot_required }}
 
 # ------------------------------
-# 6. Reboot system if kernel updated
+# 3. Reboot if needed
 # ------------------------------
 - name: Reboot system if kernel updated
   reboot:
@@ -71,7 +31,7 @@
   when: reboot_required
 
 # ------------------------------
-# 7. Update patch_result reboot flag
+# 4. Update patch_result reboot flag
 # ------------------------------
 - name: Update patch_result reboot flag
   set_fact:
