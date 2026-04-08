@@ -1,36 +1,25 @@
 ---
 # ------------------------------
-# 1. Capture running kernel AFTER patch/reboot
+# 1. Capture running kernel
 # ------------------------------
-- name: Capture running kernel
+- name: Capture running kernel after patch
   command: uname -r
   register: running_kernel_after
   changed_when: false
 
 # ------------------------------
-# 2. Display kernel transition
-# ------------------------------
-- name: Display kernel transition
-  debug:
-    msg: |
-      Kernel on {{ inventory_hostname }}:
-      Old Kernel       : {{ patch_result.old_kernel }}
-      Installed Kernel : {{ patch_result.new_kernel }}
-      Running Kernel   : {{ running_kernel_after.stdout }}
-
-# ------------------------------
-# 3. Finalize patch_result (DO NOT overwrite installed kernel)
+# 2. Finalize status safely
 # ------------------------------
 - name: Finalize patch_result
   set_fact:
     patch_result: "{{ patch_result | combine({
-      'status': ('FAILED' if (upgrade_result is failed) else 'SUCCESS')
+      'status': (patch_result.status if patch_result.status == 'FAILED' else 'SUCCESS')
     }) }}"
 
 # ------------------------------
-# 4. Optional debug
+# 3. Show final result
 # ------------------------------
-- name: Show finalized patch_result
+- name: Show final result
   debug:
     msg: |
       Host    : {{ inventory_hostname }}
