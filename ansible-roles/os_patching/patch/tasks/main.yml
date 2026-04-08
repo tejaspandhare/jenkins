@@ -8,7 +8,7 @@
       host: "{{ inventory_hostname }}"
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
       old_kernel: "{{ ansible_kernel }}"
-      new_kernel: ""
+      new_kernel: "{{ ansible_kernel }}"
       updated: false
       reboot: false
       status: "IN_PROGRESS"
@@ -44,15 +44,46 @@
   register: upgrade_result
 
 # ------------------------------
-# 4. Show result
+# 4. Detect latest installed kernel (RELIABLE)
+# ------------------------------
+- name: Get latest installed kernel (Debian/Ubuntu)
+  shell: |
+    ls -1 /boot/vmlinuz-* | sed 's#.*/vmlinuz-##' | sort -V | tail -1
+  args:
+    executable: /bin/bash
+  register: latest_kernel
+  changed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: Get latest installed kernel (RHEL)
+  shell: rpm -q kernel | sort -V | tail -n 1 | sed 's/kernel-//'
+  register: latest_kernel
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: Get latest installed kernel (SUSE)
+  shell: rpm -q kernel-default | sort -V | tail -n 1 | sed 's/kernel-default-//'
+  register: latest_kernel
+  changed_when: false
+  when: ansible_os_family == "Suse"
+
+# ------------------------------
+# 5. Update patch_result correctly
+# ------------------------------
+- name: Update patch_result after patching
+  set_fact:
+    patch_result: "{{ patch_result | combine({
+      'new_kernel': latest_kernel.stdout,
+      'updated': (latest_kernel.stdout != patch_result.old_kernel)
+    }) }}"
+
+# ------------------------------
+# 6. Show result
 # ------------------------------
 - name: Show patch result
   debug:
-    msg: "Patching done on {{ inventory_hostname }} | Changed: {{ upgrade_result.changed | default(false) }}"
-
-# ------------------------------
-# 5. Update patch_result
-# ------------------------------
-- name: Update patch_result updated flag
-  set_fact:
-    patch_result: "{{ patch_result | combine({'updated': upgrade_result.changed | default(false)}) }}"
+    msg: |
+      Patching done on {{ inventory_hostname }}
+      Old Kernel : {{ patch_result.old_kernel }}
+      New Kernel : {{ patch_result.new_kernel }}
+      Updated    : {{ patch_result.updated }}
