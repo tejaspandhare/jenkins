@@ -14,76 +14,74 @@
       status: "IN_PROGRESS"
 
 # ------------------------------
-# 1. Patch Debian/Ubuntu
+# 1. Patch OS (multi-OS unified)
 # ------------------------------
 - name: Patch Debian/Ubuntu
   ansible.builtin.apt:
     update_cache: yes
     upgrade: dist
   when: ansible_os_family == "Debian"
-  register: upgrade_result
+  register: patch_cmd
 
-# ------------------------------
-# 2. Patch RHEL
-# ------------------------------
 - name: Patch RHEL
   ansible.builtin.dnf:
     name: "*"
     state: latest
   when: ansible_os_family == "RedHat"
-  register: upgrade_result
+  register: patch_cmd
 
-# ------------------------------
-# 3. Patch SUSE
-# ------------------------------
 - name: Patch SUSE
   ansible.builtin.zypper:
     name: "*"
     state: latest
   when: ansible_os_family == "Suse"
-  register: upgrade_result
+  register: patch_cmd
 
 # ------------------------------
-# 4. Detect latest installed kernel (RELIABLE)
+# 2. Get latest installed kernel (UNIFIED METHOD)
 # ------------------------------
-- name: Get latest installed kernel (Debian/Ubuntu)
+- name: Get latest installed kernel (all Linux)
   shell: |
-    ls -1 /boot/vmlinuz-* | sed 's#.*/vmlinuz-##' | sort -V | tail -1
+    ls -1 /boot/vmlinuz-* 2>/dev/null \
+    | sed 's#.*/vmlinuz-##' \
+    | sort -V \
+    | tail -1
   args:
     executable: /bin/bash
-  register: latest_kernel
+  register: kernel_cmd
   changed_when: false
-  when: ansible_os_family == "Debian"
-
-- name: Get latest installed kernel (RHEL)
-  shell: rpm -q kernel | sort -V | tail -n 1 | sed 's/kernel-//'
-  register: latest_kernel
-  changed_when: false
-  when: ansible_os_family == "RedHat"
-
-- name: Get latest installed kernel (SUSE)
-  shell: rpm -q kernel-default | sort -V | tail -n 1 | sed 's/kernel-default-//'
-  register: latest_kernel
-  changed_when: false
-  when: ansible_os_family == "Suse"
+  failed_when: false
 
 # ------------------------------
-# 5. Update patch_result correctly
+# 3. Normalize kernel value (SAFE)
+# ------------------------------
+- name: Normalize latest kernel value
+  set_fact:
+    latest_kernel: "{{ kernel_cmd.stdout | default('') | trim }}"
+
+- name: Fallback if kernel detection failed
+  set_fact:
+    latest_kernel: "{{ patch_result.old_kernel }}"
+  when: latest_kernel == ""
+
+# ------------------------------
+# 4. Update patch_result (CORRECT LOGIC)
 # ------------------------------
 - name: Update patch_result after patching
   set_fact:
     patch_result: "{{ patch_result | combine({
-      'new_kernel': latest_kernel.stdout,
-      'updated': (latest_kernel.stdout != patch_result.old_kernel)
+      'new_kernel': latest_kernel,
+      'updated': (latest_kernel != patch_result.old_kernel)
     }) }}"
 
 # ------------------------------
-# 6. Show result
+# 5. Debug output
 # ------------------------------
 - name: Show patch result
   debug:
     msg: |
-      Patching done on {{ inventory_hostname }}
-      Old Kernel : {{ patch_result.old_kernel }}
-      New Kernel : {{ patch_result.new_kernel }}
-      Updated    : {{ patch_result.updated }}
+      Host         : {{ inventory_hostname }}
+      Old Kernel   : {{ patch_result.old_kernel }}
+      New Kernel   : {{ patch_result.new_kernel }}
+      Kernel Changed: {{ patch_result.updated }}
+      Pkg Changed  : {{ patch_cmd.changed | default(false) }}
