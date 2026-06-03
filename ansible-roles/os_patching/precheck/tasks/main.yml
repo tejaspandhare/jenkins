@@ -1,36 +1,42 @@
 ---
+# ==========================================================
+# PRECHECK - Common Linux Validation
+# Supports:
+#   - Ubuntu / Debian
+#   - RHEL / Rocky / Alma / Oracle Linux
+#   - SLES / openSUSE
+# ==========================================================
+
 # ------------------------------
-# 1. Gather disk usage (SAFE PARSING)
+# 1. Gather disk usage
 # ------------------------------
-- name: Gather disk usage for /boot, /, /usr, /var
+- name: Gather disk usage
   ansible.builtin.command: df -BG / /usr /var /boot
   register: disk_usage
   changed_when: false
+  failed_when: false
 
 - name: Parse disk usage
-  set_fact:
-    disk_parsed: >-
-      {{
-        disk_usage.stdout_lines[1:]
-        | map('split')
-        | list
-      }}
+  ansible.builtin.set_fact:
+    disk_parsed: "{{ disk_usage.stdout_lines[1:] | map('split') | list }}"
+  when: disk_usage.rc == 0
 
 # ------------------------------
-# 2. Fail if critical partitions low on space
+# 2. Validate free space
 # ------------------------------
-- name: Validate free space
+- name: Fail if critical filesystem is low on space
   ansible.builtin.fail:
     msg: "Partition {{ item[5] }} has low free space ({{ item[3] }})"
   loop: "{{ disk_parsed }}"
   loop_control:
     label: "{{ item[5] }}"
   when: >
-    (item[5] == '/boot' and (item[3] | regex_replace('G','') | int < 1)) or
+    (item[5] == '/boot' and (item[3] | regex_replace('G','') | int < 1))
+    or
     (item[5] in ['/', '/usr', '/var'] and (item[3] | regex_replace('G','') | int < 5))
 
 # ------------------------------
-# 3. Fix broken packages (Debian)
+# 3. Fix package issues
 # ------------------------------
 - name: Fix broken dependencies (Debian/Ubuntu)
   ansible.builtin.command: apt-get -f install -y
@@ -39,74 +45,100 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 4. Update apt cache
+# 4. Refresh package metadata
 # ------------------------------
 - name: Update apt cache
   ansible.builtin.apt:
-    update_cache: yes
+    update_cache: true
   when: ansible_os_family == "Debian"
 
+- name: Refresh DNF/YUM metadata
+  ansible.builtin.dnf:
+    update_cache: true
+  when: ansible_os_family == "RedHat"
+
+- name: Refresh zypper repositories
+  ansible.builtin.command: zypper --gpg-auto-import-keys refresh
+  changed_when: false
+  when: ansible_os_family == "Suse"
+
 # ------------------------------
-# 5. Remove old kernels safely (IMPROVED)
+# 5. Ensure kernel tracking package exists
 # ------------------------------
-- name: Get installed kernels
+- name: Ensure Ubuntu kernel meta-package exists
+  ansible.builtin.apt:
+    name: linux-generic
+    state: present
+  when:
+    - ansible_distribution == "Ubuntu"
+
+# Optional sanity check for RHEL
+- name: Ensure kernel package is present (RHEL)
+  ansible.builtin.package:
+    name: kernel
+    state: present
+  when:
+    - ansible_os_family == "RedHat"
+
+# Optional sanity check for SLES
+- name: Ensure kernel-default package is present (SLES)
+  ansible.builtin.package:
+    name: kernel-default
+    state: present
+  when:
+    - ansible_os_family == "Suse"
+
+# ------------------------------
+# 6. Capture running kernel
+# ------------------------------
+- name: Capture running kernel baseline
+  ansible.builtin.set_fact:
+    running_kernel: "{{ ansible_kernel }}"
+
+# ------------------------------
+# 7. Capture installed kernels
+# ------------------------------
+- name: Get installed kernels (Debian)
   ansible.builtin.shell: |
-    dpkg -l 'linux-image-*' \
-    | awk '/^ii/{ print $2 }' \
-    | sed 's/linux-image-//' \
-    | sort -V
+    dpkg -l 'linux-image-*' 2>/dev/null \
+    | awk '/^ii/ {print $2}'
   args:
     executable: /bin/bash
   register: installed_kernels
   changed_when: false
+  failed_when: false
   when: ansible_os_family == "Debian"
 
-- name: Determine kernels to remove (keep last 2 + running)
-  set_fact:
-    kernels_to_remove: >-
-      {{
-        installed_kernels.stdout_lines
-        | difference([ansible_kernel])
-        | sort
-        | reverse
-        | list
-        | slice(2, 100)
-        | flatten
-      }}
-  when: ansible_os_family == "Debian"
+- name: Get installed kernels (RedHat)
+  ansible.builtin.shell: |
+    rpm -q kernel
+  args:
+    executable: /bin/bash
+  register: installed_kernels
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "RedHat"
 
-- name: Remove old kernels
-  ansible.builtin.apt:
-    name: "{{ kernels_to_remove | map('regex_replace', '^(.*)$', 'linux-image-\\1') | list }}"
-    state: absent
-    purge: yes
-  when:
-    - ansible_os_family == "Debian"
-    - kernels_to_remove | length > 0
+- name: Get installed kernels (Suse)
+  ansible.builtin.shell: |
+    rpm -q kernel-default
+  args:
+    executable: /bin/bash
+  register: installed_kernels
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == "Suse"
 
 # ------------------------------
-# 6. Autoremove unused packages
-# ------------------------------
-- name: Autoremove unused packages
-  ansible.builtin.apt:
-    autoremove: yes
-    purge: yes
-  when: ansible_os_family == "Debian"
-
-# ------------------------------
-# 7. Capture running kernel baseline
-# ------------------------------
-- name: Capture running kernel
-  set_fact:
-    running_kernel: "{{ ansible_kernel }}"
-
-# ------------------------------
-# 8. Debug precheck summary (optional)
+# 8. Precheck summary
 # ------------------------------
 - name: Show precheck summary
-  debug:
+  ansible.builtin.debug:
     msg: |
       Precheck completed on {{ inventory_hostname }}
+      OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
       Running Kernel : {{ running_kernel }}
       Disk Checked   : OK
-      Old Kernels    : {{ kernels_to_remove | default([]) }}
+
+      Installed Kernels:
+      {{ installed_kernels.stdout | default('Not detected') }}
