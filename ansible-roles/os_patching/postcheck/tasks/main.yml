@@ -1,42 +1,33 @@
 ---
-# ==========================================================
-# POSTCHECK ROLE
-# Validates kernel after reboot and final patch status
-# ==========================================================
-
 # ------------------------------
-# 1. Capture running kernel
+# 1. Get running kernel
 # ------------------------------
-- name: Capture running kernel after patch
+- name: Get running kernel
   ansible.builtin.command: uname -r
   register: running_kernel_after
   changed_when: false
 
 # ------------------------------
-# 2. Validate kernel boot success
+# 2. Validate kernel
 # ------------------------------
-- name: Validate kernel matches expected kernel
+- name: Validate kernel boot
   ansible.builtin.set_fact:
     kernel_match: "{{ running_kernel_after.stdout == patch_result.new_kernel }}"
 
 # ------------------------------
-# 3. Determine final status
+# 3. Final status
 # ------------------------------
-- name: Finalize patch_result status
+- name: Finalize patch result
   ansible.builtin.set_fact:
     patch_result: >-
       {{
         patch_result | combine({
           'status': (
             'SUCCESS'
-            if kernel_match and patch_result.status != 'FAILED'
+            if kernel_match
             else 'FAILED'
           ),
-          'reboot': (
-            true
-            if patch_result.reboot and not kernel_match
-            else patch_result.reboot
-          )
+          'reboot': not kernel_match
         })
       }}
 
@@ -51,7 +42,4 @@
       Old Kernel  : {{ patch_result.old_kernel }}
       New Kernel  : {{ patch_result.new_kernel }}
       Running     : {{ running_kernel_after.stdout }}
-      Kernel OK   : {{ kernel_match }}
-      Updated     : {{ patch_result.updated }}
-      Reboot Req  : {{ patch_result.reboot }}
       Status      : {{ patch_result.status }}
