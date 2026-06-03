@@ -1,9 +1,17 @@
 ---
+# ==========================================================
+# PATCH ROLE
+# Supports:
+#   - Ubuntu / Debian
+#   - RHEL / Rocky / Alma / Oracle Linux
+#   - SLES / openSUSE
+# ==========================================================
+
 # ------------------------------
 # 0. Initialize patch result
 # ------------------------------
 - name: Initialize patch result
-  set_fact:
+  ansible.builtin.set_fact:
     patch_result:
       host: "{{ inventory_hostname }}"
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
@@ -14,38 +22,56 @@
       status: "IN_PROGRESS"
 
 # ------------------------------
-# 1. Patch OS (multi-OS unified)
+# 1. Ensure Ubuntu kernel meta-package exists
+# ------------------------------
+- name: Ensure Ubuntu kernel meta-package exists
+  ansible.builtin.apt:
+    name: linux-generic
+    state: present
+  when:
+    - ansible_distribution == "Ubuntu"
+
+# ------------------------------
+# 2. Patch Debian/Ubuntu
 # ------------------------------
 - name: Patch Debian/Ubuntu
   ansible.builtin.apt:
-    update_cache: yes
+    update_cache: true
     upgrade: dist
-  when: ansible_os_family == "Debian"
+    autoremove: false
   register: patch_cmd
+  when: ansible_os_family == "Debian"
 
-- name: Patch RHEL
+# ------------------------------
+# 3. Patch RedHat Family
+# ------------------------------
+- name: Patch RedHat family
   ansible.builtin.dnf:
     name: "*"
     state: latest
-  when: ansible_os_family == "RedHat"
+    update_cache: true
   register: patch_cmd
+  when: ansible_os_family == "RedHat"
 
-- name: Patch SUSE
-  ansible.builtin.zypper:
+# ------------------------------
+# 4. Patch SUSE Family
+# ------------------------------
+- name: Patch SUSE family
+  community.general.zypper:
     name: "*"
     state: latest
-  when: ansible_os_family == "Suse"
   register: patch_cmd
+  when: ansible_os_family == "Suse"
 
 # ------------------------------
-# 2. Get latest installed kernel (UNIFIED METHOD)
+# 5. Detect newest installed kernel
 # ------------------------------
-- name: Get latest installed kernel (all Linux)
-  shell: |
+- name: Detect latest installed kernel
+  ansible.builtin.shell: |
     ls -1 /boot/vmlinuz-* 2>/dev/null \
-    | sed 's#.*/vmlinuz-##' \
-    | sort -V \
-    | tail -1
+      | sed 's#.*/vmlinuz-##' \
+      | sort -V \
+      | tail -1
   args:
     executable: /bin/bash
   register: kernel_cmd
@@ -53,35 +79,53 @@
   failed_when: false
 
 # ------------------------------
-# 3. Normalize kernel value (SAFE)
+# 6. Normalize kernel value
 # ------------------------------
 - name: Normalize latest kernel value
-  set_fact:
-    latest_kernel: "{{ kernel_cmd.stdout | default('') | trim }}"
-
-- name: Fallback if kernel detection failed
-  set_fact:
-    latest_kernel: "{{ patch_result.old_kernel }}"
-  when: latest_kernel == ""
-
-# ------------------------------
-# 4. Update patch_result (CORRECT LOGIC)
-# ------------------------------
-- name: Update patch_result after patching
-  set_fact:
-    patch_result: "{{ patch_result | combine({
-      'new_kernel': latest_kernel,
-      'updated': (latest_kernel != patch_result.old_kernel)
-    }) }}"
+  ansible.builtin.set_fact:
+    latest_kernel: >-
+      {{
+        kernel_cmd.stdout | trim
+        if (kernel_cmd.stdout | trim | length > 0)
+        else ansible_kernel
+      }}
 
 # ------------------------------
-# 5. Debug output
+# 7. Determine reboot requirement
 # ------------------------------
-- name: Show patch result
-  debug:
+- name: Determine reboot requirement
+  ansible.builtin.set_fact:
+    reboot_required: "{{ latest_kernel != ansible_kernel }}"
+
+# ------------------------------
+# 8. Update patch result
+# ------------------------------
+- name: Update patch result
+  ansible.builtin.set_fact:
+    patch_result: >-
+      {{
+        patch_result | combine({
+          'new_kernel': latest_kernel,
+          'updated': (patch_cmd.changed | default(false)),
+          'reboot': reboot_required,
+          'status': (
+            'UPDATED'
+            if (patch_cmd.changed | default(false))
+            else 'NO_CHANGES'
+          )
+        })
+      }}
+
+# ------------------------------
+# 9. Display patch summary
+# ------------------------------
+- name: Show patch summary
+  ansible.builtin.debug:
     msg: |
-      Host         : {{ inventory_hostname }}
-      Old Kernel   : {{ patch_result.old_kernel }}
-      New Kernel   : {{ patch_result.new_kernel }}
-      Kernel Changed: {{ patch_result.updated }}
-      Pkg Changed  : {{ patch_cmd.changed | default(false) }}
+      Host            : {{ patch_result.host }}
+      OS              : {{ patch_result.os }}
+      Old Kernel      : {{ patch_result.old_kernel }}
+      New Kernel      : {{ patch_result.new_kernel }}
+      Package Updated : {{ patch_result.updated }}
+      Reboot Required : {{ patch_result.reboot }}
+      Status          : {{ patch_result.status }}
