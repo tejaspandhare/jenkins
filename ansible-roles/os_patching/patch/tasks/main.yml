@@ -108,11 +108,7 @@
           'new_kernel': latest_kernel,
           'updated': (patch_cmd.changed | default(false)),
           'reboot': reboot_required,
-          'status': (
-            'UPDATED'
-            if (patch_cmd.changed | default(false))
-            else 'NO_CHANGES'
-          )
+          'status': 'PATCHED'
         })
       }}
 
