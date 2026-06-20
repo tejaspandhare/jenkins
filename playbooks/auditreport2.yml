@@ -110,26 +110,48 @@
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS WITH SOURCE IP
+    # COLLECT USER DETAILS WITH 30-DAY HISTORICAL SOURCE IPS
     ########################################################
 
-    - name: Collect sudo user details and remote source IPs
+    - name: Collect sudo user details and remote source IPs (Last 30 Days)
       shell: |
+        # Get lastlog data as baseline timestamp
         RAW_LAST=$(lastlog -u {{ item }} | tail -1)
-        
         if echo "$RAW_LAST" | grep -q "**Never logged in**"; then
             LASTLOGIN="Never logged in"
-            SRC_IP="N/A"
         else
-            SRC_IP=$(echo "$RAW_LAST" | awk '{print $3}')
             LASTLOGIN=$(echo "$RAW_LAST" | awk '{$1=$2=$3=""; print $0}' | xargs)
         fi
-        
+
+        # Extract unique Source IPs from the 'last' command spanning the last 30 days
+        SRC_IPS=$(last -R {{ item }} | \
+          awk -v date_limit="$(date -d '30 days ago' +%s)" '
+            BEGIN {
+              split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", months, " ")
+              for (i=1; i<=12; i++) m_num[months[i]] = i
+              current_year = strftime("%Y")
+            }
+            NF >= 6 {
+              split($6, time_parts, ":")
+              str_date = current_year " " m_num[$4] " " $5 " " time_parts[1] " " time_parts[2] " 00"
+              row_timestamp = mktime(str_date)
+              
+              if (row_timestamp >= date_limit && $3 ~ /^[0-9]/) {
+                ips[$3]++
+              }
+            }
+            END {
+              out = ""
+              for (ip in ips) out = out (out ? ", " : "") ip
+              print (out ? out : "N/A")
+            }
+          ')
+
         GROUPS=$(id -nG {{ item }})
         PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
         PASSMAX=$(chage -l {{ item }} | grep "Maximum number of days between password change" | cut -d: -f2 | xargs)
         
-        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_IP|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_IPS|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
       loop: "{{ final_users }}"
       register: user_output
       changed_when: false
@@ -156,7 +178,7 @@
         - enterprise_system_report.html
 
     ########################################################
-    # GENERATE REPORTS (With Guaranteed Markdown Text Tables)
+    # GENERATE REPORTS
     ########################################################
 
     - name: Generate TXT report (Markdown Tables for Jenkins Console)
@@ -184,15 +206,15 @@
           | {{ disk.mount }} | {{ disk.size }} | {{ disk.usage }} |
           {% endfor %}
 
-          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE
-          | User Account | Source Connection IP | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
+          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE (LAST 30 DAYS CONNECTIONS)
+          | User Account | Source Connection IP(s) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
           | :--- | :--- | :--- | :--- | :--- |
           {% if hostvars[host].final_users | length == 0 %}
           | N/A | N/A | No privileged administrative users found | N/A | N/A |
           {% else %}
           {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
-          | {{ cols[1] }} | {{ cols[3] }} | {{ cols[2] }} | {{ cols[4] }} | {{ cols[5] }} |
+          | **{{ cols[1] }}** | `{{ cols[3] }}` | {{ cols[2] }} | {{ cols[4] }} | {{ cols[5] }} |
           {% endfor %}
           {% endif %}
 
@@ -212,7 +234,7 @@
           {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.machine_type }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }}
           {% endfor %}
 
-    - name: Generate HTML report (Kept for external downloads)
+    - name: Generate HTML report
       run_once: true
       delegate_to: localhost
       become: false
@@ -246,10 +268,10 @@
           </table>
           <h4>Privileged Accounts & Sudo Metrics Table</h4>
           <table border="1" cellpadding="5" cellspacing="0">
-            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection IP</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
+            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection IP(s)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
             {% for line in hostvars[host].report_data | default([]) %}
             {% set cols = line.split('|') %}
-            <tr><td><b>{{ cols[1] }}</b></td><td>{{ cols[3] }}</td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
+            <tr><td><b>{{ cols[1] }}</b></td><td><code>{{ cols[3] }}</code></td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
             {% endfor %}
           </table>
           {% endfor %}
