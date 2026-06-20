@@ -5,7 +5,6 @@
   become: yes
 
   vars:
-    # Defining empty tracking arrays per host execution scope
     valid_users: []
     final_users: []
     report_data: []
@@ -40,7 +39,7 @@
           last_patch: "{{ last_patch.stdout }}"
 
     ########################################################
-    # DISK INFO
+    # DISK INFO (Fixed N/A% calculation bug)
     ########################################################
 
     - name: Reset disk info per host execution
@@ -49,14 +48,21 @@
 
     - name: Build disk info list with usage %
       set_fact:
-        disk_info: "{{ disk_info + [ item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~ (item.percent | default('N/A')) ~ '%)' ] }}"
+        disk_info: >-
+          {{
+            disk_info + [
+              item.mount ~ ' (' ~ ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB, ' ~
+              (((100 * (item.size_total - item.size_available) / item.size_total) | round(1)) if item.size_total > 0 else 0) ~ '%)'
+            ]
+          }}
       loop: "{{ ansible_mounts }}"
       when:
         - item.fstype not in ['tmpfs','devtmpfs','overlay']
         - not item.mount.startswith('/run')
+        - not item.mount.startswith('/var/lib/kubelet') # Exclude noisy K8s ephemeral mount paths
 
     ########################################################
-    # USER FILTERING
+    # USER FILTERING (Includes root and admins)
     ########################################################
 
     - name: Read /etc/passwd
@@ -81,12 +87,12 @@
         getent_group: "{{ getent_group | default({}) | combine({ item.0: {'gid': item.2, 'members': item.3} }) }}"
       loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
 
-    - name: Build valid local users list (UID >=1000)
+    - name: Build valid local users list (UID >= 1000 OR root UID 0)
       set_fact:
         valid_users: "{{ valid_users + [ item.key ] }}"
       loop: "{{ getent_passwd | dict2items }}"
       when:
-        - item.value.uid | int >= 1000
+        - (item.value.uid | int >= 1000 or item.value.uid | int == 0)
         - item.key != "nobody"
 
     - name: Build sudo group users list
@@ -94,24 +100,38 @@
         sudo_group_users: >-
           {{
             (getent_group['sudo'].members.split(',') if 'sudo' in getent_group else []) +
-            (getent_group['wheel'].members.split(',') if 'wheel' in getent_group else [])
+            (getent_group['wheel'].members.split(',') if 'wheel' in getent_group else []) +
+            ['root']
           }}
 
-    - name: Keep only sudo users
+    - name: Keep only sudo users (Intersection including root)
       set_fact:
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS
+    # COLLECT USER DETAILS WITH SOURCE IP
     ########################################################
 
-    - name: Collect sudo user details
+    - name: Collect sudo user details and remote source IPs
       shell: |
-        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}')
+        # Safely capture fields from lastlog
+        RAW_LAST=$(lastlog -u {{ item }} | tail -1)
+        
+        # Check if user has ever logged in
+        if echo "$RAW_LAST" | grep -q "**Never logged in**"; then
+            LASTLOGIN="Never logged in"
+            SRC_IP="N/A"
+        else
+            # Extract Source IP/Host (Column 3) and Timestamp (Remaining text)
+            SRC_IP=$(echo "$RAW_LAST" | awk '{print $3}')
+            LASTLOGIN=$(echo "$RAW_LAST" | awk '{$1=$2=$3=""; print $0}' | xargs)
+        fi
+        
         GROUPS=$(id -nG {{ item }})
         PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
         PASSMAX=$(chage -l {{ item }} | grep "Maximum number of days between password change" | cut -d: -f2 | xargs)
-        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$GROUPS|Last Change: $PASSLAST|Max Age: $PASSMAX"
+        
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_IP|$GROUPS|Last Change: $PASSLAST|Max Age: $PASSMAX"
       loop: "{{ final_users }}"
       register: user_output
       changed_when: false
@@ -168,13 +188,13 @@
             - {{ disk }}
           {% endfor %}
 
-          SUDO USERS:
+          SUDO USERS & PRIVILEGED ACCESS:
           {% if hostvars[host].final_users | length == 0 %}
-            No sudo users found
+            No privileged users found
           {% else %}
             {% for line in hostvars[host].report_data | default([]) %}
             {% set cols = line.split('|') %}
-            User: {{ cols[1] }}, Last Login: {{ cols[2] }}, Groups: {{ cols[3] }}, {{ cols[4] }} {{ cols[5] }}
+            User: {{ cols[1] }}, Src IP: {{ cols[3] }}, Last Login: {{ cols[2] }}, Groups: {{ cols[4] }}, {{ cols[5] }} {{ cols[6] }}
             {% endfor %}
           {% endif %}
 
@@ -205,19 +225,21 @@
           <head>
           <title>Full System Audit Report</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-            th { background-color: #f2f2f2; }
-            h3 { color: #333; margin-top: 30px; border-bottom: 2px solid #ccc; padding-bottom: 5px; }
+            body { font-family: Arial, sans-serif; margin: 20px; background-color: #f9f9f9; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 25px; box-shadow: 0 2px 3px rgba(0,0,0,0.1); background: #fff; }
+            th, td { border: 1px solid #e0e0e0; padding: 10px; text-align: left; }
+            th { background-color: #004085; color: white; }
+            tr:nth-child(even) { background-color: #f2f4f8; }
+            h3 { color: #004085; margin-top: 35px; border-bottom: 2px solid #004085; padding-bottom: 5px; }
+            .root-highlight { color: #d9534f; font-weight: bold; }
           </style>
           </head>
           <body>
-          <h2>Full System Audit Report</h2>
+          <h2>Full Enterprise Infrastructure Audit Report</h2>
 
           {% for host in ansible_play_hosts %}
           {% set sys = hostvars[host].system_info %}
-          <h3>{{ sys.host }}</h3>
+          <h3>Node: {{ sys.host }}</h3>
           <ul>
             <li><strong>OS:</strong> {{ sys.os }}</li>
             <li><strong>Kernel:</strong> {{ sys.kernel }}</li>
@@ -229,31 +251,37 @@
             <li><strong>Last Patch:</strong> {{ sys.last_patch }}</li>
           </ul>
 
-          <h4>Filesystems</h4>
+          <h4>Filesystems Topology</h4>
           <ul>
           {% for disk in hostvars[host].disk_info | default([]) %}
             <li>{{ disk }}</li>
           {% endfor %}
           </ul>
 
-          <h4>Sudo Users</h4>
+          <h4>Privileged Accounts & Sudo Metrics</h4>
           <table>
           <tr>
-            <th>User</th>
-            <th>Last Login</th>
-            <th>Groups</th>
-            <th>Password Info</th>
+            <th>User Account</th>
+            <th>Source Connection IP</th>
+            <th>Last Login Timestamp</th>
+            <th>Assigned Security Groups</th>
+            <th>Password Aging Metadata</th>
           </tr>
           {% if hostvars[host].final_users | length == 0 %}
-          <tr><td colspan="4">No sudo users found</td></tr>
+          <tr><td colspan="5">No privileged administrative users mapped</td></tr>
           {% else %}
           {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
           <tr>
-            <td><strong>{{ cols[1] }}</strong></td>
+            <td>
+              <span class="{{ 'root-highlight' if cols[1] == 'root' else '' }}">
+                {{ cols[1] }}
+              </span>
+            </td>
+            <td><code>{{ cols[3] }}</code></td>
             <td>{{ cols[2] }}</td>
-            <td>{{ cols[3] }}</td>
-            <td>{{ cols[4] }}<br>{{ cols[5] }}</td>
+            <td><small>{{ cols[4] }}</small></td>
+            <td><small>{{ cols[5] }}<br>{{ cols[6] }}</small></td>
           </tr>
           {% endfor %}
           {% endif %}
