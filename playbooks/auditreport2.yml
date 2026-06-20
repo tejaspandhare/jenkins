@@ -115,37 +115,31 @@
 
     - name: Collect sudo user details and remote source IPs (Last 30 Days)
       shell: |
-        # Get lastlog data as baseline timestamp
-        RAW_LAST=$(lastlog -u {{ item }} | tail -1)
-        if echo "$RAW_LAST" | grep -q "**Never logged in**"; then
+        # Get baseline last login timestamp safely
+        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' | xargs)
+        if [ -z "$LASTLOGIN" ] || echo "$LASTLOGIN" | grep -q "Never logged"; then
             LASTLOGIN="Never logged in"
-        else
-            LASTLOGIN=$(echo "$RAW_LAST" | awk '{$1=$2=$3=""; print $0}' | xargs)
         fi
 
-        # Find all unique remote connection IPs from the past 30 days safely
-        SRC_IPS=$(last -i {{ item }} | \
-          awk -v cutoff="$(date -d '30 days ago' +%Y%m%d)" '
-            BEGIN {
-              split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", months, " ")
-              for (i=1; i<=12; i++) m_num[months[i]] = sprintf("%02d", i)
-              current_year = strftime("%Y")
-            }
-            /^[a-zA-Z0-9]/ && !/system boot/ {
-              # Convert row month and day to an easily comparable YYYYMMDD string
-              row_date = current_year m_num[$4] sprintf("%02d", $5)
-              
-              # Ensure column 3 contains a valid structural IPv4 address string
-              if (row_date >= cutoff && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
-                ips[$3]++
-              }
-            }
-            END {
-              out = ""
-              for (ip in ips) out = out (out ? ", " : "") ip
-              print (out ? out : "N/A")
-            }
-          ')
+        # Extract IPs from 'last -i' command
+        IPS_LAST=$(last -i {{ item }} | awk '
+          /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
+            if ($3 ~ /[0-9]/ && $3 !~ /^pts/) print $3
+          }
+        ')
+
+        # Fallback to scan /var/log/auth.log for accepted connections matching this user
+        IPS_AUTH=""
+        if [ -f /var/log/auth.log ]; then
+            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' | sort -u)
+        fi
+
+        # Combine both dynamic sources, remove duplicates, and flatten array to a string line
+        SRC_IPS=$(echo -e "${IPS_LAST}\n${IPS_AUTH}" | grep -E '[0-9]+\.[0-9]+' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
+
+        if [ -z "$SRC_IPS" ]; then
+            SRC_IPS="Local/Internal Only"
+        fi
 
         GROUPS=$(id -nG {{ item }})
         PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
