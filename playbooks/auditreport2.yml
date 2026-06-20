@@ -20,6 +20,11 @@
       register: last_patch
       changed_when: false
 
+    - name: Get accurate system uptime description
+      shell: "uptime -p | sed 's/up //'"
+      register: precise_uptime
+      changed_when: false
+
     - name: Set system info safely
       set_fact:
         system_info:
@@ -30,12 +35,12 @@
           cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
           ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
           ram_used: >-
-            {% if ansible_memavailable_mb is defined %}
+            {% if ansible_memtotal_mb is defined and ansible_memavailable_mb is defined %}
               {{ ansible_memtotal_mb - ansible_memavailable_mb }} MB
             {% else %}
               N/A
             {% endif %}
-          uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
+          uptime_days: "{{ precise_uptime.stdout | default('N/A') }}"
           last_patch: "{{ last_patch.stdout }}"
 
     ########################################################
@@ -110,26 +115,63 @@
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS WITH SOURCE IP
+    # COLLECT USER DETAILS WITH PROTOCOL & DATE TIMESTAMPING
     ########################################################
 
-    - name: Collect sudo user details and remote source IPs
+    - name: Collect sudo user details and remote source IPs with TTY Type & Date
       shell: |
-        RAW_LAST=$(lastlog -u {{ item }} | tail -1)
-        
-        if echo "$RAW_LAST" | grep -q "**Never logged in**"; then
+        # Get baseline last login timestamp
+        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' | xargs)
+        if [ -z "$LASTLOGIN" ] || echo "$LASTLOGIN" | grep -q "Never logged"; then
             LASTLOGIN="Never logged in"
-            SRC_IP="N/A"
-        else
-            SRC_IP=$(echo "$RAW_LAST" | awk '{print $3}')
-            LASTLOGIN=$(echo "$RAW_LAST" | awk '{$1=$2=$3=""; print $0}' | xargs)
         fi
-        
+
+        # Parse 'last' to capture unique connection types tracking their latest date stamps
+        IPS_TTY_LAST=$(last -i --since "30 days ago" {{ item }} | awk '
+          /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
+            tty=$2; ip=$3; m=$4; d=$5;
+            date_str = m " " d
+            
+            for(i=2; i<=NF; i++) {
+              if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                key_name = "SSH: " $i
+                if (!latest[key_name]) latest[key_name] = date_str
+              }
+              if ($i ~ /^:[0-9]/ || $i ~ /xrdp/) {
+                key_name = "XRDP/X11 (" $i ")"
+                if (!latest[key_name]) latest[key_name] = date_str
+              }
+            }
+          }
+          END {
+            out = ""
+            for (conn in latest) {
+              out = out (out ? "\n" : "") conn " (Latest: " latest[conn] ")"
+            }
+            print out
+          }
+        ')
+
+        # Fallback system log verification parsing for SSH actions
+        IPS_AUTH=""
+        if [ -f /var/log/auth.log ]; then
+            CURR_M=$(date +%b)
+            CURR_D=$(date +%e | xargs)
+            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk -v m="$CURR_M" -v d="$CURR_D" '{for(i=1;i<=NF;i++) if($i=="from") print "SSH: " $(i+1) " (Latest: " m " " d ")"}' | sort -u)
+        fi
+
+        # Consolidate strings safely via printf formatting without duplication
+        SRC_CONN_DATA=$(printf "%s\n%s" "${IPS_TTY_LAST}" "${IPS_AUTH}" | grep -E '[a-zA-Z0-9]' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//' | sed 's/,/, /g')
+
+        if [ -z "$SRC_CONN_DATA" ]; then
+            SRC_CONN_DATA="Local Console Access (tty1)"
+        fi
+
         GROUPS=$(id -nG {{ item }})
         PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
         PASSMAX=$(chage -l {{ item }} | grep "Maximum number of days between password change" | cut -d: -f2 | xargs)
         
-        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_IP|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_CONN_DATA|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
       loop: "{{ final_users }}"
       register: user_output
       changed_when: false
@@ -156,7 +198,7 @@
         - enterprise_system_report.html
 
     ########################################################
-    # GENERATE REPORTS (With Guaranteed Markdown Text Tables)
+    # GENERATE REPORTS
     ########################################################
 
     - name: Generate TXT report (Markdown Tables for Jenkins Console)
@@ -175,7 +217,7 @@
           ### [1] SYSTEM METRICS TABLE
           | Operating System | Kernel Version | Machine Type | CPU Cores | RAM Total | RAM Used | Uptime | Last Patch Date |
           | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-          | {{ sys.os }} | {{ sys.kernel }} | {{ sys.machine_type }} | {{ sys.cpu }} vCPUs | {{ sys.ram_total }} | {{ sys.ram_used }} | {{ sys.uptime_days }} Days | {{ sys.last_patch }} |
+          | {{ sys.os }} | {{ sys.kernel }} | {{ sys.machine_type }} | {{ sys.cpu }} vCPUs | {{ sys.ram_total }} | {{ sys.ram_used }} | {{ sys.uptime_days }} | {{ sys.last_patch }} |
 
           ### [2] FILESYSTEMS TOPOLOGY TABLE
           | Mount Point | Total Capacity Size | Current Disk Utilization |
@@ -185,14 +227,14 @@
           {% endfor %}
 
           ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE
-          | User Account | Source Connection IP | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
+          | User Account | Connection Protocol & Endpoint Location (With Timeline) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
           | :--- | :--- | :--- | :--- | :--- |
           {% if hostvars[host].final_users | length == 0 %}
           | N/A | N/A | No privileged administrative users found | N/A | N/A |
           {% else %}
           {% for line in hostvars[host].report_data | default([]) %}
           {% set cols = line.split('|') %}
-          | {{ cols[1] }} | {{ cols[3] }} | {{ cols[2] }} | {{ cols[4] }} | {{ cols[5] }} |
+          | **{{ cols[1] }}** | `{{ cols[3] }}` | {{ cols[2] }} | {{ cols[4] }} | {{ cols[5] }} |
           {% endfor %}
           {% endif %}
 
@@ -206,13 +248,13 @@
       copy:
         dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/system_report.csv"
         content: |
-          Host,OS,Kernel,Machine,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch
+          Host,OS,Kernel,Machine,CPU,RAM_Total,RAM_Used,Uptime,Last_Patch
           {% for host in ansible_play_hosts %}
           {% set sys = hostvars[host].system_info %}
           {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.machine_type }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }}
           {% endfor %}
 
-    - name: Generate HTML report (Kept for external downloads)
+    - name: Generate HTML report
       run_once: true
       delegate_to: localhost
       become: false
@@ -234,7 +276,7 @@
               <th>Operating System</th><th>Kernel Version</th><th>Machine Type</th><th>CPU Cores</th><th>RAM Total</th><th>RAM Used</th><th>Uptime</th><th>Last Patch Date</th>
             </tr>
             <tr>
-              <td>{{ sys.os }}</td><td>{{ sys.kernel }}</td><td>{{ sys.machine_type }}</td><td>{{ sys.cpu }} vCPUs</td><td>{{ sys.ram_total }}</td><td>{{ sys.ram_used }}</td><td>{{ sys.uptime_days }} Days</td><td>{{ sys.last_patch }}</td>
+              <td>{{ sys.os }}</td><td>{{ sys.kernel }}</td><td>{{ sys.machine_type }}</td><td>{{ sys.cpu }} vCPUs</td><td>{{ sys.ram_total }}</td><td>{{ sys.ram_used }}</td><td>{{ sys.uptime_days }}</td><td>{{ sys.last_patch }}</td>
             </tr>
           </table>
           <h4>Filesystems Topology Table</h4>
@@ -246,10 +288,10 @@
           </table>
           <h4>Privileged Accounts & Sudo Metrics Table</h4>
           <table border="1" cellpadding="5" cellspacing="0">
-            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection IP</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
+            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Connection Protocol & Endpoint Location (With Timeline)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
             {% for line in hostvars[host].report_data | default([]) %}
             {% set cols = line.split('|') %}
-            <tr><td><b>{{ cols[1] }}</b></td><td>{{ cols[3] }}</td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
+            <tr><td><b>{{ cols[1] }}</b></td><td><code>{{ cols[3] }}</code></td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
             {% endfor %}
           </table>
           {% endfor %}
