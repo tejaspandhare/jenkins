@@ -134,8 +134,8 @@
             IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' | sort -u)
         fi
 
-        # Combine both dynamic sources, remove duplicates, and flatten array to a string line
-        SRC_IPS=$(echo -e "${IPS_LAST}\n${IPS_AUTH}" | grep -E '[0-9]+\.[0-9]+' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
+        # Combined extraction using printf instead of echo to drop flag anomalies
+        SRC_IPS=$(printf "%s\n%s" "${IPS_LAST}" "${IPS_AUTH}" | grep -E '[0-9]+\.[0-9]+' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
 
         if [ -z "$SRC_IPS" ]; then
             SRC_IPS="Local/Internal Only"
