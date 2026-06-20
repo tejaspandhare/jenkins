@@ -110,7 +110,7 @@
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS WITH PROTOCOL & TYPE MAPPING
+    # COLLECT USER DETAILS WITH NATIVE 30-DAY SINCE FILTERING
     ########################################################
 
     - name: Collect sudo user details and remote source IPs with TTY Type
@@ -121,30 +121,28 @@
             LASTLOGIN="Never logged in"
         fi
 
-        # Parse 'last' to capture clean connection types (SSH vs XRDP)
-        IPS_TTY_LAST=$(last -i {{ item }} | awk '
+        # Use native --since engine to accurately grab a true 30-day window
+        IPS_TTY_LAST=$(last -i --since "30 days ago" {{ item }} | awk '
           /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
-            tty=$2
-            ip=$3
-            
-            # Catch graphical X11/XRDP routing environments
-            if (tty ~ /^:[0-9]/ || tty ~ /xrdp/) {
-              ips["XRDP/X11 (" tty ")"]++
-            } 
-            # Catch true network endpoints via secure shell
-            else if (ip ~ /[0-9]+\.[0-9]+/ && tty ~ /^pts/) {
-              ips["SSH: " ip]++
+            # Loop through fields to find valid IPs or XRDP display markers dynamically
+            for(i=2; i<=NF; i++) {
+              if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                ips["SSH: " $i]++
+              }
+              if ($i ~ /^:[0-9]/ || $i ~ /xrdp/) {
+                ips["XRDP/X11 (" $i ")"]++
+              }
             }
           }
         ')
 
-        # Fallback tracking verification from system logs
+        # Fallback system log tracking validation
         IPS_AUTH=""
         if [ -f /var/log/auth.log ]; then
             IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print "SSH: " $(i+1)}' | sort -u)
         fi
 
-        # Consolidate strings safely via printf formatting
+        # Consolidate strings cleanly via printf formatting
         SRC_CONN_DATA=$(printf "%s\n%s" "${IPS_TTY_LAST}" "${IPS_AUTH}" | grep -E '[a-zA-Z0-9]' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
 
         if [ -z "$SRC_CONN_DATA" ]; then
