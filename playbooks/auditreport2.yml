@@ -110,42 +110,55 @@
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS WITH 30-DAY HISTORICAL SOURCE IPS
+    # COLLECT USER DETAILS WITH TTY & PROTOCOL MAPPING
     ########################################################
 
-    - name: Collect sudo user details and remote source IPs (Last 30 Days)
+    - name: Collect sudo user details and remote source IPs with TTY
       shell: |
-        # Get baseline last login timestamp safely
+        # Get baseline last login timestamp
         LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' | xargs)
         if [ -z "$LASTLOGIN" ] || echo "$LASTLOGIN" | grep -q "Never logged"; then
             LASTLOGIN="Never logged in"
         fi
 
-        # Extract IPs from 'last -i' command
-        IPS_LAST=$(last -i {{ item }} | awk '
+        # Parse 'last' history to cross-reference IPs with their TTY connection modes
+        # Handles SSH (pts), local displays (:0), and xrdp sessions
+        IPS_TTY_LAST=$(last {{ item }} | awk '
           /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
-            if ($3 ~ /[0-9]/ && $3 !~ /^pts/) print $3
+            tty=$2
+            ip=$3
+            
+            # Clean up display syntax for XRDP or X11 local sessions
+            if (tty ~ /^:[0-9]/) {
+              type="xrdp/X11"
+              ips[type " (" tty ")"]++
+            } 
+            # Clean up standard SSH connections
+            else if (ip ~ /[0-9]+\.[0-9]+/ && tty ~ /^pts/) {
+              type="ssh"
+              ips[ip " (" tty ")"]++
+            }
           }
         ')
 
-        # Fallback to scan /var/log/auth.log for accepted connections matching this user
+        # Fallback check inside auth.log to find explicit SSH authentication markers
         IPS_AUTH=""
         if [ -f /var/log/auth.log ]; then
-            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1)}' | sort -u)
+            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1) " (ssh)"}' | sort -u)
         fi
 
-        # Combined extraction using printf instead of echo to drop flag anomalies
-        SRC_IPS=$(printf "%s\n%s" "${IPS_LAST}" "${IPS_AUTH}" | grep -E '[0-9]+\.[0-9]+' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
+        # Combine items using printf to avoid shell interpretation issues
+        SRC_CONN_DATA=$(printf "%s\n%s" "${IPS_TTY_LAST}" "${IPS_AUTH}" | grep -E '[a-zA-Z0-9]' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
 
-        if [ -z "$SRC_IPS" ]; then
-            SRC_IPS="Local/Internal Only"
+        if [ -z "$SRC_CONN_DATA" ]; then
+            SRC_CONN_DATA="Local Console (tty1)"
         fi
 
         GROUPS=$(id -nG {{ item }})
         PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
         PASSMAX=$(chage -l {{ item }} | grep "Maximum number of days between password change" | cut -d: -f2 | xargs)
         
-        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_IPS|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_CONN_DATA|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
       loop: "{{ final_users }}"
       register: user_output
       changed_when: false
@@ -200,8 +213,8 @@
           | {{ disk.mount }} | {{ disk.size }} | {{ disk.usage }} |
           {% endfor %}
 
-          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE (LAST 30 DAYS CONNECTIONS)
-          | User Account | Source Connection IP(s) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
+          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE (WITH CONNECTION TYPE)
+          | User Account | Source Connection & Method (TTY) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
           | :--- | :--- | :--- | :--- | :--- |
           {% if hostvars[host].final_users | length == 0 %}
           | N/A | N/A | No privileged administrative users found | N/A | N/A |
@@ -262,7 +275,7 @@
           </table>
           <h4>Privileged Accounts & Sudo Metrics Table</h4>
           <table border="1" cellpadding="5" cellspacing="0">
-            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection IP(s)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
+            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection & Method (TTY)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
             {% for line in hostvars[host].report_data | default([]) %}
             {% set cols = line.split('|') %}
             <tr><td><b>{{ cols[1] }}</b></td><td><code>{{ cols[3] }}</code></td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
