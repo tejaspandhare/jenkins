@@ -1,0 +1,266 @@
+---
+- name: Kubernetes Upgrade with Audit Report (HA Cluster)
+  hosts: kube_control_plane
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars:
+    kube_repo_file: /etc/apt/sources.list.d/kubernetes.list
+    kube_keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+  tasks:
+
+  #################################################################
+  # CURRENT STATE (PRE-UPGRADE AUDIT)
+  #################################################################
+
+  - name: Capture kubectl version
+    shell: kubectl version --short
+    register: kubectl_version
+    changed_when: false
+
+  - name: Capture kubeadm version
+    shell: kubeadm version -o short
+    register: kubeadm_version
+    changed_when: false
+
+  - name: Capture node status
+    shell: kubectl get nodes -o wide
+    register: node_status
+    changed_when: false
+
+  #################################################################
+  # CALCULATE NEXT MINOR (KEEP YOUR SERIES UPGRADE MODEL)
+  #################################################################
+
+  - name: Extract version parts
+    set_fact:
+      current_version: "{{ kubeadm_version.stdout | regex_replace('^v','') }}"
+      major: "{{ current_version.split('.')[0] }}"
+      minor: "{{ current_version.split('.')[1] | int }}"
+      next_minor: "{{ minor + 1 }}"
+
+  #################################################################
+  # KEEP HISTORICAL REPOS + ADD NEXT ONE
+  #################################################################
+
+  - name: Add next Kubernetes repo (keep history)
+    lineinfile:
+      path: "{{ kube_repo_file }}"
+      line: "deb [signed-by={{ kube_keyring }}] https://pkgs.k8s.io/core:/stable:/v{{ major }}.{{ next_minor }}/deb/ /"
+      state: present
+      create: true
+
+  - name: Update apt cache
+    apt:
+      update_cache: true
+
+  #################################################################
+  # UPGRADE KUBEADM
+  #################################################################
+
+  - name: Upgrade kubeadm
+    apt:
+      name: kubeadm
+      state: latest
+
+  #################################################################
+  # RUN UPGRADE PLAN
+  #################################################################
+
+  - name: Run kubeadm upgrade plan
+    shell: kubeadm upgrade plan
+    register: upgrade_plan
+    changed_when: false
+
+  - name: Extract target version from plan
+    set_fact:
+      target_version: >-
+        {{
+          (
+            upgrade_plan.stdout
+            | regex_findall('Target version:\\s*(v[0-9]+\\.[0-9]+\\.[0-9]+)')
+          )[0]
+        }}
+
+  #################################################################
+  # APPLY UPGRADE (FIRST CONTROL PLANE ONLY)
+  #################################################################
+
+  - name: Apply kubeadm upgrade (first control plane only)
+    shell: kubeadm upgrade apply {{ target_version }} -y
+    register: upgrade_apply
+    when: inventory_hostname == groups['kube_control_plane'][0]
+
+  - name: Upgrade remaining control planes
+    shell: kubeadm upgrade node
+    when: inventory_hostname != groups['kube_control_plane'][0]
+
+  #################################################################
+  # UPGRADE KUBELET + KUBECTL
+  #################################################################
+
+  - name: Upgrade kubelet and kubectl
+    apt:
+      name:
+        - kubelet
+        - kubectl
+      state: latest
+
+  - name: Restart kubelet
+    systemd:
+      name: kubelet
+      state: restarted
+      daemon_reload: true
+
+  #################################################################
+  # POST UPGRADE AUDIT COLLECTION
+  #################################################################
+
+  - name: Capture post-upgrade node status
+    shell: kubectl get nodes -o wide
+    register: node_status_post
+    changed_when: false
+
+  - name: Store upgrade report data
+    set_fact:
+      upgrade_report:
+        host: "{{ inventory_hostname }}"
+        kubeadm_before: "{{ kubeadm_version.stdout }}"
+        kubectl_before: "{{ kubectl_version.stdout }}"
+        target_version: "{{ target_version }}"
+        plan_output: "{{ upgrade_plan.stdout }}"
+        apply_output: "{{ upgrade_apply.stdout | default('Executed on primary control plane') }}"
+        nodes_before: "{{ node_status.stdout }}"
+        nodes_after: "{{ node_status_post.stdout }}"
+
+#################################################################
+# REPORT CLEANUP (JENKINS)
+#################################################################
+
+- name: Generate Kubernetes Upgrade Reports
+  hosts: localhost
+  gather_facts: false
+  become: false
+
+  tasks:
+
+  - name: Remove old report files
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/k8s_upgrade_report.txt"
+      state: absent
+
+  - name: Remove old HTML report
+    file:
+      path: "{{ lookup('env','WORKSPACE') }}/k8s_upgrade_report.html"
+      state: absent
+
+  #################################################################
+  # TXT REPORT
+  #################################################################
+
+  - name: Generate TXT report
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/k8s_upgrade_report.txt"
+      content: |
+        =====================================================
+                    KUBERNETES UPGRADE REPORT
+        =====================================================
+
+        {% for host in ansible_play_hosts %}
+        -----------------------------------------------------
+        HOST: {{ host }}
+        -----------------------------------------------------
+
+        Kubeadm Before:
+        {{ hostvars[host].upgrade_report.kubeadm_before }}
+
+        Kubectl Before:
+        {{ hostvars[host].upgrade_report.kubectl_before }}
+
+        Target Version:
+        {{ hostvars[host].upgrade_report.target_version }}
+
+        -----------------------------------------------------
+        UPGRADE PLAN
+        -----------------------------------------------------
+        {{ hostvars[host].upgrade_report.plan_output }}
+
+        -----------------------------------------------------
+        UPGRADE RESULT
+        -----------------------------------------------------
+        {{ hostvars[host].upgrade_report.apply_output }}
+
+        -----------------------------------------------------
+        NODE STATUS (BEFORE)
+        -----------------------------------------------------
+        {{ hostvars[host].upgrade_report.nodes_before }}
+
+        -----------------------------------------------------
+        NODE STATUS (AFTER)
+        -----------------------------------------------------
+        {{ hostvars[host].upgrade_report.nodes_after }}
+
+        {% endfor %}
+
+  #################################################################
+  # HTML REPORT
+  #################################################################
+
+  - name: Generate HTML report
+    copy:
+      dest: "{{ lookup('env','WORKSPACE') }}/k8s_upgrade_report.html"
+      content: |
+        <html>
+        <head>
+        <title>Kubernetes Upgrade Report</title>
+        <style>
+          body { font-family: Arial; }
+          pre { white-space: pre-wrap; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid black; padding: 8px; }
+          th { background: #f2f2f2; }
+        </style>
+        </head>
+
+        <body>
+        <h1>Kubernetes Upgrade Report</h1>
+
+        {% for host in ansible_play_hosts %}
+
+        <h2>{{ host }}</h2>
+
+        <table>
+          <tr>
+            <th>Kubeadm Before</th>
+            <td>{{ hostvars[host].upgrade_report.kubeadm_before }}</td>
+          </tr>
+          <tr>
+            <th>Kubectl Before</th>
+            <td>{{ hostvars[host].upgrade_report.kubectl_before }}</td>
+          </tr>
+          <tr>
+            <th>Target Version</th>
+            <td>{{ hostvars[host].upgrade_report.target_version }}</td>
+          </tr>
+        </table>
+
+        <h3>Upgrade Plan</h3>
+        <pre>{{ hostvars[host].upgrade_report.plan_output }}</pre>
+
+        <h3>Upgrade Result</h3>
+        <pre>{{ hostvars[host].upgrade_report.apply_output }}</pre>
+
+        <h3>Node Status Before</h3>
+        <pre>{{ hostvars[host].upgrade_report.nodes_before }}</pre>
+
+        <h3>Node Status After</h3>
+        <pre>{{ hostvars[host].upgrade_report.nodes_after }}</pre>
+
+        <hr>
+
+        {% endfor %}
+
+        </body>
+        </html>
