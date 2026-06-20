@@ -123,20 +123,20 @@
             LASTLOGIN=$(echo "$RAW_LAST" | awk '{$1=$2=$3=""; print $0}' | xargs)
         fi
 
-        # Extract unique Source IPs from the 'last' command spanning the last 30 days
-        SRC_IPS=$(last -R {{ item }} | \
-          awk -v date_limit="$(date -d '30 days ago' +%s)" '
+        # Find all unique remote connection IPs from the past 30 days safely
+        SRC_IPS=$(last -i {{ item }} | \
+          awk -v cutoff="$(date -d '30 days ago' +%Y%m%d)" '
             BEGIN {
               split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", months, " ")
-              for (i=1; i<=12; i++) m_num[months[i]] = i
+              for (i=1; i<=12; i++) m_num[months[i]] = sprintf("%02d", i)
               current_year = strftime("%Y")
             }
-            NF >= 6 {
-              split($6, time_parts, ":")
-              str_date = current_year " " m_num[$4] " " $5 " " time_parts[1] " " time_parts[2] " 00"
-              row_timestamp = mktime(str_date)
+            /^[a-zA-Z0-9]/ && !/system boot/ {
+              # Convert row month and day to an easily comparable YYYYMMDD string
+              row_date = current_year m_num[$4] sprintf("%02d", $5)
               
-              if (row_timestamp >= date_limit && $3 ~ /^[0-9]/) {
+              # Ensure column 3 contains a valid structural IPv4 address string
+              if (row_date >= cutoff && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
                 ips[$3]++
               }
             }
