@@ -110,10 +110,10 @@
         final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
 
     ########################################################
-    # COLLECT USER DETAILS WITH TTY & PROTOCOL MAPPING
+    # COLLECT USER DETAILS WITH PROTOCOL & TYPE MAPPING
     ########################################################
 
-    - name: Collect sudo user details and remote source IPs with TTY
+    - name: Collect sudo user details and remote source IPs with TTY Type
       shell: |
         # Get baseline last login timestamp
         LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' | xargs)
@@ -121,37 +121,34 @@
             LASTLOGIN="Never logged in"
         fi
 
-        # Parse 'last' history to cross-reference IPs with their TTY connection modes
-        # Handles SSH (pts), local displays (:0), and xrdp sessions
-        IPS_TTY_LAST=$(last {{ item }} | awk '
+        # Parse 'last' to capture clean connection types (SSH vs XRDP)
+        IPS_TTY_LAST=$(last -i {{ item }} | awk '
           /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
             tty=$2
             ip=$3
             
-            # Clean up display syntax for XRDP or X11 local sessions
-            if (tty ~ /^:[0-9]/) {
-              type="xrdp/X11"
-              ips[type " (" tty ")"]++
+            # Catch graphical X11/XRDP routing environments
+            if (tty ~ /^:[0-9]/ || tty ~ /xrdp/) {
+              ips["XRDP/X11 (" tty ")"]++
             } 
-            # Clean up standard SSH connections
+            # Catch true network endpoints via secure shell
             else if (ip ~ /[0-9]+\.[0-9]+/ && tty ~ /^pts/) {
-              type="ssh"
-              ips[ip " (" tty ")"]++
+              ips["SSH: " ip]++
             }
           }
         ')
 
-        # Fallback check inside auth.log to find explicit SSH authentication markers
+        # Fallback tracking verification from system logs
         IPS_AUTH=""
         if [ -f /var/log/auth.log ]; then
-            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print $(i+1) " (ssh)"}' | sort -u)
+            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk '{for(i=1;i<=NF;i++) if($i=="from") print "SSH: " $(i+1)}' | sort -u)
         fi
 
-        # Combine items using printf to avoid shell interpretation issues
+        # Consolidate strings safely via printf formatting
         SRC_CONN_DATA=$(printf "%s\n%s" "${IPS_TTY_LAST}" "${IPS_AUTH}" | grep -E '[a-zA-Z0-9]' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//')
 
         if [ -z "$SRC_CONN_DATA" ]; then
-            SRC_CONN_DATA="Local Console (tty1)"
+            SRC_CONN_DATA="Local Console Access (tty1)"
         fi
 
         GROUPS=$(id -nG {{ item }})
@@ -213,8 +210,8 @@
           | {{ disk.mount }} | {{ disk.size }} | {{ disk.usage }} |
           {% endfor %}
 
-          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE (WITH CONNECTION TYPE)
-          | User Account | Source Connection & Method (TTY) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
+          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE
+          | User Account | Connection Protocol & Endpoint Location | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
           | :--- | :--- | :--- | :--- | :--- |
           {% if hostvars[host].final_users | length == 0 %}
           | N/A | N/A | No privileged administrative users found | N/A | N/A |
@@ -275,7 +272,7 @@
           </table>
           <h4>Privileged Accounts & Sudo Metrics Table</h4>
           <table border="1" cellpadding="5" cellspacing="0">
-            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Source Connection & Method (TTY)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
+            <tr bgcolor="#f2f2f2"><th>User Account</th><th>Connection Protocol & Endpoint Location</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
             {% for line in hostvars[host].report_data | default([]) %}
             {% set cols = line.split('|') %}
             <tr><td><b>{{ cols[1] }}</b></td><td><code>{{ cols[3] }}</code></td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
