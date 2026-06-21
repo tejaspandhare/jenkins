@@ -12,10 +12,15 @@ pipeline {
     }
 
     parameters {
-        string(name: 'SERVER_NAME', description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1')
+        string(
+            name: 'SERVER_NAME',
+            defaultValue: '',
+            description: 'Target server(s) separated by ; e.g. lb1;lb2;kmaster1'
+        )
     }
 
     stages {
+
         stage('Checkout Repository') {
             steps {
                 checkout scm
@@ -24,28 +29,30 @@ pipeline {
 
         stage('Run Enterprise Audit') {
             steps {
-                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
                     script {
-                        sh """
-                            echo "Running Ansible Audit on: ${params.SERVER_NAME}"
-                            
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                playbooks/auditreport1.yml \
-                                --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "hosts=${params.SERVER_NAME}"
-                                
-                            RC=\$?
-                            echo "Ansible Exit Code: \$RC"
+                        def rc = sh(
+                            script: """
+                                echo "Running Ansible Audit on: ${params.SERVER_NAME}"
 
-                            if [ \$RC -eq 0 ] || [ \$RC -eq 2 ]; then
-                                echo "Ansible completed successfully."
-                                exit 0
-                            else
-                                echo "Ansible failed."
-                                exit \$RC
-                            fi
-                        """
+                                ansible-playbook \
+                                    -i inventory/hosts \
+                                    playbooks/auditreport1.yml \
+                                    --private-key="\$ANSIBLE_KEY_FILE" \
+                                    -e "hosts=${params.SERVER_NAME}"
+                            """,
+                            returnStatus: true
+                        )
+
+                        echo "Ansible Exit Code: ${rc}"
+
+                        if (rc == 0 || rc == 2) {
+                            echo "Ansible completed successfully."
+                        } else {
+                            error("Ansible failed with exit code ${rc}")
+                        }
                     }
                 }
             }
@@ -55,7 +62,23 @@ pipeline {
             steps {
                 sh '''
                     echo "Listing generated reports:"
-                    ls -lah *.html *.txt *.csv || true
+                    ls -lah *.html *.txt *.csv 2>/dev/null || true
                 '''
             }
         }
+    }
+
+    post {
+        always {
+            echo "Build completed."
+        }
+
+        success {
+            echo "Audit completed successfully."
+        }
+
+        failure {
+            echo "Audit failed."
+        }
+    }
+}
