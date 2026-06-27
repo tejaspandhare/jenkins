@@ -1,53 +1,207 @@
 ---
-- name: Infrastructure Audit and Report Generation
-  hosts: all
-  gather_facts: yes # Necessary for ansible_memtotal_mb and ansible_memfree_mb
+- name: Full System + Sudo User Enterprise Audit Report
+  hosts: "{{ hosts.split(';') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    valid_users: []
+    final_users: []
+    report_data: []
 
   tasks:
-    # 1. Gather System Metrics
-    - name: Populate System Info Variable
-      ansible.builtin.set_fact:
+
+    ########################################################
+    # SYSTEM INFORMATION
+    ########################################################
+
+    - name: Get last patch date (Debian/Ubuntu)
+      shell: "stat -c %y /var/lib/dpkg/status | awk '{print $1}' 2>/dev/null || echo 'N/A'"
+      register: last_patch
+      changed_when: false
+
+    - name: Set system info safely
+      set_fact:
         system_info:
-          host: "{{ ansible_hostname }}"
+          host: "{{ inventory_hostname }}"
           os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
           kernel: "{{ ansible_kernel }}"
-          machine_type: "{{ ansible_architecture }}"
-          cpu: "{{ ansible_processor_vcpus | default(ansible_processor_cores) }}"
-          ram_total: "{{ (ansible_memtotal_mb / 1024) | round(1) }} GB"
-          uptime_days: "{{ (ansible_uptime_seconds / 86400) | int }}"
-          last_patch: "2026-05-15" # Replace with actual logic/command result if needed
+          machine_type: "{{ ansible_virtualization_type | default('physical') }}"
+          cpu: "{{ ansible_processor_vcpus | default(ansible_processor_count | default('N/A')) }}"
+          ram_total: "{{ ansible_memtotal_mb | default('N/A') }} MB"
+          ram_used: >-
+            {% if ansible_memavailable_mb is defined %}
+              {{ ansible_memtotal_mb - ansible_memavailable_mb }} MB
+            {% else %}
+              N/A
+            {% endif %}
+          uptime_days: "{{ (ansible_uptime_seconds | default(0) // 86400) }}"
+          last_patch: "{{ last_patch.stdout }}"
 
-    # 2. Gather Filesystem Storage Data
-    - name: Populate Disk Info Variable
-      ansible.builtin.set_fact:
+    ########################################################
+    # DISK INFO
+    ########################################################
+
+    - name: Reset disk info per host execution
+      set_fact:
+        disk_info: []
+
+    - name: Build disk info list with usage %
+      set_fact:
         disk_info: >-
-          {% set disks = [] %}
-          {% for mount in ansible_mounts %}
-            {% set _ = disks.append({
-              'mount': mount.mount,
-              'size': ((mount.size_total / 1024 / 1024 / 1024) | round(1) | string) + ' GB',
-              'usage': (((mount.size_total - mount.size_available) / mount.size_total * 100) | round(1) | string) + '%'
-            }) %}
-          {% endfor %}
-          {{ disks }}
+          {{
+            disk_info + [{
+              'mount': item.mount,
+              'size': ((item.size_total/1024/1024/1024)|round(2)) ~ ' GB',
+              'usage': (((100 * (item.size_total - item.size_available) / item.size_total) | round(1)) if item.size_total > 0 else 0) ~ '%'
+            }]
+          }}
+      loop: "{{ ansible_mounts }}"
+      when:
+        - item.fstype not in ['tmpfs','devtmpfs','overlay']
+        - not item.mount.startswith('/run')
+        - not item.mount.startswith('/var/lib/kubelet')
 
-    # 3. Gather Privileged Accounts (Mocked with your expected Pipe-Separated format)
-    - name: Populate Privileged Accounts (Pipe-Separated format)
-      ansible.builtin.set_fact:
-        report_data:
-          - "idx|root|2026-06-25 10:32:11|SSH from 192.168.1.50|root, wheel|Password Never Expires"
-          - "idx|admin_user|2026-06-27 14:15:00|Console Session|sudo, admin|90 Days Remaining"
+    ########################################################
+    # USER FILTERING
+    ########################################################
 
-# 4. Generate the HTML Report (Runs once on your local machine)
-- name: Generate Audit Report
-  hosts: all
-  run_once: true
-  delegate_to: localhost
-  become: false
+    - name: Read /etc/passwd
+      slurp:
+        src: /etc/passwd
+      register: passwd_file
+      changed_when: false
 
-  tasks:
+    - name: Parse passwd entries
+      set_fact:
+        getent_passwd: "{{ getent_passwd | default({}) | combine({ item.0: {'uid': item.2, 'gid': item.3, 'home': item.5, 'shell': item.6} }) }}"
+      loop: "{{ passwd_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
+
+    - name: Read /etc/group
+      slurp:
+        src: /etc/group
+      register: group_file
+      changed_when: false
+
+    - name: Parse group entries
+      set_fact:
+        getent_group: "{{ getent_group | default({}) | combine({ item.0: {'gid': item.2, 'members': item.3} }) }}"
+      loop: "{{ group_file.content | b64decode | split('\n') | reject('equalto','') | map('split', ':') | list }}"
+
+    - name: Build valid local users list (UID >= 1000 OR root UID 0)
+      set_fact:
+        valid_users: "{{ valid_users + [ item.key ] }}"
+      loop: "{{ getent_passwd | dict2items }}"
+      when:
+        - (item.value.uid | int >= 1000 or item.value.uid | int == 0)
+        - item.key != "nobody"
+
+    - name: Build sudo group users list
+      set_fact:
+        sudo_group_users: >-
+          {{
+            (getent_group['sudo'].members.split(',') if 'sudo' in getent_group else []) +
+            (getent_group['wheel'].members.split(',') if 'wheel' in getent_group else []) +
+            ['root']
+          }}
+
+    - name: Keep only sudo users
+      set_fact:
+        final_users: "{{ valid_users | intersect(sudo_group_users | default([])) }}"
+
+    ########################################################
+    # COLLECT USER DETAILS WITH PROTOCOL & DATE TIMESTAMPING
+    ########################################################
+
+    - name: Collect sudo user details and remote source IPs with TTY Type & Date
+      shell: |
+        # Get baseline last login timestamp
+        LASTLOGIN=$(lastlog -u {{ item }} | tail -1 | awk '{$1=$2=$3=""; print $0}' | xargs)
+        if [ -z "$LASTLOGIN" ] || echo "$LASTLOGIN" | grep -q "Never logged"; then
+            LASTLOGIN="Never logged in"
+        fi
+
+        # Parse 'last' to capture unique connection types tracking their latest date stamps
+        IPS_TTY_LAST=$(last -i --since "30 days ago" {{ item }} | awk '
+          /^[a-zA-Z0-9]/ && !/system boot/ && !/0.0.0.0/ {
+            tty=$2; ip=$3; m=$4; d=$5;
+            date_str = m " " d
+            
+            for(i=2; i<=NF; i++) {
+              if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+                key_name = "SSH: " $i
+                if (!latest[key_name]) latest[key_name] = date_str
+              }
+              if ($i ~ /^:[0-9]/ || $i ~ /xrdp/) {
+                key_name = "XRDP/X11 (" $i ")"
+                if (!latest[key_name]) latest[key_name] = date_str
+              }
+            }
+          }
+          END {
+            out = ""
+            for (conn in latest) {
+              out = out (out ? "\n" : "") conn " (Latest: " latest[conn] ")"
+            }
+            print out
+          }
+        ')
+
+        # Fallback system log verification parsing for SSH actions
+        IPS_AUTH=""
+        if [ -f /var/log/auth.log ]; then
+            # Grabs current year month data for a standardized timestamp label
+            CURR_M=$(date +%b)
+            CURR_D=$(date +%e | xargs)
+            IPS_AUTH=$(grep -E "Accepted password|Accepted publickey" /var/log/auth.log | grep "for {{ item }}" | awk -v m="$CURR_M" -v d="$CURR_D" '{for(i=1;i<=NF;i++) if($i=="from") print "SSH: " $(i+1) " (Latest: " m " " d ")"}' | sort -u)
+        fi
+
+        # Consolidate strings safely via printf formatting without duplication
+        SRC_CONN_DATA=$(printf "%s\n%s" "${IPS_TTY_LAST}" "${IPS_AUTH}" | grep -E '[a-zA-Z0-9]' | sort -u | tr '\n' ',' | sed 's/,$//' | sed 's/^,//' | sed 's/,/, /g')
+
+        if [ -z "$SRC_CONN_DATA" ]; then
+            SRC_CONN_DATA="Local Console Access (tty1)"
+        fi
+
+        GROUPS=$(id -nG {{ item }})
+        PASSLAST=$(chage -l {{ item }} | grep "Last password change" | cut -d: -f2 | xargs)
+        PASSMAX=$(chage -l {{ item }} | grep "Maximum number of days between password change" | cut -d: -f2 | xargs)
+        
+        echo "{{ inventory_hostname }}|{{ item }}|$LASTLOGIN|$SRC_CONN_DATA|$GROUPS|Last Change: $PASSLAST, Max Age: $PASSMAX"
+      loop: "{{ final_users }}"
+      register: user_output
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Store user report data
+      set_fact:
+        report_data: "{{ user_output.results | map(attribute='stdout') | list }}"
+
+    ########################################################
+    # CLEAN OLD REPORTS (JENKINS WORKSPACE)
+    ########################################################
+
+    - name: Remove old report files
+      run_once: true
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ lookup('env','WORKSPACE') | default('.', true) }}/{{ item }}"
+        state: absent
+      loop:
+        - system_report.txt
+        - system_report.csv
+        - enterprise_system_report.html
+
+    ########################################################
+    # GENERATE REPORTS
+    ########################################################
+
     - name: Generate HTML report
-      ansible.builtin.copy:
+      run_once: true
+      delegate_to: localhost
+      become: false
+      copy:
         dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/enterprise_system_report.html"
         content: |
           <html>
@@ -100,7 +254,7 @@
             {% for disk in hostvars[host].disk_info | default([]) %}
             {% set disk_pct = disk.usage | replace('%', '') | float %}
             <tr>
-              <td>{{ mount_point | default(disk.mount) }}</td>
+              <td>{{ disk.mount }}</td>
               <td>{{ disk.size }}</td>
               <td class="{{ 'critical' if disk_pct >= 90.0 else '' }}">{{ disk.usage }}</td>
             </tr>
