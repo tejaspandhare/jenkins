@@ -197,59 +197,6 @@
     # GENERATE REPORTS
     ########################################################
 
-    - name: Generate TXT report (Markdown Tables for Jenkins Console)
-      run_once: true
-      delegate_to: localhost
-      become: false
-      copy:
-        dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/system_report.txt"
-        content: |
-          # ENTERPRISE INFRASTRUCTURE AUDIT SUMMARY REPORT
-
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          ## NODE TOPOLOGY: {{ sys.host }}
-
-          ### [1] SYSTEM METRICS TABLE
-          | Operating System | Kernel Version | Machine Type | CPU Cores | RAM Total | RAM Used | Uptime | Last Patch Date |
-          | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-          | {{ sys.os }} | {{ sys.kernel }} | {{ sys.machine_type }} | {{ sys.cpu }} vCPUs | {{ sys.ram_total }} | {{ sys.ram_used }} | {{ sys.uptime_days }} Days | {{ sys.last_patch }} |
-
-          ### [2] FILESYSTEMS TOPOLOGY TABLE
-          | Mount Point | Total Capacity Size | Current Disk Utilization |
-          | :--- | :--- | :--- |
-          {% for disk in hostvars[host].disk_info | default([]) %}
-          | {{ disk.mount }} | {{ disk.size }} | {{ disk.usage }} |
-          {% endfor %}
-
-          ### [3] PRIVILEGED ACCOUNTS & SUDO METRICS TABLE
-          | User Account | Connection Protocol & Endpoint Location (With Timeline) | Last Login Timestamp | Assigned Security Groups | Password Aging Metadata |
-          | :--- | :--- | :--- | :--- | :--- |
-          {% if hostvars[host].final_users | length == 0 %}
-          | N/A | N/A | No privileged administrative users found | N/A | N/A |
-          {% else %}
-          {% for line in hostvars[host].report_data | default([]) %}
-          {% set cols = line.split('|') %}
-          | **{{ cols[1] }}** | `{{ cols[3] }}` | {{ cols[2] }} | {{ cols[4] }} | {{ cols[5] }} |
-          {% endfor %}
-          {% endif %}
-
-          ------------------------------------------------------------------------------------------------------------------------
-          {% endfor %}
-
-    - name: Generate CSV report
-      run_once: true
-      delegate_to: localhost
-      become: false
-      copy:
-        dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/system_report.csv"
-        content: |
-          Host,OS,Kernel,Machine,CPU,RAM_Total,RAM_Used,Uptime_days,Last_Patch
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.machine_type }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }}
-          {% endfor %}
-
     - name: Generate HTML report
       run_once: true
       delegate_to: localhost
