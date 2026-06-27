@@ -33,7 +33,7 @@ pipeline {
                             
                             ansible-playbook \
                                 -i inventory/hosts \
-                                playbooks/auditreport1.yml \
+                                playbooks/auditreport3.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
                                 -e "hosts=${params.SERVER_NAME}" \
                                 
