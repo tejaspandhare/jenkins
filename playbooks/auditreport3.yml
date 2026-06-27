@@ -250,78 +250,164 @@
           {{ sys.host }},{{ sys.os }},{{ sys.kernel }},{{ sys.machine_type }},{{ sys.cpu }},{{ sys.ram_total }},{{ sys.ram_used }},{{ sys.uptime_days }},{{ sys.last_patch }}
           {% endfor %}
 
-    - name: Generate HTML report
-      run_once: true
-      delegate_to: localhost
-      become: false
-      copy:
-        dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/enterprise_system_report.html"
-        content: |
-          <html>
-          <head>
-          <title>Full System Audit Report</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
-            table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
-            th, td { border: 1px solid #dddddd; text-align: left; padding: 8px; }
-            tr:nth-child(even) { background-color: #f9f9f9; }
-            th { background-color: #f2f2f2; font-weight: bold; }
-            .critical { background-color: #ffcccc !important; color: #cc0000; font-weight: bold; }
-          </style>
-          </head>
-          <body>
-          <h2>Full Enterprise Infrastructure Audit Report</h2>
-          {% for host in ansible_play_hosts %}
-          {% set sys = hostvars[host].system_info %}
-          
-          {# Calculate RAM math inline for color logic #}
-          {% set raw_total = hostvars[host].ansible_memtotal_mb | default(0) | int %}
-          {% set raw_free = hostvars[host].ansible_memfree_mb | default(0) | int %}
-          {% set raw_used = raw_total - raw_free %}
-          {% set ram_pct = ((raw_used / raw_total) * 100) | round(1) if raw_total > 0 else 0 %}
+- name: Generate HTML report
+  run_once: true
+  delegate_to: localhost
+  become: false
+  copy:
+    dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/enterprise_system_report.html"
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Full Enterprise Infrastructure Audit Report</title>
+        <style>
+          body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 20px;
+            color: #333;
+          }
+          h2 {
+            color: #003366;
+            border-bottom: 2px solid #003366;
+            padding-bottom: 5px;
+          }
+          h3 {
+            color: #006699;
+            margin-top: 30px;
+          }
+          h4 {
+            background: #f2f2f2;
+            padding: 8px;
+          }
+          table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 25px;
+          }
+          th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+          }
+          th {
+            background-color: #e6e6e6;
+          }
+          tr:nth-child(even) {
+            background-color: #fafafa;
+          }
+          .critical {
+            background-color: #ffcccc !important;
+            color: #c00000;
+            font-weight: bold;
+          }
+        </style>
+      </head>
 
-          <h3>Node Topology: {{ sys.host }}</h3>
-          
-          <h4>System Metrics Table</h4>
-          <table>
-            <tr>
-              <th>Operating System</th><th>Kernel Version</th><th>Machine Type</th><th>CPU Cores</th><th>RAM Total</th><th>RAM Used (Usage %)</th><th>Uptime</th><th>Last Patch Date</th>
-            </tr>
-            <tr>
-              <td>{{ sys.os }}</td>
-              <td>{{ sys.kernel }}</td>
-              <td>{{ sys.machine_type }}</td>
-              <td>{{ sys.cpu }} vCPUs</td>
-              <td>{{ sys.ram_total }}</td>
-              <td class="{{ 'critical' if ram_pct >= 90.0 else '' }}">
-                {{ raw_used }} MB ({{ ram_pct }}%)
-              </td>
-              <td>{{ sys.uptime_days }} Days</td>
-              <td>{{ sys.last_patch }}</td>
-            </tr>
-          </table>
-          
-          <h4>Filesystems Topology Table</h4>
-          <table>
-            <tr><th>Mount Point</th><th>Total Capacity Size</th><th>Current Disk Utilization</th></tr>
-            {% for disk in hostvars[host].disk_info | default([]) %}
-            {% set disk_pct = disk.usage | replace('%', '') | float %}
-            <tr>
-              <td>{{ disk.mount }}</td>
-              <td>{{ disk.size }}</td>
-              <td class="{{ 'critical' if disk_pct >= 90.0 else '' }}">{{ disk.usage }}</td>
-            </tr>
-            {% endfor %}
-          </table>
-          
-          <h4>Privileged Accounts & Sudo Metrics Table</h4>
-          <table>
-            <tr><th>User Account</th><th>Connection Protocol & Endpoint Location (With Timeline)</th><th>Last Login Timestamp</th><th>Assigned Security Groups</th><th>Password Aging Metadata</th></tr>
-            {% for line in hostvars[host].report_data | default([]) %}
-            {% set cols = line.split('|') %}
-            <tr><td><b>{{ cols[1] }}</b></td><td><code>{{ cols[3] }}</code></td><td>{{ cols[2] }}</td><td>{{ cols[4] }}</td><td>{{ cols[5] }}</td></tr>
-            {% endfor %}
-          </table>
-          {% endfor %}
-          </body>
-          </html>
+      <body>
+
+      <h2>Full Enterprise Infrastructure Audit Report</h2>
+
+      {% for host in ansible_play_hosts %}
+      {% set sys = hostvars[host].system_info %}
+
+      {% set raw_total = hostvars[host].ansible_memtotal_mb | default(0) | int %}
+      {% set raw_free = hostvars[host].ansible_memfree_mb | default(0) | int %}
+      {% set raw_used = raw_total - raw_free %}
+      {% set ram_pct = ((raw_used / raw_total) * 100) | round(1) if raw_total > 0 else 0 %}
+
+      <h3>Node Topology : {{ sys.host }}</h3>
+
+      <h4>System Metrics Table</h4>
+
+      <table>
+        <tr>
+          <th>Operating System</th>
+          <th>Kernel Version</th>
+          <th>Machine Type</th>
+          <th>CPU Cores</th>
+          <th>RAM Total</th>
+          <th>RAM Used</th>
+          <th>RAM Free</th>
+          <th>RAM Usage %</th>
+          <th>Uptime</th>
+          <th>Last Patch Date</th>
+        </tr>
+
+        <tr>
+          <td>{{ sys.os | default('N/A') }}</td>
+          <td>{{ sys.kernel | default('N/A') }}</td>
+          <td>{{ sys.machine_type | default('N/A') }}</td>
+          <td>{{ sys.cpu | default('N/A') }} vCPUs</td>
+          <td>{{ raw_total }} MB</td>
+          <td>{{ raw_used }} MB</td>
+          <td>{{ raw_free }} MB</td>
+          <td class="{{ 'critical' if ram_pct >= 90 else '' }}">
+            {{ ram_pct }}%
+          </td>
+          <td>{{ sys.uptime_days | default('N/A') }} Days</td>
+          <td>{{ sys.last_patch | default('N/A') }}</td>
+        </tr>
+      </table>
+
+      <h4>Filesystems Topology Table</h4>
+
+      <table>
+        <tr>
+          <th>Mount Point</th>
+          <th>Total Capacity</th>
+          <th>Used</th>
+          <th>Available</th>
+          <th>Disk Usage</th>
+        </tr>
+
+        {% for disk in hostvars[host].disk_info | default([]) %}
+        {% set disk_pct = disk.usage | replace('%','') | float %}
+
+        <tr>
+          <td>{{ disk.mount }}</td>
+          <td>{{ disk.size }}</td>
+          <td>{{ disk.used | default('N/A') }}</td>
+          <td>{{ disk.available | default('N/A') }}</td>
+          <td class="{{ 'critical' if disk_pct >= 90 else '' }}">
+            {{ disk.usage }}
+          </td>
+        </tr>
+
+        {% endfor %}
+
+      </table>
+
+      <h4>Privileged Accounts & Sudo Metrics Table</h4>
+
+      <table>
+
+        <tr>
+          <th>User Account</th>
+          <th>Connection Protocol & Endpoint</th>
+          <th>Last Login Timestamp</th>
+          <th>Assigned Security Groups</th>
+          <th>Password Aging Metadata</th>
+        </tr>
+
+        {% for line in hostvars[host].report_data | default([]) %}
+        {% set cols = line.split('|') %}
+
+        <tr>
+          <td><b>{{ cols[1] if cols|length>1 else 'N/A' }}</b></td>
+          <td>{{ cols[3] if cols|length>3 else 'N/A' }}</td>
+          <td>{{ cols[2] if cols|length>2 else 'Never' }}</td>
+          <td>{{ cols[4] if cols|length>4 else 'N/A' }}</td>
+          <td>{{ cols[5] if cols|length>5 else 'N/A' }}</td>
+        </tr>
+
+        {% endfor %}
+
+      </table>
+
+      <hr>
+
+      {% endfor %}
+
+      </body>
+      </html>
