@@ -1,37 +1,113 @@
 ---
-- name: Perform SSH fix Tasks
-  hosts: "{{ hosts.split(';') }}"  # Split SERVER_NAME into a list
-  gather_facts: true  # Ensure facts are gathered to check OS version
+- name: Perform SSH hardening on Linux servers
+  hosts: "{{ hosts.split(';') }}"
+  become: true
+  gather_facts: true
 
   tasks:
-    - name: Upgrade SSH on Ubuntu/Debian
+
+    #################################################################
+    # Update OpenSSH package
+    #################################################################
+
+    - name: Update OpenSSH package on Debian/Ubuntu
       apt:
         name: openssh-server
         state: latest
         update_cache: yes
-        dpkg_options: 'force-confdef,force-confold'
-      register: ssh_update
+        dpkg_options: "force-confdef,force-confold"
       when: ansible_os_family == "Debian"
 
-    - name: Restart SSH on Ubuntu/Debian
+    - name: Update OpenSSH package on RedHat/Rocky/Alma/CentOS/Oracle
+      yum:
+        name: openssh-server
+        state: latest
+      when: ansible_os_family == "RedHat"
+
+    - name: Update OpenSSH package on SUSE
+      zypper:
+        name: openssh
+        state: latest
+      when: ansible_os_family == "Suse"
+
+    #################################################################
+    # SSH Hardening
+    #################################################################
+
+    - name: Configure LoginGraceTime
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?LoginGraceTime"
+        line: "LoginGraceTime 0"
+        state: present
+        backup: yes
+        validate: "/usr/sbin/sshd -tf %s"
+      register: login_grace
+
+    - name: Configure SSH cryptographic algorithms
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?{{ item.key }}"
+        line: "{{ item.key }} {{ item.value }}"
+        state: present
+        backup: yes
+        validate: "/usr/sbin/sshd -tf %s"
+      loop:
+        - key: GSSAPIKexAlgorithms
+          value: "gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-,gss-group14-sha1-,gss-gex-sha1-"
+
+        - key: Ciphers
+          value: "chacha20-poly1305@openssh.com,aes128-ctr,aes192-ctr,aes256-ctr,aes128-gcm@openssh.com,aes256-gcm@openssh.com"
+
+        - key: MACs
+          value: "umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,umac-64@openssh.com,umac-128@openssh.com,hmac-sha2-256,hmac-sha2-512,hmac-sha1"
+
+        - key: KexAlgorithms
+          value: "curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521,sntrup761x25519-sha512@openssh.com,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256"
+
+      register: ssh_hardening
+
+    #################################################################
+    # Restart SSH Service
+    #################################################################
+
+    - name: Restart SSH on Debian/Ubuntu
       service:
         name: ssh
         state: restarted
-      when: ssh_update.changed and ansible_os_family == "Debian"
+      when:
+        - ansible_os_family == "Debian"
+        - login_grace.changed or ssh_hardening.changed
 
-    - name: Modify sshd config redhat
-      lineinfile:
-        path: /etc/ssh/sshd_config
-        state:  present
-        regexp: "^LoginGraceTime"
-        insertafter: "^#LoginGraceTime"
-        line: "LoginGraceTime 0"
-        validate: "/usr/sbin/sshd -tf %s"
-        backup: true
-      when: ansible_os_family == "RedHat"
-
-    - name: Restart SSH on RedHat
+    - name: Restart SSH on RedHat/Rocky/Alma/CentOS/Oracle
       service:
         name: sshd
         state: restarted
-      when: ansible_os_family == "RedHat"
+      when:
+        - ansible_os_family == "RedHat"
+        - login_grace.changed or ssh_hardening.changed
+
+    - name: Restart SSH on SUSE
+      service:
+        name: sshd
+        state: restarted
+      when:
+        - ansible_os_family == "Suse"
+        - login_grace.changed or ssh_hardening.changed
+
+    #################################################################
+    # Verify SSH Configuration
+    #################################################################
+
+    - name: Verify sshd configuration
+      command: /usr/sbin/sshd -t
+      changed_when: false
+
+    - name: Display configured algorithms
+      command: /usr/sbin/sshd -T
+      register: sshd_output
+      changed_when: false
+
+    - name: Show configured SSH algorithms
+      debug:
+        msg: "{{ sshd_output.stdout_lines | select('match', '^(ciphers|macs|kexalgorithms|gssapikexalgorithms)') | list }}"
