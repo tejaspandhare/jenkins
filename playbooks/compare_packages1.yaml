@@ -2,13 +2,14 @@
 - name: Gather installed packages from working host
   hosts: "{{ working_host }}"
   gather_facts: false
+
   tasks:
     - name: Get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
       changed_when: false
 
-    - name: Save package list to file
+    - name: Save package list
       copy:
         content: "{{ package_list.stdout }}"
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
@@ -16,144 +17,148 @@
 - name: Gather installed packages from nonworking host
   hosts: "{{ nonworking_host }}"
   gather_facts: false
+
   tasks:
     - name: Get installed packages
       shell: dpkg --get-selections | grep -w install
       register: package_list
       changed_when: false
 
-    - name: Save package list to file
+    - name: Save package list
       copy:
         content: "{{ package_list.stdout }}"
         dest: "/tmp/packages_{{ inventory_hostname }}.txt"
 
-- name: Fetch package lists to controller
+- name: Fetch package lists
   hosts: "{{ working_host }},{{ nonworking_host }}"
   gather_facts: false
+
   tasks:
     - name: Fetch package list
       fetch:
         src: "/tmp/packages_{{ inventory_hostname }}.txt"
-        dest: "{{ playbook_dir }}/fetched/"
+        dest: "./fetched/"
         flat: true
 
-- name: Compare package lists and generate reports
+- name: Compare package lists
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars:
-    working_file: "{{ playbook_dir }}/fetched/packages_{{ working_host }}.txt"
-    nonworking_file: "{{ playbook_dir }}/fetched/packages_{{ nonworking_host }}.txt"
+    working_file: "./fetched/packages_{{ working_host }}.txt"
+    nonworking_file: "./fetched/packages_{{ nonworking_host }}.txt"
     compare_script_url: "https://raw.githubusercontent.com/tejaspandhare/python/main/scripts/compare_packages1.py"
 
   tasks:
+
+    - name: Create reports directory
+      file:
+        path: "./reports"
+        state: directory
+        mode: "0755"
+
     - name: Download comparison script
       get_url:
         url: "{{ compare_script_url }}"
-        dest: "{{ playbook_dir }}/compare_packages.py"
-        mode: '0755'
+        dest: "./compare_packages.py"
+        mode: "0755"
 
-    - name: Compare package lists
+    - name: Compare packages
       shell: |
-        python3 compare_packages.py "{{ working_file }}" "{{ nonworking_file }}" --plain | grep -v '^Packages' | grep -v '^$'
-      args:
-        chdir: "{{ playbook_dir }}"
+        python3 compare_packages.py "{{ working_file }}" "{{ nonworking_file }}" --plain \
+        | grep -v '^Packages' \
+        | grep -v '^$'
       register: comparison_output
       changed_when: false
       failed_when: false
 
-    - name: Display missing packages in Jenkins console
+    - name: Print missing packages
       debug:
-        msg: "{{ comparison_output.stdout_lines }}"
+        var: comparison_output.stdout_lines
 
-    - name: Generate text report
+    - name: Generate TXT report
       copy:
-        dest: "{{ playbook_dir }}/missing_packages.txt"
+        dest: "./reports/missing_packages.txt"
         content: |
-          Missing Packages Report
-          =======================
+          Package Comparison Report
+          =========================
 
           Working Host    : {{ working_host }}
           Nonworking Host : {{ nonworking_host }}
 
-          Missing Packages:
-          {% if comparison_output.stdout_lines | length > 0 %}
+          Missing Packages
+          ----------------
+
+          {% if comparison_output.stdout_lines | length == 0 %}
+          No missing packages found.
+          {% else %}
           {% for pkg in comparison_output.stdout_lines %}
           {{ pkg }}
           {% endfor %}
-          {% else %}
-          No missing packages found.
           {% endif %}
 
     - name: Generate HTML report
       copy:
-        dest: "{{ playbook_dir }}/missing_packages.html"
+        dest: "./reports/missing_packages.html"
         content: |
           <!DOCTYPE html>
           <html>
           <head>
-            <title>Package Comparison Report</title>
-            <style>
-              body {
-                font-family: Arial, sans-serif;
-                margin: 30px;
-                background: #f5f5f5;
-              }
-              h2 {
-                color: #2c3e50;
-              }
-              table {
-                border-collapse: collapse;
-                width: 60%;
-                background: white;
-              }
-              th {
-                background: #4CAF50;
-                color: white;
-                padding: 10px;
-                text-align: left;
-              }
-              td {
-                border: 1px solid #ddd;
-                padding: 8px;
-              }
-              tr:nth-child(even) {
-                background: #f2f2f2;
-              }
-            </style>
+              <title>Package Comparison Report</title>
+              <style>
+                  body {
+                      font-family: Arial;
+                      margin: 30px;
+                  }
+                  table {
+                      border-collapse: collapse;
+                      width: 60%;
+                  }
+                  th, td {
+                      border: 1px solid #ccc;
+                      padding: 8px;
+                  }
+                  th {
+                      background: #4CAF50;
+                      color: white;
+                  }
+              </style>
           </head>
           <body>
 
           <h2>Package Comparison Report</h2>
 
-          <p><strong>Working Host:</strong> {{ working_host }}</p>
-          <p><strong>Nonworking Host:</strong> {{ nonworking_host }}</p>
+          <p><b>Working Host:</b> {{ working_host }}</p>
+          <p><b>Nonworking Host:</b> {{ nonworking_host }}</p>
 
           <table>
-            <tr>
-              <th>Missing Packages</th>
-            </tr>
+              <tr>
+                  <th>Missing Packages</th>
+              </tr>
 
-            {% if comparison_output.stdout_lines | length > 0 %}
-            {% for pkg in comparison_output.stdout_lines %}
-            <tr>
-              <td>{{ pkg }}</td>
-            </tr>
-            {% endfor %}
-            {% else %}
-            <tr>
-              <td>No missing packages found.</td>
-            </tr>
-            {% endif %}
-
+              {% if comparison_output.stdout_lines | length == 0 %}
+              <tr>
+                  <td>No missing packages found.</td>
+              </tr>
+              {% else %}
+              {% for pkg in comparison_output.stdout_lines %}
+              <tr>
+                  <td>{{ pkg }}</td>
+              </tr>
+              {% endfor %}
+              {% endif %}
           </table>
 
           </body>
           </html>
 
-    - name: Show report locations
-      debug:
-        msg:
-          - "Text report : {{ playbook_dir }}/missing_packages.txt"
-          - "HTML report : {{ playbook_dir }}/missing_packages.html"
+    - name: Verify reports
+      shell: |
+        pwd
+        ls -l ./reports
+      register: report_check
+      changed_when: false
+
+    - debug:
+        var: report_check.stdout_lines
