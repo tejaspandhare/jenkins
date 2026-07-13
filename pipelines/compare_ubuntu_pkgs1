@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -10,12 +9,12 @@ pipeline {
         string(
             name: 'WORKING_HOST',
             defaultValue: '',
-            description: 'Working server hostname'
+            description: 'Working Host'
         )
         string(
             name: 'NONWORKING_HOST',
             defaultValue: '',
-            description: 'Non-working server hostname'
+            description: 'Non-working Host'
         )
     }
 
@@ -32,10 +31,14 @@ pipeline {
                 withCredentials([
                     file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
                 ]) {
+
                     sh '''
+                        pwd
+                        ls -la
+
                         ansible-playbook \
                           -i inventory/hosts \
-                          playbooks/compare_packages1.yaml \
+                          playbooks/compare_packages.yaml \
                           --private-key="$ANSIBLE_KEY_FILE" \
                           -e "working_host=${WORKING_HOST}" \
                           -e "nonworking_host=${NONWORKING_HOST}"
@@ -43,26 +46,40 @@ pipeline {
                 }
             }
         }
+
+        stage('Verify Reports') {
+            steps {
+                sh '''
+                    echo "===== Current Directory ====="
+                    pwd
+
+                    echo "===== Workspace ====="
+                    ls -la
+
+                    echo "===== Reports ====="
+                    find . -type f | grep -E "missing_packages|reports|html|txt" || true
+                '''
+            }
+        }
     }
 
     post {
         always {
 
-            archiveArtifacts artifacts: '''
-                playbooks/missing_packages.txt,
-                playbooks/missing_packages.html
-            ''', fingerprint: true
+            archiveArtifacts(
+                artifacts: '**/reports/*',
+                fingerprint: true,
+                allowEmptyArchive: true
+            )
 
             publishHTML(target: [
-                reportDir: 'playbooks',
+                reportDir: 'reports',
                 reportFiles: 'missing_packages.html',
                 reportName: 'Package Comparison Report',
                 keepAll: true,
                 alwaysLinkToLastBuild: true,
                 allowMissing: true
             ])
-
-            echo 'Reports archived successfully.'
         }
 
         success {
