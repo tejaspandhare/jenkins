@@ -38,7 +38,7 @@ pipeline {
 
                         ansible-playbook \
                           -i inventory/hosts \
-                          playbooks/compare_packages.yaml \
+                          playbooks/compare_packages1.yaml \
                           --private-key="$ANSIBLE_KEY_FILE" \
                           -e "working_host=${WORKING_HOST}" \
                           -e "nonworking_host=${NONWORKING_HOST}"
