@@ -8,12 +8,13 @@ pipeline {
     parameters {
         string(
             name: 'WORKING_HOST',
-            defaultValue: '',
+            defaultValue: 'lb1',
             description: 'Working Host'
         )
+
         string(
             name: 'NONWORKING_HOST',
-            defaultValue: '',
+            defaultValue: 'lb2',
             description: 'Non-working Host'
         )
     }
@@ -26,19 +27,21 @@ pipeline {
             }
         }
 
-        stage('Compare Installed Packages') {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Compare Packages') {
             steps {
                 withCredentials([
                     file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
                 ]) {
-
                     sh '''
-                        pwd
-                        ls -la
-
                         ansible-playbook \
                           -i inventory/hosts \
-                          playbooks/compare_packages1.yaml \
+                          playbooks/compare_packages.yaml \
                           --private-key="$ANSIBLE_KEY_FILE" \
                           -e "working_host=${WORKING_HOST}" \
                           -e "nonworking_host=${NONWORKING_HOST}"
@@ -50,14 +53,20 @@ pipeline {
         stage('Verify Reports') {
             steps {
                 sh '''
-                    echo "===== Current Directory ====="
+                    echo "Current Workspace:"
                     pwd
 
-                    echo "===== Workspace ====="
-                    ls -la
+                    echo ""
+                    echo "Generated Reports:"
+                    ls -l reports || true
 
-                    echo "===== Reports ====="
-                    find . -type f | grep -E "missing_packages|reports|html|txt" || true
+                    echo ""
+                    echo "All HTML Files:"
+                    find . -name "*.html"
+
+                    echo ""
+                    echo "All TXT Files:"
+                    find . -name "*.txt"
                 '''
             }
         }
@@ -67,27 +76,35 @@ pipeline {
         always {
 
             archiveArtifacts(
-                artifacts: '**/reports/*',
+                artifacts: 'reports/*',
                 fingerprint: true,
                 allowEmptyArchive: true
             )
 
-            publishHTML(target: [
-                reportDir: 'reports',
-                reportFiles: 'missing_packages.html',
-                reportName: 'Package Comparison Report',
-                keepAll: true,
-                alwaysLinkToLastBuild: true,
-                allowMissing: true
-            ])
+            script {
+                if (fileExists('reports/missing_packages.html')) {
+
+                    publishHTML(target: [
+                        reportDir: 'reports',
+                        reportFiles: 'missing_packages.html',
+                        reportName: 'Package Comparison Report',
+                        keepAll: true,
+                        alwaysLinkToLastBuild: true,
+                        allowMissing: false
+                    ])
+
+                } else {
+                    echo "HTML report not found. Skipping publishHTML."
+                }
+            }
         }
 
         success {
-            echo 'Package comparison completed successfully.'
+            echo "Package comparison completed successfully."
         }
 
         failure {
-            echo 'Package comparison failed.'
+            echo "Package comparison failed."
         }
     }
 }
