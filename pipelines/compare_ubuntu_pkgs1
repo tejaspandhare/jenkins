@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -5,22 +6,71 @@ pipeline {
         ANSIBLE_FORCE_COLOR = 'true'
     }
 
+    parameters {
+        string(
+            name: 'WORKING_HOST',
+            defaultValue: '',
+            description: 'Working server hostname'
+        )
+        string(
+            name: 'NONWORKING_HOST',
+            defaultValue: '',
+            description: 'Non-working server hostname'
+        )
+    }
+
     stages {
-        stage('Cleanup Junk data') {
+
+        stage('Clean Workspace') {
             steps {
-                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                    script {
-                        sh """
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                playbooks/compare_packages.yaml \
-                                --private-key="$ANSIBLE_KEY_FILE" \
-                                -e "working_host=${params.WORKING_HOST}" \
-                                -e "nonworking_host=${params.NONWORKING_HOST}"
-                        """
-                    }
+                cleanWs()
+            }
+        }
+
+        stage('Compare Installed Packages') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
+                    sh '''
+                        ansible-playbook \
+                          -i inventory/hosts \
+                          playbooks/compare_packages1.yaml \
+                          --private-key="$ANSIBLE_KEY_FILE" \
+                          -e "working_host=${WORKING_HOST}" \
+                          -e "nonworking_host=${NONWORKING_HOST}"
+                    '''
                 }
             }
+        }
+    }
+
+    post {
+        always {
+
+            archiveArtifacts artifacts: '''
+                playbooks/missing_packages.txt,
+                playbooks/missing_packages.html
+            ''', fingerprint: true
+
+            publishHTML(target: [
+                reportDir: 'playbooks',
+                reportFiles: 'missing_packages.html',
+                reportName: 'Package Comparison Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+            ])
+
+            echo 'Reports archived successfully.'
+        }
+
+        success {
+            echo 'Package comparison completed successfully.'
+        }
+
+        failure {
+            echo 'Package comparison failed.'
         }
     }
 }
