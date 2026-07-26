@@ -57,7 +57,7 @@ pipeline {
 
                         ansible-playbook \
                           -i inventory/hosts \
-                          ansible-roles/os_patching/patch_servers.yaml \
+                          ansible-roles/os_patching/patch1.yaml \
                           --private-key="$ANSIBLE_KEY_FILE" \
                           -e "hosts=${SERVER_NAME}"
 
