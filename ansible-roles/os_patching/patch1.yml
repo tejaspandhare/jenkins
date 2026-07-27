@@ -3,122 +3,211 @@
 <head>
 <meta charset="UTF-8">
 <title>Linux Patch Report</title>
+
 <style>
-body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:20px;color:#333}
-.container{max-width:1200px;margin:auto}
-.header{background:#1565c0;color:#fff;padding:20px;border-radius:8px}
-.cards{display:flex;gap:15px;margin:20px 0;flex-wrap:wrap}
-.card{flex:1;background:#fff;padding:15px;border-radius:8px;text-align:center;box-shadow:0 2px 6px #ddd}
-.card h2{margin:5px 0;font-size:30px}
-table{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 6px #ddd}
-th{background:#1565c0;color:#fff;padding:12px}
-td{padding:10px;border-bottom:1px solid #eee}
-tr:nth-child(even){background:#fafafa}
-.badge{padding:4px 10px;border-radius:12px;color:#fff;font-size:12px;font-weight:bold}
-.ok{background:#2e7d32}
-.fail{background:#c62828}
-.reboot{background:#ef6c00}
-.none{background:#607d8b}
-.progress{height:20px;background:#ddd;border-radius:10px;margin:20px 0;overflow:hidden}
-.bar{height:100%;background:#2e7d32;color:#fff;text-align:center;line-height:20px;font-size:12px}
-.footer{text-align:center;margin-top:20px;font-size:13px;color:#666}
+body{
+    font-family:Arial,sans-serif;
+    background:#f4f6f9;
+    margin:0;
+    padding:20px;
+    color:#333;
+}
+
+.container{
+    max-width:1200px;
+    margin:auto;
+}
+
+.header{
+    background:#1565c0;
+    color:#fff;
+    padding:20px;
+    border-radius:8px;
+    margin-bottom:20px;
+}
+
+.header h1{
+    margin:0 0 10px;
+}
+
+.progress{
+    height:22px;
+    background:#ddd;
+    border-radius:15px;
+    overflow:hidden;
+    margin:20px 0;
+}
+
+.progress-bar{
+    height:100%;
+    background:#2e7d32;
+    color:#fff;
+    text-align:center;
+    line-height:22px;
+    font-size:12px;
+    font-weight:bold;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    background:#fff;
+    box-shadow:0 2px 6px rgba(0,0,0,.15);
+}
+
+th{
+    background:#1565c0;
+    color:#fff;
+    padding:12px;
+}
+
+td{
+    padding:10px;
+    border-bottom:1px solid #eee;
+}
+
+tr:nth-child(even){
+    background:#fafafa;
+}
+
+.badge{
+    padding:4px 10px;
+    border-radius:12px;
+    color:#fff;
+    font-size:12px;
+    font-weight:bold;
+}
+
+.ok{
+    background:#2e7d32;
+}
+
+.fail{
+    background:#c62828;
+}
+
+.warn{
+    background:#ef6c00;
+}
+
+.gray{
+    background:#607d8b;
+}
+
+.summary{
+    background:#fff;
+    margin-top:20px;
+    padding:20px;
+    border-radius:8px;
+    box-shadow:0 2px 6px rgba(0,0,0,.15);
+}
+
+.summary table{
+    box-shadow:none;
+}
+
+.summary td{
+    border:none;
+    padding:8px;
+}
+
+.footer{
+    text-align:center;
+    color:#666;
+    margin-top:25px;
+    font-size:13px;
+}
 </style>
+
 </head>
+
 <body>
 
-{% set total=patch_results_summary|length %}
-{% set success=patch_results_summary|selectattr('status','equalto','SUCCESS')|list|length %}
-{% set failed=total-success %}
-{% set reboot=patch_results_summary|selectattr('reboot','equalto','Yes')|list|length %}
-{% set percent=((success*100)/total)|round(0) if total>0 else 0 %}
+{% set total = patch_results_summary | length %}
+{% set success = patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length %}
+{% set failed = total - success %}
+{% set reboot = patch_results_summary | selectattr('reboot','equalto','Yes') | list | length %}
+{% set percent = ((success * 100) / total) | round(0) if total > 0 else 0 %}
 
 <div class="container">
 
 <div class="header">
 <h1>🚀 Linux Patch Report</h1>
+
 <p><b>Generated:</b> {{ lookup('pipe','date') }}</p>
-<p><b>Playbook:</b> patch.yml |
-<b>Job:</b> {{ lookup('env','JOB_NAME')|default('Manual',true) }}
-#{{ lookup('env','BUILD_NUMBER')|default('',true) }}</p>
+
+<p>
+<b>Playbook:</b> patch.yml |
+<b>Job:</b> {{ lookup('env','JOB_NAME') | default('Manual', true) }}
+#{{ lookup('env','BUILD_NUMBER') | default('', true) }}
+</p>
+
 </div>
 
-<div class="cards">
-<div class="card">
-<h2>{{ total }}</h2>
-<div>Total Hosts</div>
-</div>
-
-<div class="card">
-<h2 style="color:#2e7d32">{{ success }}</h2>
-<div>Successful</div>
-</div>
-
-<div class="card">
-<h2 style="color:#c62828">{{ failed }}</h2>
-<div>Failed</div>
-</div>
-
-<div class="card">
-<h2 style="color:#ef6c00">{{ reboot }}</h2>
-<div>Reboot Required</div>
-</div>
-</div>
-
-<b>Success Rate ({{ percent }}%)</b>
+<h3>Patch Success Rate ({{ percent }}%)</h3>
 
 <div class="progress">
-<div class="bar" style="width:{{ percent }}%">
+<div class="progress-bar" style="width:{{ percent }}%;">
 {{ percent }}%
 </div>
 </div>
 
 <table>
+
 <thead>
+
 <tr>
 <th>Host</th>
-<th>OS</th>
+<th>Operating System</th>
 <th>Old Kernel</th>
 <th>New Kernel</th>
 <th>Updated</th>
 <th>Reboot</th>
 <th>Status</th>
 </tr>
+
 </thead>
 
 <tbody>
 
 {% for h in patch_results_summary %}
+
 <tr>
+
 <td><b>{{ h.host }}</b></td>
+
 <td>{{ h.os }}</td>
+
 <td>{{ h.old_kernel }}</td>
 
 <td>
 {% if h.old_kernel != h.new_kernel %}
-<span style="color:#2e7d32;font-weight:bold">{{ h.new_kernel }}</span>
+<span style="color:#2e7d32;font-weight:bold;">
+{{ h.new_kernel }}
+</span>
 {% else %}
 {{ h.new_kernel }}
 {% endif %}
 </td>
 
 <td>
-{% if h.updated=="Yes" %}
+{% if h.updated == "Yes" %}
 <span class="badge ok">Updated</span>
 {% else %}
-<span class="badge none">No Update</span>
+<span class="badge gray">No Update</span>
 {% endif %}
 </td>
 
 <td>
-{% if h.reboot=="Yes" %}
-<span class="badge reboot">Required</span>
+{% if h.reboot == "Yes" %}
+<span class="badge warn">Required</span>
 {% else %}
 <span class="badge ok">No</span>
 {% endif %}
 </td>
 
 <td>
-{% if h.status=="SUCCESS" %}
+{% if h.status == "SUCCESS" %}
 <span class="badge ok">SUCCESS</span>
 {% else %}
 <span class="badge fail">{{ h.status }}</span>
@@ -126,21 +215,59 @@ tr:nth-child(even){background:#fafafa}
 </td>
 
 </tr>
+
 {% endfor %}
 
 </tbody>
+
 </table>
+
+<div class="summary">
+
+<h2>Execution Summary</h2>
+
+<table>
+
+<tr>
+<td><b>Total Hosts</b></td>
+<td>{{ total }}</td>
+</tr>
+
+<tr>
+<td><b>Successful Hosts</b></td>
+<td>{{ success }}</td>
+</tr>
+
+<tr>
+<td><b>Failed Hosts</b></td>
+<td>{{ failed }}</td>
+</tr>
+
+<tr>
+<td><b>Reboot Required</b></td>
+<td>{{ reboot }}</td>
+</tr>
+
+<tr>
+<td><b>Success Rate</b></td>
+<td>{{ percent }}%</td>
+</tr>
+
+<tr>
+<td><b>Report Generated</b></td>
+<td>{{ lookup('pipe','date') }}</td>
+</tr>
+
+</table>
+
+</div>
 
 <div class="footer">
 <hr>
-<b>Execution Summary</b><br><br>
 
-Total Hosts: {{ total }} |
-Successful: {{ success }} |
-Failed: {{ failed }} |
-Reboot Required: {{ reboot }}<br><br>
+<b>Linux Patch Automation Report</b><br>
+Generated by <b>Jenkins Pipeline</b> &amp; <b>Ansible Automation</b>
 
-Generated by Jenkins Pipeline &amp; Ansible Automation
 </div>
 
 </div>
