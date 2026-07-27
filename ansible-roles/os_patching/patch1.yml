@@ -1,149 +1,435 @@
----
-- name: Enterprise Linux Patching and Reporting
-  hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
-  gather_facts: true
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux Patch Report</title>
 
-  vars:
-    ansible_remote_tmp: "/tmp/ansible_tmp"
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
 
-    exclude_packages_list: >-
-      {{ EXCLUDE_PKGS | default('') | split(';')
-         | map('trim')
-         | reject('equalto', '')
-         | list }}
+body{
+    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    background:#eef2f7;
+    color:#333;
+    padding:30px;
+}
 
-    report_dir: "{{ playbook_dir }}/reports"
-    report_file: "{{ report_dir }}/patch_report.html"
+.container{
+    max-width:1400px;
+    margin:auto;
+}
 
-  roles:
-    - precheck
-    - patch
-    - reboot
-    - postcheck
+/* Header */
 
-  tasks:
+.header{
+    background:linear-gradient(135deg,#1565C0,#42A5F5);
+    color:#fff;
+    border-radius:12px;
+    padding:30px;
+    box-shadow:0 6px 15px rgba(0,0,0,.15);
+    margin-bottom:25px;
+}
 
-    # ------------------------------
-    # 1. Patch the system based on OS
-    # ------------------------------
-    - name: Patch Debian/Ubuntu
-      apt:
-        update_cache: yes
-        upgrade: dist
-      when: ansible_os_family == "Debian"
-      register: upgrade_result
+.header h1{
+    font-size:34px;
+    margin-bottom:10px;
+}
 
-    - name: Patch RHEL
-      dnf:
-        name: "*"
-        state: latest
-      when: ansible_os_family == "RedHat"
-      register: upgrade_result
+.header-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:20px;
+    margin-top:20px;
+}
 
-    - name: Patch SUSE
-      zypper:
-        name: "*"
-        state: latest
-      when: ansible_os_family == "Suse"
-      register: upgrade_result
+.info-box{
+    background:rgba(255,255,255,.15);
+    padding:15px;
+    border-radius:8px;
+}
 
-    - name: Show patch result
-      debug:
-        msg: "Patching completed on {{ inventory_hostname }} | Changes applied: {{ upgrade_result.changed }}"
+.info-box h4{
+    font-size:14px;
+    opacity:.9;
+    margin-bottom:5px;
+}
 
-    - name: Set patch_result updated flag
-      set_fact:
-        patch_result: "{{ patch_result | default({}) | combine({'updated': upgrade_result.changed}) }}"
+/* Summary */
 
-    # ------------------------------
-    # 2. Post-check: Capture kernel & finalize facts
-    # ------------------------------
-    - name: Capture new kernel
-      command: uname -r
-      register: new_kernel
-      changed_when: false
+.summary{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:20px;
+    margin-bottom:25px;
+}
 
-    - name: Update patch_result with kernel & status
-      set_fact:
-        patch_result: >-
-          {{ patch_result | combine({
-            'os': ansible_distribution ~ " " ~ ansible_distribution_version,
-            'old_kernel': patch_result.old_kernel | default(ansible_kernel),
-            'new_kernel': new_kernel.stdout,
-            'status': ('FAILED' if upgrade_result is failed else 'SUCCESS')
-          }) }}
+.card{
+    color:white;
+    border-radius:10px;
+    padding:25px;
+    text-align:center;
+    box-shadow:0 3px 12px rgba(0,0,0,.15);
+}
 
-    # ------------------------------
-    # 3. Console-friendly Markdown table
-    # ------------------------------
-    - name: Generate console patch summary
-      run_once: true
-      delegate_to: localhost
-      block:
+.card h2{
+    font-size:42px;
+    margin:10px 0;
+}
 
-        - name: Build patch results summary
-          set_fact:
-            patch_results_summary: >-
-              {{ groups['all']
-                 | map('extract', hostvars, 'patch_result')
-                 | select('defined')
-                 | list }}
+.card p{
+    font-size:17px;
+}
 
-        - name: Print Markdown table header
-          debug:
-            msg: |
-              | Host | OS | Old Kernel | New Kernel | Updated | Reboot | Status |
-              | ---- | -- | ---------- | ---------- | ------- | ------ | ------ |
+.total{
+    background:#1565C0;
+}
 
-        - name: Print each host row
-          debug:
-            msg: "| {{ item.host }} | {{ item.os | default('N/A') }} | {{ item.old_kernel }} | {{ item.new_kernel }} | {{ 'Yes' if item.updated else 'No' }} | {{ 'Yes' if item.reboot else 'No' }} | {{ item.status }} |"
-          loop: "{{ patch_results_summary }}"
-          loop_control:
-            label: "{{ item.host }}"
+.success{
+    background:#2E7D32;
+}
 
-        - name: Print totals
-          debug:
-            msg: |
-              Total Hosts: {{ patch_results_summary | length }}
-              Success    : {{ patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length }}
-              Failed     : {{ patch_results_summary | selectattr('status','equalto','FAILED') | list | length }}
+.failed{
+    background:#C62828;
+}
 
-    # ------------------------------
-    # 4. HTML report generation
-    # ------------------------------
-    - name: Reset temp directory
-      run_once: true
-      delegate_to: localhost
-      file:
-        path: /tmp/ansible_tmp
-        state: absent
+.reboot{
+    background:#EF6C00;
+}
 
-    - name: Create temp directory
-      run_once: true
-      delegate_to: localhost
-      file:
-        path: /tmp/ansible_tmp
-        state: directory
-        mode: '0777'
+/* Progress */
 
-    - name: Ensure reports directory exists
-      run_once: true
-      delegate_to: localhost
-      file:
-        path: "{{ report_dir }}"
-        state: directory
-        mode: '0755'
+.progress-section{
+    background:white;
+    border-radius:10px;
+    padding:20px;
+    margin-bottom:25px;
+    box-shadow:0 2px 8px rgba(0,0,0,.1);
+}
 
-    - name: Create HTML report
-      run_once: true
-      delegate_to: localhost
-      template:
-        src: "{{ playbook_dir }}/templates/report1.j2"
-        dest: "{{ report_file }}"
+.progress{
+    background:#ddd;
+    border-radius:30px;
+    overflow:hidden;
+    height:28px;
+    margin-top:10px;
+}
 
-    - name: Show report path
-      run_once: true
-      delegate_to: localhost
-      debug:
-        msg: "HTML report generated at {{ report_file }}"
+.progress-bar{
+    background:#2E7D32;
+    height:100%;
+    color:white;
+    text-align:center;
+    line-height:28px;
+    font-weight:bold;
+}
+
+/* Table */
+
+.table-card{
+    background:white;
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:0 3px 12px rgba(0,0,0,.1);
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+thead{
+    background:#1565C0;
+    color:white;
+}
+
+th{
+    padding:15px;
+    text-align:left;
+}
+
+td{
+    padding:14px;
+    border-bottom:1px solid #eee;
+}
+
+tbody tr:nth-child(even){
+    background:#fafafa;
+}
+
+tbody tr:hover{
+    background:#eef7ff;
+}
+
+.badge{
+    color:white;
+    border-radius:30px;
+    padding:6px 14px;
+    font-size:13px;
+    font-weight:bold;
+}
+
+.success-badge{
+    background:#2E7D32;
+}
+
+.failed-badge{
+    background:#C62828;
+}
+
+.warning-badge{
+    background:#EF6C00;
+}
+
+.yes{
+    color:#d32f2f;
+    font-weight:bold;
+}
+
+.no{
+    color:#2E7D32;
+    font-weight:bold;
+}
+
+.kernel-updated{
+    color:#2E7D32;
+    font-weight:bold;
+}
+
+/* Details */
+
+.details{
+    background:white;
+    margin-top:25px;
+    border-radius:10px;
+    box-shadow:0 2px 8px rgba(0,0,0,.1);
+    padding:25px;
+}
+
+.details table{
+    width:100%;
+}
+
+.details td{
+    border:none;
+    padding:8px;
+}
+
+/* Footer */
+
+.footer{
+    text-align:center;
+    margin-top:30px;
+    color:#666;
+    font-size:14px;
+}
+</style>
+
+</head>
+
+<body>
+
+{% set total = patch_results_summary | length %}
+{% set success = patch_results_summary | selectattr('status','equalto','SUCCESS') | list | length %}
+{% set failed = total - success %}
+{% set reboot = patch_results_summary | selectattr('reboot','equalto','Yes') | list | length %}
+{% set percent = ((success * 100) / total) | round(0) if total > 0 else 0 %}
+
+<div class="container">
+
+<div class="header">
+
+<h1>🚀 Linux Patch Report</h1>
+
+<p>Enterprise Linux Automated Patching Report</p>
+
+<div class="header-grid">
+
+<div class="info-box">
+<h4>Generated By</h4>
+Jenkins Pipeline + Ansible
+</div>
+
+<div class="info-box">
+<h4>Generated On</h4>
+{{ lookup('pipe','date') }}
+</div>
+
+<div class="info-box">
+<h4>Target Hosts</h4>
+{{ total }}
+</div>
+
+<div class="info-box">
+<h4>Playbook</h4>
+patch.yml
+</div>
+
+</div>
+
+</div>
+
+<div class="summary">
+
+<div class="card total">
+<p>Total Hosts</p>
+<h2>{{ total }}</h2>
+</div>
+
+<div class="card success">
+<p>Successful</p>
+<h2>{{ success }}</h2>
+</div>
+
+<div class="card failed">
+<p>Failed</p>
+<h2>{{ failed }}</h2>
+</div>
+
+<div class="card reboot">
+<p>Reboot Required</p>
+<h2>{{ reboot }}</h2>
+</div>
+
+</div>
+
+<div class="progress-section">
+
+<h3>Patch Success Rate</h3>
+
+<div class="progress">
+<div class="progress-bar" style="width:{{ percent }}%;">
+{{ percent }}%
+</div>
+</div>
+
+</div>
+
+<div class="table-card">
+
+<table>
+
+<thead>
+<tr>
+<th>Host</th>
+<th>Operating System</th>
+<th>Old Kernel</th>
+<th>New Kernel</th>
+<th>Updated</th>
+<th>Reboot</th>
+<th>Status</th>
+</tr>
+</thead>
+
+<tbody>
+
+{% for host in patch_results_summary %}
+
+<tr>
+
+<td><strong>{{ host.host }}</strong></td>
+
+<td>{{ host.os }}</td>
+
+<td>{{ host.old_kernel }}</td>
+
+<td>
+{% if host.old_kernel != host.new_kernel %}
+<span class="kernel-updated">{{ host.new_kernel }}</span>
+{% else %}
+{{ host.new_kernel }}
+{% endif %}
+</td>
+
+<td>
+{% if host.updated == "Yes" %}
+<span class="yes">✔ Yes</span>
+{% else %}
+<span class="no">✘ No</span>
+{% endif %}
+</td>
+
+<td>
+{% if host.reboot == "Yes" %}
+<span class="yes">✔ Yes</span>
+{% else %}
+<span class="no">✘ No</span>
+{% endif %}
+</td>
+
+<td>
+{% if host.status == "SUCCESS" %}
+<span class="badge success-badge">SUCCESS</span>
+{% else %}
+<span class="badge failed-badge">{{ host.status }}</span>
+{% endif %}
+</td>
+
+</tr>
+
+{% endfor %}
+
+</tbody>
+
+</table>
+
+</div>
+
+<div class="details">
+
+<h2 style="margin-bottom:15px;">Execution Summary</h2>
+
+<table>
+
+<tr>
+<td><strong>Total Hosts</strong></td>
+<td>{{ total }}</td>
+</tr>
+
+<tr>
+<td><strong>Successful Hosts</strong></td>
+<td>{{ success }}</td>
+</tr>
+
+<tr>
+<td><strong>Failed Hosts</strong></td>
+<td>{{ failed }}</td>
+</tr>
+
+<tr>
+<td><strong>Reboot Required</strong></td>
+<td>{{ reboot }}</td>
+</tr>
+
+<tr>
+<td><strong>Success Rate</strong></td>
+<td>{{ percent }}%</td>
+</tr>
+
+<tr>
+<td><strong>Report Generated</strong></td>
+<td>{{ lookup('pipe','date') }}</td>
+</tr>
+
+</table>
+
+</div>
+
+<div class="footer">
+
+<hr style="margin:25px 0;">
+
+<b>Linux Patch Automation Report</b><br>
+
+Generated by <strong>Jenkins Pipeline</strong> &amp; <strong>Ansible Automation</strong>
+
+</div>
+
+</div>
+
+</body>
+</html>
