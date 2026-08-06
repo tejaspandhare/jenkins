@@ -1,4 +1,8 @@
 ---
+# ==========================================================
+# POSTCHECK ROLE - Full Corrected Version
+# ==========================================================
+
 # ------------------------------
 # 1. Get running kernel
 # ------------------------------
@@ -17,35 +21,20 @@
   when: ansible_os_family == "Debian"
 
 # ------------------------------
-# 3. Validate kernel state
-# ------------------------------
-- name: Validate kernel state
-  ansible.builtin.set_fact:
-    # ✅ Fix: Evaluates to true if running kernel does not match the newly expected package version
-    is_kernel_changed: "{{ running_kernel_after.stdout != patch_result.new_kernel }}"
-    # ✅ Fix: Safely reads the updated variable even if it was stored as a string ('Yes'/'No')
-    was_system_updated: "{{ patch_result.updated | default('No') | bool or patch_result.updated | default('No') == 'Yes' or (ubuntu_reboot_flag.stat.exists | default(false)) }}"
-
-# ------------------------------
-# 4. Final status aggregation
+# 3. Final status aggregation
 # ------------------------------
 - name: Finalize patch result dictionary
   ansible.builtin.set_fact:
     patch_result: >-
       {{
         patch_result | combine({
-          'updated': ('Yes' if was_system_updated | bool else 'No'),
-          'reboot': ('Yes' if (was_system_updated | bool and is_kernel_changed | bool) else 'No'),
-          'status': (
-            'SUCCESS'
-            if (not was_system_updated | bool or not is_kernel_changed | bool)
-            else 'SUCCESS'
-          )
+          'reboot': ('Yes' if (patch_result.reboot == 'Yes' or (ubuntu_reboot_flag.stat.exists | default(false)) or running_kernel_after.stdout != patch_result.new_kernel) else 'No'),
+          'status': 'SUCCESS'
         })
       }}
 
 # ------------------------------
-# 5. Show final verified result
+# 4. Show final verified result
 # ------------------------------
 - name: Show final verified result
   ansible.builtin.debug:
