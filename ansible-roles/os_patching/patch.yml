@@ -1,6 +1,7 @@
 ---
 - name: Enterprise Linux Patching and Reporting
-  hosts: "{{ hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
+  # ✅ Fix: Changed variable from 'hosts' to 'target_hosts' to avoid Ansible reserved keyword warnings
+  hosts: "{{ target_hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
   gather_facts: true
 
   vars:
@@ -31,25 +32,26 @@
       delegate_to: localhost
       block:
 
-        - name: Reset temp directory
-          file:
-            path: /tmp/ansible_tmp
+        # ✅ Fix: Target /tmp/ansible_tmp/run subdirectory. Deleting /tmp/ansible_tmp fails because it is a Kubernetes mount point.
+        - name: Reset temp directory subfolder
+          ansible.builtin.file:
+            path: /tmp/ansible_tmp/run
             state: absent
 
-        - name: Create temp directory
-          file:
-            path: /tmp/ansible_tmp
+        - name: Create temp directory subfolder
+          ansible.builtin.file:
+            path: /tmp/ansible_tmp/run
             state: directory
             mode: '0777'
 
         - name: Ensure reports directory exists
-          file:
+          ansible.builtin.file:
             path: "{{ report_dir }}"
             state: directory
             mode: '0755'
 
         - name: Build patch results summary
-          set_fact:
+          ansible.builtin.set_fact:
             patch_results_summary: >-
               {{ groups['all']
                  | map('extract', hostvars, 'patch_result')
@@ -57,25 +59,26 @@
                  | list }}
 
         - name: Print clean patch summary
-          debug:
+          ansible.builtin.debug:
             msg: |
               ================= PATCH SUMMARY =================
 
               {% for h in patch_results_summary %}
               Host    : {{ h.host }}
               OS      : {{ h.os }}
-              Kernel  : {{ h.old_kernel }} → {{ h.new_kernel }}
-              Updated : {{ h.updated }}
-              Reboot  : {{ h.reboot }}
-              Status  : {{ h.status }}
+              Kernel  : {{ h.old_kernel | default('N/A') }} → {{ h.new_kernel | default('N/A') }}
+              Updated : {{ h.updated | default('No') }}
+              Reboot  : {{ h.reboot | default('No') }}
+              Status  : {{ h.status | default('UNKNOWN') }}
               -------------------------------------------------
               {% endfor %}
 
         - name: Create HTML report
-          template:
+          ansible.builtin.template:
             src: "{{ playbook_dir }}/templates/report.j2"
             dest: "{{ report_file }}"
+            mode: '0644'
 
         - name: Show report path
-          debug:
+          ansible.builtin.debug:
             msg: "Report generated at {{ report_file }}"
