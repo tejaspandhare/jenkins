@@ -28,7 +28,7 @@
     patch_result: >-
       {{
         patch_result | combine({
-          'reboot': ('Yes' if (patch_result.reboot == 'Yes' or (ubuntu_reboot_flag.stat.exists | default(false)) or running_kernel_after.stdout != patch_result.new_kernel) else 'No'),
+          'reboot': ('Yes' if (patch_result.reboot == 'Yes' or (ubuntu_reboot_flag.stat.exists | default(false)) or (running_kernel_after.stdout | trim != patch_result.new_kernel | trim)) else 'No'),
           'status': 'SUCCESS'
         })
       }}
@@ -43,7 +43,7 @@
       OS          : {{ patch_result.os }}
       Old Kernel  : {{ patch_result.old_kernel }}
       New Kernel  : {{ patch_result.new_kernel }}
-      Running     : {{ running_kernel_after.stdout }}
+      Running     : {{ running_kernel_after.stdout | trim }}
       Updated     : {{ patch_result.updated }}
       Reboot      : {{ patch_result.reboot }}
       Status      : {{ patch_result.status }}
