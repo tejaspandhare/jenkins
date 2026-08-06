@@ -15,8 +15,8 @@
     patch_result:
       host: "{{ inventory_hostname }}"
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
-      old_kernel: "{{ ansible_kernel }}"
-      new_kernel: "{{ ansible_kernel }}"
+      old_kernel: "{{ ansible_kernel | trim }}"
+      new_kernel: "{{ ansible_kernel | trim }}"
       updated: "No"
       reboot: "No"
       status: "IN_PROGRESS"
@@ -87,7 +87,7 @@
       {{
         kernel_cmd.stdout | trim
         if (kernel_cmd.stdout | trim | length > 0)
-        else ansible_kernel
+        else (ansible_kernel | trim)
       }}
 
 # ------------------------------
@@ -111,8 +111,8 @@
       {{
         patch_result | combine({
           'new_kernel': latest_kernel,
-          'updated': ('Yes' if (any_package_updated | bool or ansible_kernel != latest_kernel) else 'No'),
-          'reboot': ('Yes' if (ansible_kernel != latest_kernel) else 'No'),
+          'updated': ('Yes' if (any_package_updated | bool) else 'No'),
+          'reboot': ('Yes' if (ansible_kernel | trim != latest_kernel | trim) else 'No'),
           'status': 'PATCHED'
         })
       }}
