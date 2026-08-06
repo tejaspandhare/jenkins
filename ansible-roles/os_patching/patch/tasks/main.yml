@@ -1,6 +1,6 @@
 ---
 # ==========================================================
-# PATCH ROLE
+# PATCH ROLE - Full Corrected Version
 # Supports:
 #   - Ubuntu / Debian
 #   - RHEL / Rocky / Alma / Oracle Linux
@@ -17,8 +17,8 @@
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
       old_kernel: "{{ ansible_kernel }}"
       new_kernel: "{{ ansible_kernel }}"
-      updated: false
-      reboot: false
+      updated: "No"
+      reboot: "No"
       status: "IN_PROGRESS"
 
 # ------------------------------
@@ -39,7 +39,7 @@
     update_cache: true
     upgrade: dist
     autoremove: false
-  register: patch_cmd
+  register: patch_cmd_debian
   when: ansible_os_family == "Debian"
 
 # ------------------------------
@@ -50,7 +50,7 @@
     name: "*"
     state: latest
     update_cache: true
-  register: patch_cmd
+  register: patch_cmd_redhat
   when: ansible_os_family == "RedHat"
 
 # ------------------------------
@@ -60,7 +60,7 @@
   community.general.zypper:
     name: "*"
     state: latest
-  register: patch_cmd
+  register: patch_cmd_suse
   when: ansible_os_family == "Suse"
 
 # ------------------------------
@@ -91,11 +91,16 @@
       }}
 
 # ------------------------------
-# 7. Determine reboot requirement
+# 7. Determine system package changed state
 # ------------------------------
-- name: Determine reboot requirement
+- name: Determine if any updates were applied
   ansible.builtin.set_fact:
-    reboot_required: "{{ latest_kernel != ansible_kernel }}"
+    any_package_updated: >-
+      {{
+        (patch_cmd_debian.changed | default(false)) or
+        (patch_cmd_redhat.changed | default(false)) or
+        (patch_cmd_suse.changed | default(false))
+      }}
 
 # ------------------------------
 # 8. Update patch result
@@ -106,8 +111,8 @@
       {{
         patch_result | combine({
           'new_kernel': latest_kernel,
-          'updated': (patch_cmd.changed | default(false)),
-          'reboot': reboot_required,
+          'updated': ('Yes' if (any_package_updated | bool or ansible_kernel != latest_kernel) else 'No'),
+          'reboot': ('Yes' if (ansible_kernel != latest_kernel) else 'No'),
           'status': 'PATCHED'
         })
       }}
