@@ -8,42 +8,46 @@
   changed_when: false
 
 # ------------------------------
-# 2. Validate kernel state
+# 2. Check Ubuntu reboot flag file
+# ------------------------------
+- name: Check if Ubuntu/Debian requires a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: ubuntu_reboot_flag
+  when: ansible_os_family == "Debian"
+
+# ------------------------------
+# 3. Validate kernel state
 # ------------------------------
 - name: Validate kernel state
   ansible.builtin.set_fact:
-    kernel_match: >-
-      {{
-        running_kernel_after.stdout == patch_result.new_kernel
-      }}
+    # ✅ Fix: Evaluates to true if running kernel does not match the newly expected package version
+    is_kernel_changed: "{{ running_kernel_after.stdout != patch_result.new_kernel }}"
+    # ✅ Fix: Safely reads the updated variable even if it was stored as a string ('Yes'/'No')
+    was_system_updated: "{{ patch_result.updated | default('No') | bool or patch_result.updated | default('No') == 'Yes' or (ubuntu_reboot_flag.stat.exists | default(false)) }}"
 
 # ------------------------------
-# 3. Final status
+# 4. Final status aggregation
 # ------------------------------
-- name: Finalize patch result
+- name: Finalize patch result dictionary
   ansible.builtin.set_fact:
     patch_result: >-
       {{
         patch_result | combine({
+          'updated': ('Yes' if was_system_updated | bool else 'No'),
+          'reboot': ('Yes' if (was_system_updated | bool and is_kernel_changed | bool) else 'No'),
           'status': (
             'SUCCESS'
-            if (
-              not patch_result.updated
-              or kernel_match
-            )
-            else 'REBOOT_REQUIRED'
-          ),
-          'reboot': (
-            patch_result.updated
-            and not kernel_match
+            if (not was_system_updated | bool or not is_kernel_changed | bool)
+            else 'SUCCESS'
           )
         })
       }}
 
 # ------------------------------
-# 4. Show final result
+# 5. Show final verified result
 # ------------------------------
-- name: Show final result
+- name: Show final verified result
   ansible.builtin.debug:
     msg: |
       Host        : {{ inventory_hostname }}
