@@ -33,7 +33,7 @@
         | regex_replace('G', '')
         | int
       }}
-  when: root_usage.rc == 0
+  when: root_usage.rc == 0 and (root_usage.stdout_lines | length) > 1
 
 - name: Parse boot free space
   ansible.builtin.set_fact:
@@ -43,17 +43,19 @@
         | regex_replace('G', '')
         | int
       }}
-  when: boot_usage.rc == 0
+  when: boot_usage.rc == 0 and (boot_usage.stdout_lines | length) > 1
 
 - name: Validate root free space
   ansible.builtin.fail:
-    msg: "Root filesystem has only {{ root_free_gb }}GB free"
-  when: root_free_gb < 5
+    msg: "Root filesystem has only {{ root_free_gb | default('unknown') }}GB free"
+  # ✅ Fix: Protect against undefined errors by using the default filter
+  when: (root_free_gb | default(0) | int) < 5
 
 - name: Validate boot free space
   ansible.builtin.fail:
-    msg: "/boot filesystem has only {{ boot_free_gb }}GB free"
-  when: boot_free_gb < 1
+    msg: "/boot filesystem has only {{ boot_free_gb | default('unknown') }}GB free"
+  # ✅ Fix: Protect against undefined errors by using the default filter
+  when: (boot_free_gb | default(0) | int) < 1
 
 # ------------------------------
 # 3. Fix package issues
@@ -157,8 +159,8 @@
 
       OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
       Running Kernel : {{ running_kernel }}
-      Root Free      : {{ root_free_gb }}GB
-      Boot Free      : {{ boot_free_gb }}GB
+      Root Free      : {{ root_free_gb | default('unknown') }}GB
+      Boot Free      : {{ boot_free_gb | default('unknown') }}GB
 
       Installed Kernels:
       {{ installed_kernels.stdout | default('Not detected') }}
