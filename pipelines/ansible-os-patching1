@@ -7,7 +7,7 @@ kind: Pod
 spec:
   containers:
   - name: ansible-runner
-    image: cytopia/ansible:latest # Contains ansible-playbook and Python
+    image: cytopia/ansible:latest
     command: ['cat']
     tty: true
     volumeMounts:
@@ -32,7 +32,9 @@ spec:
 
     environment {
         ANSIBLE_FORCE_COLOR = 'true'
-        ANSIBLE_STDOUT_CALLBACK = 'yaml'
+        // ✅ Fixed callback plugin configurations for modern Ansible versions
+        ANSIBLE_STDOUT_CALLBACK = 'default'
+        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
     }
@@ -63,7 +65,7 @@ spec:
                                     -i inventory/hosts \
                                     ansible-roles/os_patching/patch.yml \
                                     --private-key="$ANSIBLE_KEY_FILE" \
-                                    -e "hosts=${params.SERVER_NAME}" \
+                                    -e "target_hosts=${params.SERVER_NAME}" \
                                     -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
                             """
                         }
@@ -80,7 +82,6 @@ spec:
                         sh 'ls -l ansible-roles/os_patching/reports || true'
                     }
                 }
-                // Archiving runs outside the specific container block, in the agent workspace
                 archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
             }
         }
