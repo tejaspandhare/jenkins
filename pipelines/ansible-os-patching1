@@ -1,4 +1,5 @@
 pipeline {
+    // 1. ✅ FIX: Changed 'agent any' to use a dynamic Kubernetes Pod Template configuration
     agent {
         kubernetes {
             yaml '''
@@ -11,7 +12,6 @@ spec:
     command:
     - sh
     - -c
-    # ✅ Fix: Install OpenSSH client and keep container alive
     - |
       if [ -f /usr/bin/apt-get ]; then
         apt-get update && apt-get install -y openssh-client
@@ -42,11 +42,11 @@ spec:
 
     environment {
         ANSIBLE_FORCE_COLOR = 'true'
+        // 2. ✅ FIX: Changed removed callback plugin to modern core settings (Groovy '//' comments used)
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
-        # ✅ Recommended: Disable SSH Host Key Checking inside ephemeral runners
         ANSIBLE_HOST_KEY_CHECKING = 'false'
     }
 
@@ -63,6 +63,7 @@ spec:
 
         stage('Run Ansible Patching') {
             steps {
+                // 3. ✅ FIX: Wrapped sh block in container wrapper so it runs inside the pod container
                 container('ansible-runner') {
                     withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                         script {
@@ -75,7 +76,7 @@ spec:
                                 ansible-playbook \
                                     -i inventory/hosts \
                                     ansible-roles/os_patching/patch.yml \
-                                    --private-key="$ANSIBLE_KEY_FILE" \
+                                    --private-key="\$ANSIBLE_KEY_FILE" \
                                     -e "target_hosts=${params.SERVER_NAME}" \
                                     -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
                             """
