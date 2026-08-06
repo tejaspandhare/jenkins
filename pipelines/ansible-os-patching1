@@ -22,11 +22,14 @@ pipeline {
 
     environment {
         ANSIBLE_FORCE_COLOR = 'true'
-        // ✅ FIX 1: Replaced the removed 'yaml' callback plugin with the modern engine configuration
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+        ANSIBLE_HOST_KEY_CHECKING = 'false'
+        
+        // ✅ FIX: Redirect SSH control multiplex sockets to local agent storage to prevent NFS Stale File Handle crashes
+        ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
     stages {
@@ -51,6 +54,9 @@ pipeline {
                             echo "========== PATCH EXECUTION =========="
                             echo "Running patching on: ${params.SERVER_NAME}"
                             echo "Excluding packages: ${params.EXCLUDE_PKGS}"
+                            
+                            # ✅ Ensure the local control path directory exists on the agent machine
+                            mkdir -p /tmp/ansible_cp
 
                             ansible-playbook \
                                 -i inventory/hosts \
