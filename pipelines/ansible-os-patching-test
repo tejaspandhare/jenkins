@@ -4,7 +4,6 @@ pipeline {
     options {
         timestamps()
         ansiColor('xterm')
-        skipDefaultCheckout(false)
     }
 
     parameters {
@@ -33,11 +32,6 @@ pipeline {
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
         ANSIBLE_HOST_KEY_CHECKING = 'false'
-
-        /*
-         * Keep SSH multiplex/control sockets on local Jenkins storage.
-         * This avoids NFS stale-file-handle problems.
-         */
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
@@ -73,12 +67,12 @@ pipeline {
 
                     chmod 700 /tmp/ansible_cp
 
+                    test -f inventory/hosts
+                    test -f ansible-roles/linux/os_update.yml
+
                     echo "Workspace : $(pwd)"
                     echo "Inventory : inventory/hosts"
                     echo "Playbook  : ansible-roles/linux/os_update.yml"
-
-                    test -f inventory/hosts
-                    test -f ansible-roles/linux/os_update.yml
 
                     echo "Environment ready."
                 '''
@@ -93,49 +87,59 @@ pipeline {
                         variable: 'ANSIBLE_KEY_FILE'
                     )
                 ]) {
-                    sh '''
-                        set -eu
 
-                        echo ""
-                        echo "============================================"
-                        echo "ANSIBLE PATCH EXECUTION"
-                        echo "============================================"
-                        echo "Servers      : ${SERVER_NAME}"
-                        echo "Exclude pkgs : ${EXCLUDE_PKGS:-NONE}"
-                        echo "============================================"
+                    /*
+                     * Copy Jenkins parameters into environment variables.
+                     *
+                     * Using withEnv here avoids Groovy injecting parameter
+                     * values directly into the shell script.
+                     */
+                    withEnv([
+                        "PATCH_TARGETS=${params.SERVER_NAME}",
+                        "PATCH_EXCLUDE_PKGS=${params.EXCLUDE_PKGS ?: ''}"
+                    ]) {
 
-                        mkdir -p reports
+                        sh '''
+                            set -eu
 
-                        /*
-                         * Do not use Groovy interpolation for the credential.
-                         * Jenkins will mask the credential path/value appropriately.
-                         */
+                            echo ""
+                            echo "============================================"
+                            echo "ANSIBLE PATCH EXECUTION"
+                            echo "============================================"
+                            echo "Servers      : ${PATCH_TARGETS}"
+                            
+                            if [ -n "${PATCH_EXCLUDE_PKGS}" ]; then
+                                echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
+                            else
+                                echo "Exclude pkgs : NONE"
+                            fi
 
-                        if [ -n "${EXCLUDE_PKGS:-}" ]; then
+                            echo "============================================"
+
+                            mkdir -p reports
+
+                            /*
+                             * IMPORTANT:
+                             *
+                             * Quote every variable.
+                             * Do not use ${EXCLUDE_PKGS} unquoted because
+                             * values such as kernel* can be expanded by
+                             * the shell.
+                             */
 
                             ansible-playbook \
                                 -i inventory/hosts \
                                 ansible-roles/linux/os_update.yml \
                                 --private-key="$ANSIBLE_KEY_FILE" \
-                                -e "target_hosts=${SERVER_NAME}" \
-                                -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}"
+                                -e "target_hosts=$PATCH_TARGETS" \
+                                -e "EXCLUDE_PKGS=$PATCH_EXCLUDE_PKGS"
 
-                        else
-
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/linux/os_update.yml \
-                                --private-key="$ANSIBLE_KEY_FILE" \
-                                -e "target_hosts=${SERVER_NAME}" \
-                                -e "EXCLUDE_PKGS="
-
-                        fi
-
-                        echo ""
-                        echo "============================================"
-                        echo "ANSIBLE PATCH EXECUTION COMPLETED"
-                        echo "============================================"
-                    '''
+                            echo ""
+                            echo "============================================"
+                            echo "ANSIBLE PATCH EXECUTION COMPLETED"
+                            echo "============================================"
+                        '''
+                    }
                 }
             }
         }
@@ -150,35 +154,37 @@ pipeline {
                     echo "REPORT CHECK"
                     echo "============================================"
 
-                    if [ -d reports ]; then
-
-                        echo "Reports directory:"
-                        ls -lah reports
-
-                        echo ""
-                        echo "HTML reports:"
-
-                        find reports \
-                            -type f \
-                            -name '*.html' \
-                            -print
-
-                        echo ""
-                        echo "Report count:"
-
-                        find reports \
-                            -type f \
-                            -name '*.html' \
-                            | wc -l
-
-                    else
-
+                    if [ ! -d reports ]; then
                         echo "ERROR: reports directory does not exist."
                         exit 1
+                    fi
 
+                    echo "Reports directory:"
+                    ls -lah reports
+
+                    echo ""
+                    echo "HTML reports:"
+
+                    find reports \
+                        -type f \
+                        -name '*.html' \
+                        -print
+
+                    REPORT_COUNT=$(find reports \
+                        -type f \
+                        -name '*.html' \
+                        | wc -l)
+
+                    echo ""
+                    echo "Report count: ${REPORT_COUNT}"
+
+                    if [ "${REPORT_COUNT}" -eq 0 ]; then
+                        echo "ERROR: No HTML report was generated."
+                        exit 1
                     fi
 
                     echo ""
+                    echo "Report check successful."
                     echo "============================================"
                 '''
             }
@@ -186,13 +192,6 @@ pipeline {
 
         stage('Archive Report') {
             steps {
-                /*
-                 * No findFiles() here.
-                 *
-                 * archiveArtifacts is built into Jenkins and does not
-                 * require Pipeline Utility Steps.
-                 */
-
                 archiveArtifacts(
                     artifacts: 'reports/*.html',
                     fingerprint: true,
