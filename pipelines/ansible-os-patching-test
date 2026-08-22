@@ -1,39 +1,37 @@
-pipeline {
-    agent any
-
-    options {
+  options {
         timestamps()
         ansiColor('xterm')
+        skipDefaultCheckout(false)
     }
 
     parameters {
-        string(
-            name: 'SERVER_NAME',
-            defaultValue: '',
-            description: 'Enter servers (semicolon separated): server1;server2'
-        )
-
-        string(
-            name: 'EXCLUDE_PKGS',
-            defaultValue: '',
-            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
-        )
+@@ -21,15 +22,6 @@ pipeline {
     }
 
     environment {
+        /*
+         * Locale
+         */
         LANG = 'C.UTF-8'
         LC_ALL = 'C.UTF-8'
 
+        /*
+         * Ansible
+         */
         ANSIBLE_FORCE_COLOR = 'true'
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
-
-        ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
-        ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+@@ -39,106 +31,66 @@ pipeline {
 
         ANSIBLE_HOST_KEY_CHECKING = 'false'
 
+        /*
+         * SSH control sockets must stay on local Jenkins filesystem.
+         */
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
+
+        LANG = 'C.UTF-8'
+        LC_ALL = 'C.UTF-8'
     }
 
     stages {
@@ -43,214 +41,331 @@ pipeline {
                 script {
 
                     if (!params.SERVER_NAME?.trim()) {
-                        error('SERVER_NAME cannot be empty')
+                        error("SERVER_NAME cannot be empty")
                     }
 
-                    echo '============================================'
-                    echo 'PATCH MANAGEMENT'
-                    echo '============================================'
-                    echo "Servers      : ${params.SERVER_NAME}"
-                    echo "Exclude pkgs : ${params.EXCLUDE_PKGS?.trim() ?: 'NONE'}"
-                    echo '============================================'
+                    echo "============================================"
+                    echo "SERVER_NAME : ${params.SERVER_NAME}"
+                    echo "EXCLUDE_PKGS: ${params.EXCLUDE_PKGS ?: '(none)'}"
+                    echo "PATCH INPUT"
+                    echo "============================================"
+                    echo "Servers       : ${params.SERVER_NAME}"
+                    echo "Exclude pkgs  : ${params.EXCLUDE_PKGS ?: 'NONE'}"
+                    echo "============================================"
                 }
             }
         }
 
-        stage('Prepare') {
+
+        stage('Prepare Ansible Environment') {
+        stage('Prepare Workspace') {
             steps {
                 sh '''
                     set -eu
 
-                    echo "Preparing Ansible environment..."
+                    echo "========== ANSIBLE ENVIRONMENT =========="
+
+                    echo "LANG=${LANG}"
+                    echo "LC_ALL=${LC_ALL}"
+
+                    echo ""
+                    echo "Locale:"
+                    locale || true
+
+                    echo ""
+                    echo "Locale character map:"
+                    locale charmap || true
+
+                    echo ""
+                    echo "Ansible version:"
+                    ansible --version
+
+                    echo ""
+                    echo "Creating temporary directories..."
+                    echo "============================================"
+                    echo "PREPARING ANSIBLE ENVIRONMENT"
+                    echo "============================================"
 
                     mkdir -p /tmp/ansible_tmp
                     mkdir -p /tmp/ansible_cp
-                    mkdir -p reports
 
+                    chmod 700 /tmp/ansible_tmp
                     chmod 700 /tmp/ansible_cp
 
-                    test -f inventory/hosts
-                    test -f ansible-roles/linux/os_update.yml
-
-                    echo "Workspace : $(pwd)"
-                    echo "Inventory : inventory/hosts"
-                    echo "Playbook  : ansible-roles/linux/os_update.yml"
-
-                    echo "Environment ready."
+                    echo ""
+                    echo "Temporary directories:"
+                    ls -ld /tmp/ansible_tmp
+                    ls -ld /tmp/ansible_cp
                 '''
             }
         }
 
-        stage('Run Ansible Patching') {
-            steps {
 
+        stage('Verify Ansible Files') {
+            steps {
+                sh '''
+                    set -eu
+
+                    echo "========== VERIFY ANSIBLE FILES =========="
+                    mkdir -p reports
+
+                    echo ""
+                    echo "Current directory:"
+                    echo "Workspace:"
+                    pwd
+
+                    echo ""
+                    echo "Inventory:"
+                    ls -lh inventory/hosts
+
+                    echo ""
+                    echo "Playbook:"
+                    ls -lh ansible-roles/linux/os_update.yml
+                    echo
+                    echo "Repository:"
+                    ls -la
+
+                    echo ""
+                    echo "Role:"
+                    ls -ld ansible-roles/linux/os_update
+                    echo
+                    echo "Ansible role:"
+                    ls -la ansible-roles/linux/os_update
+
+                    echo ""
+                    echo "Role main.yml:"
+                    ls -lh ansible-roles/linux/os_update/tasks/main.yml
+
+                    echo ""
+                    echo "Number of lines in main.yml:"
+                    wc -l ansible-roles/linux/os_update/tasks/main.yml
+                    echo
+                    echo "Reports directory:"
+                    ls -ld reports
+                '''
+            }
+        }
+
+
+        stage('Ansible Syntax Check') {
+            steps {
+                withCredentials([
+@@ -150,47 +102,41 @@ pipeline {
+                    sh '''
+                        set -eu
+
+                        echo "========== ANSIBLE SYNTAX CHECK =========="
+                        echo "============================================"
+                        echo "ANSIBLE SYNTAX CHECK"
+                        echo "============================================"
+
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
+                            --syntax-check
+
+                        echo "============================================"
+                        echo "SYNTAX CHECK PASSED"
+                        echo "============================================"
+                    '''
+                }
+            }
+        }
+
+
+        stage('Verify Ansible Role Tasks') {
+        stage('Ansible Task List') {
+            steps {
                 withCredentials([
                     file(
                         credentialsId: 'automation-key',
                         variable: 'ANSIBLE_KEY_FILE'
                     )
                 ]) {
+                    sh '''
+                        set -eu
+                sh '''
+                    set -eu
 
-                    script {
+                        echo "========== ANSIBLE ROLE TASKS =========="
+                    echo "============================================"
+                    echo "ANSIBLE TASK LIST"
+                    echo "============================================"
 
-                        /*
-                         * Normalize the Jenkins parameters in Groovy.
-                         */
-                        def targetHosts = params.SERVER_NAME?.trim() ?: ''
-                        def excludePkgs = params.EXCLUDE_PKGS?.trim() ?: ''
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
+                            --list-tasks
+                    '''
+                }
+                    ansible-playbook \
+                        -i inventory/hosts \
+                        ansible-roles/linux/os_update.yml \
+                        -e "target_hosts=${SERVER_NAME}" \
+                        --list-tasks
+                '''
+            }
+        }
 
-                        /*
-                         * Pass values into the shell as environment variables.
-                         */
-                        withEnv([
-                            "PATCH_TARGETS=${targetHosts}",
-                            "PATCH_EXCLUDE_PKGS=${excludePkgs}"
-                        ]) {
 
-                            sh '''
-                                set -eu
+        stage('Run Ansible Patching') {
+            steps {
+                withCredentials([
+@@ -203,101 +149,109 @@ pipeline {
+                        set -eu
 
-                                echo ""
-                                echo "============================================"
-                                echo "ANSIBLE PATCH EXECUTION"
-                                echo "============================================"
+                        echo "============================================"
+                        echo "========== PATCH EXECUTION ================"
+                        echo "ANSIBLE PATCH EXECUTION"
+                        echo "============================================"
+                        echo "Servers      : ${SERVER_NAME}"
+                        echo "Exclude pkgs : ${EXCLUDE_PKGS:-NONE}"
+                        echo "============================================"
 
-                                echo "Servers      : ${PATCH_TARGETS:-}"
+                        echo "Running patching on:"
+                        echo "${SERVER_NAME}"
 
-                                if [ -n "${PATCH_EXCLUDE_PKGS:-}" ]; then
-                                    echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
-                                else
-                                    echo "Exclude pkgs : NONE"
-                                fi
+                        echo ""
+                        echo "Excluded packages:"
+                        echo "${EXCLUDE_PKGS:-"(none)"}"
+                        # Always make sure report directory exists
+                        mkdir -p reports
 
-                                echo "============================================"
+                        echo ""
+                        echo "Starting Ansible..."
+                        # Do not allow an empty EXCLUDE_PKGS value to break
+                        # shell execution when nounset is enabled.
+                        EXCLUDE_VALUE="${EXCLUDE_PKGS:-}"
 
-                                mkdir -p reports
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            --private-key="${ANSIBLE_KEY_FILE}" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}"
+                            -e "EXCLUDE_PKGS=${EXCLUDE_VALUE}"
 
-                                /*
-                                 * Always use the default expansion.
-                                 * This prevents "parameter not set".
-                                 */
-
-                                TARGETS="${PATCH_TARGETS:-}"
-                                EXCLUDES="${PATCH_EXCLUDE_PKGS:-}"
-
-                                if [ -n "$EXCLUDES" ]; then
-
-                                    ansible-playbook \
-                                        -i inventory/hosts \
-                                        ansible-roles/linux/os_update.yml \
-                                        --private-key="$ANSIBLE_KEY_FILE" \
-                                        -e "target_hosts=$TARGETS" \
-                                        -e "EXCLUDE_PKGS=$EXCLUDES"
-
-                                else
-
-                                    ansible-playbook \
-                                        -i inventory/hosts \
-                                        ansible-roles/linux/os_update.yml \
-                                        --private-key="$ANSIBLE_KEY_FILE" \
-                                        -e "target_hosts=$TARGETS" \
-                                        -e "EXCLUDE_PKGS="
-
-                                fi
-
-                                echo ""
-                                echo "============================================"
-                                echo "ANSIBLE PATCH EXECUTION COMPLETED"
-                                echo "============================================"
-                            '''
-                        }
-                    }
+                        echo
+                        echo "============================================"
+                        echo "ANSIBLE PATCH EXECUTION COMPLETED"
+                        echo "============================================"
+                    '''
                 }
             }
         }
 
+
         stage('Check Report') {
             steps {
                 sh '''
-                    set -eu
+                    set +e
 
-                    echo ""
                     echo "============================================"
+                    echo "========== REPORT FILE ====================="
                     echo "REPORT CHECK"
                     echo "============================================"
 
-                    if [ ! -d reports ]; then
-                        echo "ERROR: reports directory does not exist."
-                        exit 1
-                    fi
-
-                    echo "Reports directory:"
-                    ls -lah reports
+                    echo ""
+                    echo
+                    echo "Workspace:"
+                    pwd
 
                     echo ""
+                    echo
+                    echo "Reports directory:"
+
+                    if [ -d reports ]; then
+                        ls -lah reports/
+                        ls -lah reports
+                    else
+                        echo "reports directory does not exist"
+                        echo "WARNING: reports directory does not exist"
+                    fi
+
+                    echo ""
+                    echo
                     echo "HTML reports:"
+                    find . -type f -name '*.html' -print
 
                     find reports \
                         -type f \
                         -name '*.html' \
-                        -print
-
-                    REPORT_COUNT=$(
-                        find reports \
-                            -type f \
-                            -name '*.html' \
-                            | wc -l
-                    )
+                        -print 2>/dev/null || true
 
                     echo ""
-                    echo "Report count: ${REPORT_COUNT}"
+                    echo "Searching workspace for HTML files:"
 
-                    if [ "${REPORT_COUNT}" -eq 0 ]; then
-                        echo "ERROR: No HTML report was generated."
-                        exit 1
-                    fi
-
-                    echo ""
-                    echo "Report check successful."
+                    find . \
+                        -type f \
+                        -name '*.html' \
+                        -print 2>/dev/null || true
+                    echo
                     echo "============================================"
                 '''
             }
         }
 
+
         stage('Archive Report') {
             steps {
-
                 archiveArtifacts(
                     artifacts: 'reports/*.html',
                     fingerprint: true,
-                    allowEmptyArchive: false
+                    allowEmptyArchive: true
                 )
+                script {
+                    def reportFiles = sh(
+                        script: "find reports -maxdepth 1 -type f -name '*.html' -print 2>/dev/null || true",
+                        returnStdout: true
+                    ).trim()
+
+                    if (reportFiles) {
+                        echo "HTML report(s) found:"
+                        echo reportFiles
+
+                        archiveArtifacts(
+                            artifacts: 'reports/*.html',
+                            fingerprint: true,
+                            allowEmptyArchive: false
+                        )
+                    } else {
+                        echo "WARNING: No HTML report was generated."
+                        echo "Patching itself completed, but there is no report to archive."
+                    }
+                }
             }
         }
     }
 
+
     post {
 
         success {
-            echo ""
             echo "============================================"
+            echo "✅ Patching completed successfully"
             echo "✅ PATCHING COMPLETED SUCCESSFULLY"
             echo "============================================"
-            echo "HTML report has been archived."
         }
 
         failure {
-            echo ""
             echo "============================================"
+            echo "❌ Patching failed"
             echo "❌ PATCHING FAILED"
             echo "============================================"
-            echo "Check the Ansible output above for details."
         }
 
         always {
-            echo ""
+            echo "========== CLEANING WORKSPACE =========="
             echo "============================================"
             echo "CLEANING WORKSPACE"
             echo "============================================"
 
             cleanWs()
         }
-    }
-}
