@@ -5,20 +5,19 @@ pipeline {
     options {
         timestamps()
         ansiColor('xterm')
-        skipDefaultCheckout(false)
         disableConcurrentBuilds()
     }
 
     parameters {
 
         string(
-            name: 'PATCH_SERVERS',
+            name: 'SERVER_NAME',
             defaultValue: 'lb2',
-            description: 'Ansible target hosts. Example: lb2 or lb1;lb2'
+            description: 'Ansible target host(s). Example: lb2 or lb1;lb2'
         )
 
         string(
-            name: 'PATCH_EXCLUDE_PKGS',
+            name: 'EXCLUDE_PKGS',
             defaultValue: '',
             description: 'Optional packages to exclude. Example: kernel*;openssl'
         )
@@ -26,13 +25,13 @@ pipeline {
 
     environment {
 
-        ANSIBLE_PLAYBOOK = 'ansible-roles/linux/os_update.yml'
         ANSIBLE_INVENTORY = 'inventory/hosts'
-
-        ANSIBLE_REMOTE_TMP = '/tmp/ansible_tmp'
-        ANSIBLE_LOCAL_TMP = '/tmp/ansible_cp'
+        ANSIBLE_PLAYBOOK = 'ansible-roles/linux/os_update.yml'
 
         REPORT_DIR = 'reports'
+
+        ANSIBLE_LOCAL_TMP = '/tmp/ansible_cp'
+        ANSIBLE_REMOTE_TMP = '/tmp/ansible_tmp'
     }
 
     stages {
@@ -44,18 +43,19 @@ pipeline {
                     echo '============================================'
                     echo 'PATCH MANAGEMENT'
                     echo '============================================'
-                    echo "Servers      : ${params.PATCH_SERVERS}"
 
-                    if (params.PATCH_EXCLUDE_PKGS?.trim()) {
-                        echo "Exclude pkgs : ${params.PATCH_EXCLUDE_PKGS}"
+                    echo "Servers      : ${params.SERVER_NAME}"
+
+                    if (params.EXCLUDE_PKGS?.trim()) {
+                        echo "Exclude pkgs : ${params.EXCLUDE_PKGS}"
                     } else {
                         echo 'Exclude pkgs : NONE'
                     }
 
                     echo '============================================'
 
-                    if (!params.PATCH_SERVERS?.trim()) {
-                        error('PATCH_SERVERS cannot be empty')
+                    if (!params.SERVER_NAME?.trim()) {
+                        error('SERVER_NAME cannot be empty')
                     }
                 }
             }
@@ -92,63 +92,79 @@ pipeline {
 
             steps {
 
+                /*
+                 * Existing working Jenkins credential.
+                 *
+                 * This is a FILE credential containing
+                 * the SSH private key.
+                 */
                 withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'ansible-ssh-key',
-                        keyFileVariable: 'ANSIBLE_KEY_FILE'
+                    file(
+                        credentialsId: 'automation-key',
+                        variable: 'ANSIBLE_KEY_FILE'
                     )
                 ]) {
 
-                    sh '''
-                        set -eu
+                    script {
 
-                        echo ""
-                        echo "============================================"
-                        echo "ANSIBLE PATCH EXECUTION"
-                        echo "============================================"
-                        echo "Servers      : ${PATCH_SERVERS}"
+                        sh '''
+                            set -eu
 
-                        if [ -n "${PATCH_EXCLUDE_PKGS:-}" ]; then
-                            echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
-                        else
-                            echo "Exclude pkgs : NONE"
-                        fi
+                            echo ""
+                            echo "============================================"
+                            echo "ANSIBLE PATCH EXECUTION"
+                            echo "============================================"
+                            echo "Servers      : ${SERVER_NAME}"
 
-                        echo "============================================"
+                            if [ -n "${EXCLUDE_PKGS:-}" ]; then
+                                echo "Exclude pkgs : ${EXCLUDE_PKGS}"
+                            else
+                                echo "Exclude pkgs : NONE"
+                            fi
 
-                        mkdir -p "${REPORT_DIR}"
+                            echo "============================================"
 
-                        if [ -n "${PATCH_EXCLUDE_PKGS:-}" ]; then
+                            mkdir -p "${REPORT_DIR}"
+                            mkdir -p "${ANSIBLE_LOCAL_TMP}"
 
+                            chmod 700 "${ANSIBLE_LOCAL_TMP}"
+
+                            echo ""
                             echo "Starting Ansible patch..."
+                            echo ""
 
-                            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-                            ansible-playbook \
-                                -i "${ANSIBLE_INVENTORY}" \
-                                "${ANSIBLE_PLAYBOOK}" \
-                                --private-key="${ANSIBLE_KEY_FILE}" \
-                                -e "target_hosts=${PATCH_SERVERS}" \
-                                -e "EXCLUDE_PKGS=${PATCH_EXCLUDE_PKGS}"
+                            if [ -n "${EXCLUDE_PKGS:-}" ]; then
 
-                        else
+                                LANG=C.UTF-8 \
+                                LC_ALL=C.UTF-8 \
+                                ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TMP}" \
+                                ansible-playbook \
+                                    -i "${ANSIBLE_INVENTORY}" \
+                                    "${ANSIBLE_PLAYBOOK}" \
+                                    --private-key="${ANSIBLE_KEY_FILE}" \
+                                    -e "target_hosts=${SERVER_NAME}" \
+                                    -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}"
 
-                            echo "Starting Ansible patch..."
+                            else
 
-                            LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-                            ansible-playbook \
-                                -i "${ANSIBLE_INVENTORY}" \
-                                "${ANSIBLE_PLAYBOOK}" \
-                                --private-key="${ANSIBLE_KEY_FILE}" \
-                                -e "target_hosts=${PATCH_SERVERS}" \
-                                -e "EXCLUDE_PKGS="
+                                LANG=C.UTF-8 \
+                                LC_ALL=C.UTF-8 \
+                                ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TMP}" \
+                                ansible-playbook \
+                                    -i "${ANSIBLE_INVENTORY}" \
+                                    "${ANSIBLE_PLAYBOOK}" \
+                                    --private-key="${ANSIBLE_KEY_FILE}" \
+                                    -e "target_hosts=${SERVER_NAME}" \
+                                    -e "EXCLUDE_PKGS="
 
-                        fi
+                            fi
 
-                        echo ""
-                        echo "============================================"
-                        echo "ANSIBLE PATCH COMPLETED"
-                        echo "============================================"
-                    '''
+                            echo ""
+                            echo "============================================"
+                            echo "ANSIBLE PATCH COMPLETED"
+                            echo "============================================"
+                        '''
+                    }
                 }
             }
         }
@@ -161,15 +177,17 @@ pipeline {
                 sh '''
                     set -eu
 
+                    echo ""
                     echo "============================================"
                     echo "REPORT CHECK"
                     echo "============================================"
 
                     if [ ! -d "${REPORT_DIR}" ]; then
-                        echo "ERROR: reports directory does not exist"
+                        echo "ERROR: Reports directory does not exist."
                         exit 1
                     fi
 
+                    echo ""
                     echo "Reports directory:"
                     ls -lah "${REPORT_DIR}"
 
@@ -181,21 +199,28 @@ pipeline {
                         -name '*.html' \
                         -print
 
-                    REPORT_COUNT=$(find "${REPORT_DIR}" \
-                        -type f \
-                        -name '*.html' \
-                        | wc -l)
+                    REPORT_COUNT=$(
+                        find "${REPORT_DIR}" \
+                            -type f \
+                            -name '*.html' \
+                            | wc -l
+                    )
 
                     echo ""
                     echo "HTML report count: ${REPORT_COUNT}"
 
                     if [ "${REPORT_COUNT}" -eq 0 ]; then
+                        echo ""
                         echo "ERROR: No HTML reports were generated."
+                        echo ""
+                        echo "Searching entire workspace for HTML files:"
+                        find . -type f -name '*.html' -print || true
                         exit 1
                     fi
 
                     echo ""
                     echo "Generated reports:"
+
                     find "${REPORT_DIR}" \
                         -type f \
                         -name '*.html' \
@@ -229,13 +254,13 @@ pipeline {
 
                 publishHTML(
                     target: [
-                        allowMissing: false,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
                         reportDir: 'reports',
                         reportFiles: '*.html',
                         reportName: 'Linux OS Patch Report',
-                        reportTitles: 'Linux OS Patch Report'
+                        reportTitles: 'Linux OS Patch Report',
+                        keepAll: true,
+                        alwaysLinkToLastBuild: true,
+                        allowMissing: false
                     ]
                 )
             }
@@ -247,34 +272,34 @@ pipeline {
 
         success {
 
-            echo ''
-            echo '============================================'
-            echo '✅ PATCHING COMPLETED SUCCESSFULLY'
-            echo '============================================'
-            echo "Servers: ${params.PATCH_SERVERS}"
-            echo 'HTML report archived and published.'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "✅ PATCHING COMPLETED SUCCESSFULLY"
+            echo "============================================"
+            echo "Servers: ${params.SERVER_NAME}"
+            echo "HTML report archived and published."
+            echo "============================================"
         }
 
 
         failure {
 
-            echo ''
-            echo '============================================'
-            echo '❌ PATCHING FAILED'
-            echo '============================================'
-            echo "Servers: ${params.PATCH_SERVERS}"
-            echo 'Check the Ansible output above for details.'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "❌ PATCHING FAILED"
+            echo "============================================"
+            echo "Servers: ${params.SERVER_NAME}"
+            echo "Check the Ansible output above for details."
+            echo "============================================"
         }
 
 
         always {
 
-            echo ''
-            echo '============================================'
-            echo 'CLEANING WORKSPACE'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "CLEANING WORKSPACE"
+            echo "============================================"
 
             cleanWs(
                 deleteDirs: true,
