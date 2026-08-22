@@ -7,19 +7,10 @@
   gather_facts: true
 
   vars:
-
     ansible_remote_tmp: "/tmp/ansible_tmp"
 
-    # Jenkins checks out the Git repository into the workspace.
-    # playbook_dir is:
-    #
-    #   <workspace>/ansible-roles/linux
-    #
-    # Therefore ../../reports is:
-    #
-    #   <workspace>/reports
-    #
-    os_update_report_directory: "{{ playbook_dir }}/../../reports"
+    # Jenkins workspace
+    os_update_report_directory: "{{ lookup('env', 'WORKSPACE') }}/reports"
 
   roles:
     - role: "{{ playbook_dir }}/os_update"
