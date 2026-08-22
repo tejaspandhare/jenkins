@@ -4,37 +4,40 @@ pipeline {
     options {
         timestamps()
         ansiColor('xterm')
-        skipDefaultCheckout(false)
     }
 
     parameters {
         string(
             name: 'SERVER_NAME',
             defaultValue: '',
-            description: 'Enter servers (semicolon separated): server1;server2'
+            trim: true,
+            description: 'Enter servers, semicolon separated. Example: lb1;lb2'
         )
 
         string(
             name: 'EXCLUDE_PKGS',
             defaultValue: '',
-            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
+            trim: true,
+            description: 'Packages to exclude, semicolon separated. Example: kernel*;docker*'
         )
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true'
-        ANSIBLE_STDOUT_CALLBACK = 'default'
-        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
+        LANG = 'C.UTF-8'
+        LC_ALL = 'C.UTF-8'
+
+        ANSIBLE_FORCE_COLOR = 'false'
+        ANSIBLE_NOCOLOR = 'false'
+
+        ANSIBLE_HOST_KEY_CHECKING = 'false'
 
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
-        ANSIBLE_HOST_KEY_CHECKING = 'false'
-
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
 
-        LANG = 'C.UTF-8'
-        LC_ALL = 'C.UTF-8'
+        ANSIBLE_STDOUT_CALLBACK = 'default'
+        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
     }
 
     stages {
@@ -43,33 +46,29 @@ pipeline {
             steps {
                 script {
                     if (!params.SERVER_NAME?.trim()) {
-                        error("SERVER_NAME cannot be empty")
+                        error('SERVER_NAME cannot be empty')
                     }
 
-                    echo "============================================"
-                    echo "PATCH INPUT"
-                    echo "============================================"
-                    echo "Servers       : ${params.SERVER_NAME}"
-                    echo "Exclude pkgs  : ${params.EXCLUDE_PKGS ?: 'NONE'}"
-                    echo "============================================"
+                    echo '============================================'
+                    echo 'PATCH REQUEST'
+                    echo '============================================'
+                    echo "Servers      : ${params.SERVER_NAME}"
+                    echo "Exclude pkgs : ${params.EXCLUDE_PKGS?.trim() ?: 'NONE'}"
+                    echo '============================================'
                 }
             }
         }
 
-        stage('Prepare Workspace') {
+        stage('Prepare') {
             steps {
                 sh '''
                     set -eu
 
-                    echo "============================================"
-                    echo "PREPARING ANSIBLE ENVIRONMENT"
-                    echo "============================================"
+                    export LANG=C.UTF-8
+                    export LC_ALL=C.UTF-8
 
                     mkdir -p /tmp/ansible_tmp
                     mkdir -p /tmp/ansible_cp
-
-                    chmod 700 /tmp/ansible_tmp
-                    chmod 700 /tmp/ansible_cp
 
                     mkdir -p reports
 
@@ -77,16 +76,13 @@ pipeline {
                     pwd
 
                     echo
-                    echo "Repository:"
-                    ls -la
+                    echo "Checking Ansible files..."
 
-                    echo
-                    echo "Ansible role:"
-                    ls -la ansible-roles/linux/os_update
+                    test -f inventory/hosts
+                    test -f ansible-roles/linux/os_update.yml
 
-                    echo
-                    echo "Reports directory:"
-                    ls -ld reports
+                    echo "OK: inventory/hosts"
+                    echo "OK: ansible-roles/linux/os_update.yml"
                 '''
             }
         }
@@ -102,6 +98,9 @@ pipeline {
                     sh '''
                         set -eu
 
+                        export LANG=C.UTF-8
+                        export LC_ALL=C.UTF-8
+
                         echo "============================================"
                         echo "ANSIBLE SYNTAX CHECK"
                         echo "============================================"
@@ -111,29 +110,9 @@ pipeline {
                             ansible-roles/linux/os_update.yml \
                             --syntax-check
 
-                        echo "============================================"
-                        echo "SYNTAX CHECK PASSED"
-                        echo "============================================"
+                        echo "Syntax check: OK"
                     '''
                 }
-            }
-        }
-
-        stage('Ansible Task List') {
-            steps {
-                sh '''
-                    set -eu
-
-                    echo "============================================"
-                    echo "ANSIBLE TASK LIST"
-                    echo "============================================"
-
-                    ansible-playbook \
-                        -i inventory/hosts \
-                        ansible-roles/linux/os_update.yml \
-                        -e "target_hosts=${SERVER_NAME}" \
-                        --list-tasks
-                '''
             }
         }
 
@@ -148,6 +127,9 @@ pipeline {
                     sh '''
                         set -eu
 
+                        export LANG=C.UTF-8
+                        export LC_ALL=C.UTF-8
+
                         echo "============================================"
                         echo "ANSIBLE PATCH EXECUTION"
                         echo "============================================"
@@ -155,23 +137,20 @@ pipeline {
                         echo "Exclude pkgs : ${EXCLUDE_PKGS:-NONE}"
                         echo "============================================"
 
-                        # Always make sure report directory exists
                         mkdir -p reports
 
-                        # Do not allow an empty EXCLUDE_PKGS value to break
-                        # shell execution when nounset is enabled.
                         EXCLUDE_VALUE="${EXCLUDE_PKGS:-}"
 
                         ansible-playbook \
                             -i inventory/hosts \
                             ansible-roles/linux/os_update.yml \
-                            --private-key="${ANSIBLE_KEY_FILE}" \
+                            --private-key="$ANSIBLE_KEY_FILE" \
                             -e "target_hosts=${SERVER_NAME}" \
                             -e "EXCLUDE_PKGS=${EXCLUDE_VALUE}"
 
                         echo
                         echo "============================================"
-                        echo "ANSIBLE PATCH EXECUTION COMPLETED"
+                        echo "ANSIBLE PATCH EXECUTION COMPLETE"
                         echo "============================================"
                     '''
                 }
@@ -181,30 +160,26 @@ pipeline {
         stage('Check Report') {
             steps {
                 sh '''
-                    set +e
+                    set -eu
 
                     echo "============================================"
                     echo "REPORT CHECK"
                     echo "============================================"
 
-                    echo
-                    echo "Workspace:"
-                    pwd
-
-                    echo
-                    echo "Reports directory:"
                     if [ -d reports ]; then
+                        echo "Reports directory:"
                         ls -lah reports
+
+                        echo
+                        echo "HTML reports:"
+                        find reports -type f -name '*.html' -print || true
                     else
                         echo "WARNING: reports directory does not exist"
                     fi
 
                     echo
-                    echo "HTML reports:"
-                    find . -type f -name '*.html' -print
-
-                    echo
-                    echo "============================================"
+                    echo "Searching workspace for HTML files:"
+                    find . -type f -name '*.html' -print || true
                 '''
             }
         }
@@ -212,23 +187,20 @@ pipeline {
         stage('Archive Report') {
             steps {
                 script {
-                    def reportFiles = sh(
-                        script: "find reports -maxdepth 1 -type f -name '*.html' -print 2>/dev/null || true",
-                        returnStdout: true
-                    ).trim()
+                    def reports = findFiles(
+                        glob: 'reports/*.html'
+                    )
 
-                    if (reportFiles) {
-                        echo "HTML report(s) found:"
-                        echo reportFiles
+                    if (reports.length == 0) {
+                        echo 'WARNING: No HTML report was generated.'
+                    } else {
+                        echo "Found ${reports.length} HTML report(s)."
 
                         archiveArtifacts(
                             artifacts: 'reports/*.html',
                             fingerprint: true,
-                            allowEmptyArchive: false
+                            allowEmptyArchive: true
                         )
-                    } else {
-                        echo "WARNING: No HTML report was generated."
-                        echo "Patching itself completed, but there is no report to archive."
                     }
                 }
             }
@@ -236,22 +208,23 @@ pipeline {
     }
 
     post {
+
         success {
-            echo "============================================"
-            echo "✅ PATCHING COMPLETED SUCCESSFULLY"
-            echo "============================================"
+            echo '============================================'
+            echo '✅ PATCHING COMPLETED SUCCESSFULLY'
+            echo '============================================'
         }
 
         failure {
-            echo "============================================"
-            echo "❌ PATCHING FAILED"
-            echo "============================================"
+            echo '============================================'
+            echo '❌ PATCHING FAILED'
+            echo '============================================'
         }
 
         always {
-            echo "============================================"
-            echo "CLEANING WORKSPACE"
-            echo "============================================"
+            echo '============================================'
+            echo 'CLEANING WORKSPACE'
+            echo '============================================'
 
             cleanWs()
         }
