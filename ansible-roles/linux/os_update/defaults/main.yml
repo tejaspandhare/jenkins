@@ -113,3 +113,10 @@ os_update_collect_disk_summary: true
 #   - nginx
 #
 os_update_exclude_packages: []
+# ============================================================
+# REPORT CONFIGURATION
+# ============================================================
+
+os_update_report_enabled: true
+
+os_update_report_directory: "{{ playbook_dir }}/../../reports"
