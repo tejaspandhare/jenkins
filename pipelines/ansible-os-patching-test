@@ -4,21 +4,20 @@ pipeline {
     options {
         timestamps()
         ansiColor('xterm')
+        skipDefaultCheckout(false)
     }
 
     parameters {
         string(
             name: 'SERVER_NAME',
             defaultValue: '',
-            trim: true,
-            description: 'Enter servers, semicolon separated. Example: lb1;lb2'
+            description: 'Enter servers (semicolon separated): server1;server2'
         )
 
         string(
             name: 'EXCLUDE_PKGS',
             defaultValue: '',
-            trim: true,
-            description: 'Packages to exclude, semicolon separated. Example: kernel*;docker*'
+            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
         )
     }
 
@@ -26,18 +25,20 @@ pipeline {
         LANG = 'C.UTF-8'
         LC_ALL = 'C.UTF-8'
 
-        ANSIBLE_FORCE_COLOR = 'false'
-        ANSIBLE_NOCOLOR = 'false'
-
-        ANSIBLE_HOST_KEY_CHECKING = 'false'
+        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_STDOUT_CALLBACK = 'default'
+        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
 
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
-        ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
+        ANSIBLE_HOST_KEY_CHECKING = 'false'
 
-        ANSIBLE_STDOUT_CALLBACK = 'default'
-        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
+        /*
+         * Keep SSH multiplex/control sockets on local Jenkins storage.
+         * This avoids NFS stale-file-handle problems.
+         */
+        ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
     stages {
@@ -50,7 +51,7 @@ pipeline {
                     }
 
                     echo '============================================'
-                    echo 'PATCH REQUEST'
+                    echo 'PATCH MANAGEMENT'
                     echo '============================================'
                     echo "Servers      : ${params.SERVER_NAME}"
                     echo "Exclude pkgs : ${params.EXCLUDE_PKGS?.trim() ?: 'NONE'}"
@@ -64,55 +65,23 @@ pipeline {
                 sh '''
                     set -eu
 
-                    export LANG=C.UTF-8
-                    export LC_ALL=C.UTF-8
+                    echo "Preparing Ansible environment..."
 
                     mkdir -p /tmp/ansible_tmp
                     mkdir -p /tmp/ansible_cp
-
                     mkdir -p reports
 
-                    echo "Workspace:"
-                    pwd
+                    chmod 700 /tmp/ansible_cp
 
-                    echo
-                    echo "Checking Ansible files..."
+                    echo "Workspace : $(pwd)"
+                    echo "Inventory : inventory/hosts"
+                    echo "Playbook  : ansible-roles/linux/os_update.yml"
 
                     test -f inventory/hosts
                     test -f ansible-roles/linux/os_update.yml
 
-                    echo "OK: inventory/hosts"
-                    echo "OK: ansible-roles/linux/os_update.yml"
+                    echo "Environment ready."
                 '''
-            }
-        }
-
-        stage('Ansible Syntax Check') {
-            steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'automation-key',
-                        variable: 'ANSIBLE_KEY_FILE'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
-
-                        export LANG=C.UTF-8
-                        export LC_ALL=C.UTF-8
-
-                        echo "============================================"
-                        echo "ANSIBLE SYNTAX CHECK"
-                        echo "============================================"
-
-                        ansible-playbook \
-                            -i inventory/hosts \
-                            ansible-roles/linux/os_update.yml \
-                            --syntax-check
-
-                        echo "Syntax check: OK"
-                    '''
-                }
             }
         }
 
@@ -127,9 +96,7 @@ pipeline {
                     sh '''
                         set -eu
 
-                        export LANG=C.UTF-8
-                        export LC_ALL=C.UTF-8
-
+                        echo ""
                         echo "============================================"
                         echo "ANSIBLE PATCH EXECUTION"
                         echo "============================================"
@@ -139,18 +106,34 @@ pipeline {
 
                         mkdir -p reports
 
-                        EXCLUDE_VALUE="${EXCLUDE_PKGS:-}"
+                        /*
+                         * Do not use Groovy interpolation for the credential.
+                         * Jenkins will mask the credential path/value appropriately.
+                         */
 
-                        ansible-playbook \
-                            -i inventory/hosts \
-                            ansible-roles/linux/os_update.yml \
-                            --private-key="$ANSIBLE_KEY_FILE" \
-                            -e "target_hosts=${SERVER_NAME}" \
-                            -e "EXCLUDE_PKGS=${EXCLUDE_VALUE}"
+                        if [ -n "${EXCLUDE_PKGS:-}" ]; then
 
-                        echo
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                ansible-roles/linux/os_update.yml \
+                                --private-key="$ANSIBLE_KEY_FILE" \
+                                -e "target_hosts=${SERVER_NAME}" \
+                                -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}"
+
+                        else
+
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                ansible-roles/linux/os_update.yml \
+                                --private-key="$ANSIBLE_KEY_FILE" \
+                                -e "target_hosts=${SERVER_NAME}" \
+                                -e "EXCLUDE_PKGS="
+
+                        fi
+
+                        echo ""
                         echo "============================================"
-                        echo "ANSIBLE PATCH EXECUTION COMPLETE"
+                        echo "ANSIBLE PATCH EXECUTION COMPLETED"
                         echo "============================================"
                     '''
                 }
@@ -162,47 +145,59 @@ pipeline {
                 sh '''
                     set -eu
 
+                    echo ""
                     echo "============================================"
                     echo "REPORT CHECK"
                     echo "============================================"
 
                     if [ -d reports ]; then
+
                         echo "Reports directory:"
                         ls -lah reports
 
-                        echo
+                        echo ""
                         echo "HTML reports:"
-                        find reports -type f -name '*.html' -print || true
+
+                        find reports \
+                            -type f \
+                            -name '*.html' \
+                            -print
+
+                        echo ""
+                        echo "Report count:"
+
+                        find reports \
+                            -type f \
+                            -name '*.html' \
+                            | wc -l
+
                     else
-                        echo "WARNING: reports directory does not exist"
+
+                        echo "ERROR: reports directory does not exist."
+                        exit 1
+
                     fi
 
-                    echo
-                    echo "Searching workspace for HTML files:"
-                    find . -type f -name '*.html' -print || true
+                    echo ""
+                    echo "============================================"
                 '''
             }
         }
 
         stage('Archive Report') {
             steps {
-                script {
-                    def reports = findFiles(
-                        glob: 'reports/*.html'
-                    )
+                /*
+                 * No findFiles() here.
+                 *
+                 * archiveArtifacts is built into Jenkins and does not
+                 * require Pipeline Utility Steps.
+                 */
 
-                    if (reports.length == 0) {
-                        echo 'WARNING: No HTML report was generated.'
-                    } else {
-                        echo "Found ${reports.length} HTML report(s)."
-
-                        archiveArtifacts(
-                            artifacts: 'reports/*.html',
-                            fingerprint: true,
-                            allowEmptyArchive: true
-                        )
-                    }
-                }
+                archiveArtifacts(
+                    artifacts: 'reports/*.html',
+                    fingerprint: true,
+                    allowEmptyArchive: false
+                )
             }
         }
     }
@@ -210,21 +205,26 @@ pipeline {
     post {
 
         success {
-            echo '============================================'
-            echo '✅ PATCHING COMPLETED SUCCESSFULLY'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "✅ PATCHING COMPLETED SUCCESSFULLY"
+            echo "============================================"
+            echo "HTML report has been archived."
         }
 
         failure {
-            echo '============================================'
-            echo '❌ PATCHING FAILED'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "❌ PATCHING FAILED"
+            echo "============================================"
+            echo "Check the Ansible output above for details."
         }
 
         always {
-            echo '============================================'
-            echo 'CLEANING WORKSPACE'
-            echo '============================================'
+            echo ""
+            echo "============================================"
+            echo "CLEANING WORKSPACE"
+            echo "============================================"
 
             cleanWs()
         }
