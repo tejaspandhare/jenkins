@@ -3,7 +3,7 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')   // ✅ Fix color output
+        ansiColor('xterm')
     }
 
     parameters {
@@ -24,11 +24,13 @@ pipeline {
         ANSIBLE_FORCE_COLOR = 'true'
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
+
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+
         ANSIBLE_HOST_KEY_CHECKING = 'false'
-        
-        // ✅ FIX: Redirect SSH control multiplex sockets to local agent storage to prevent NFS Stale File Handle crashes
+
+        // Keep SSH control sockets on local agent storage
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
@@ -40,49 +42,136 @@ pipeline {
                     if (!params.SERVER_NAME?.trim()) {
                         error("SERVER_NAME cannot be empty")
                     }
+
+                    echo "Target servers: ${params.SERVER_NAME}"
+                    echo "Excluded packages: ${params.EXCLUDE_PKGS ?: 'None'}"
                 }
             }
         }
+
+
+        stage('Prepare Environment') {
+            steps {
+                sh '''
+                    set -eux
+
+                    echo "========== PREPARE ANSIBLE ENVIRONMENT =========="
+
+                    mkdir -p /tmp/ansible_cp
+                    chmod 700 /tmp/ansible_cp
+
+                    mkdir -p /tmp/ansible_tmp
+                    chmod 700 /tmp/ansible_tmp
+
+                    # Predictable Jenkins report directory
+                    rm -rf reports
+                    mkdir -p reports
+
+                    echo "Ansible version:"
+                    ansible --version
+
+                    echo ""
+                    echo "OS update files:"
+                    find ansible-roles/linux -maxdepth 3 -type f -print | sort || true
+                '''
+            }
+        }
+
+
+        stage('Validate Ansible Syntax') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'automation-key',
+                        variable: 'ANSIBLE_KEY_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eux
+
+                        echo "========== ANSIBLE SYNTAX CHECK =========="
+
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}" \
+                            --syntax-check
+                    '''
+                }
+            }
+        }
+
 
         stage('Run Ansible Patching') {
             steps {
                 withCredentials([
-                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                    file(
+                        credentialsId: 'automation-key',
+                        variable: 'ANSIBLE_KEY_FILE'
+                    )
                 ]) {
-                    script {
-                        sh """
-                            echo "========== PATCH EXECUTION =========="
-                            echo "Running patching on: ${params.SERVER_NAME}"
-                            echo "Excluding packages: ${params.EXCLUDE_PKGS}"
-                            
-                            # ✅ Ensure the local control path directory exists on the agent machine
-                            mkdir -p /tmp/ansible_cp
+                    sh '''
+                        set -eux
 
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/linux/os_update.yml \
-                                --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "target_hosts=${params.SERVER_NAME}" \
-                                -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
-                        """
-                    }
+                        echo "========== PATCH EXECUTION =========="
+                        echo "Running patching on: ${SERVER_NAME}"
+                        echo "Excluding packages: ${EXCLUDE_PKGS:-None}"
+
+                        mkdir -p /tmp/ansible_cp
+                        chmod 700 /tmp/ansible_cp
+
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}"
+                    '''
                 }
             }
         }
 
+
+        stage('Check Report') {
+            steps {
+                sh '''
+                    echo "========== REPORT FILE =========="
+
+                    if [ -d "reports" ]; then
+                        echo "Reports directory:"
+                        ls -lah reports/
+
+                        echo ""
+                        echo "HTML reports:"
+                        find reports -type f -name "*.html" -print || true
+                    else
+                        echo "No reports directory was created."
+                    fi
+
+                    echo ""
+                    echo "Searching workspace for HTML files:"
+                    find . -type f -name "*.html" -print || true
+                '''
+            }
+        }
+
+
         stage('Archive Report') {
             steps {
-                script {
-                    echo "========== REPORT FILE =========="
-                    sh 'ls -l ansible-roles/os_patching/reports || true'
-                }
-
-                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
+                archiveArtifacts(
+                    artifacts: 'reports/*.html',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
             }
         }
     }
 
+
     post {
+
         success {
             echo "✅ Patching completed successfully"
         }
@@ -92,6 +181,7 @@ pipeline {
         }
 
         always {
+            echo "========== CLEANING WORKSPACE =========="
             cleanWs()
         }
     }
