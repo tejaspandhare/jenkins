@@ -8,4 +8,4 @@
     ansible_remote_tmp: "/tmp/ansible_tmp"
 
   roles:
-    - os_update
+    - role: "{{ playbook_dir }}/os_update"
