@@ -2,38 +2,14 @@
 # ============================================================
 # OS UPDATE - REPORT GENERATION
 # ============================================================
-#
-# Reports are generated on the Jenkins controller/agent,
-# NOT on the target Linux server.
-#
-# The report directory is supplied by the playbook/Jenkins:
-#
-#   os_update_report_directory
-#
-# Example:
-#
-#   /var/lib/jenkins/workspace/<job>/reports
-#
-# ============================================================
 
-
-# ============================================================
-# 1. VALIDATE REPORT DIRECTORY
-# ============================================================
-
-- name: OS Update | Validate report directory variable
+- name: OS Update | Validate report directory
   ansible.builtin.assert:
     that:
       - os_update_report_directory is defined
       - os_update_report_directory | trim | length > 0
     fail_msg: >-
       os_update_report_directory is not configured.
-      Please provide the Jenkins workspace reports directory.
-
-
-# ============================================================
-# 2. CREATE REPORT DIRECTORY
-# ============================================================
 
 - name: OS Update | Create report directory
   ansible.builtin.file:
@@ -43,11 +19,6 @@
   delegate_to: localhost
   become: false
 
-
-# ============================================================
-# 3. GENERATE HTML REPORT
-# ============================================================
-
 - name: OS Update | Generate HTML report
   ansible.builtin.template:
     src: report.j2
@@ -56,11 +27,6 @@
   delegate_to: localhost
   become: false
 
-
-# ============================================================
-# 4. VERIFY REPORT
-# ============================================================
-
 - name: OS Update | Verify HTML report
   ansible.builtin.stat:
     path: "{{ os_update_report_directory }}/{{ inventory_hostname }}.html"
@@ -68,33 +34,19 @@
   delegate_to: localhost
   become: false
 
-
-# ============================================================
-# 5. REPORT GENERATION STATUS
-# ============================================================
-
 - name: OS Update | Validate generated report
   ansible.builtin.assert:
     that:
       - os_update_report_file.stat.exists
       - os_update_report_file.stat.size | int > 0
     fail_msg: >-
-      HTML report was not generated correctly.
-
-      Expected:
+      HTML report was not generated correctly:
       {{ os_update_report_directory }}/{{ inventory_hostname }}.html
-
     success_msg: >-
       HTML report generated successfully:
-
       {{ os_update_report_directory }}/{{ inventory_hostname }}.html
   delegate_to: localhost
   become: false
-
-
-# ============================================================
-# 6. DISPLAY REPORT LOCATION
-# ============================================================
 
 - name: OS Update | Display report location
   ansible.builtin.debug:
