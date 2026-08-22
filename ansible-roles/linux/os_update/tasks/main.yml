@@ -527,6 +527,7 @@
     - ansible_os_family == 'Suse'
 
 
+
 # ============================================================
 # 18. DETERMINE POST-CHECK STATUS
 # ============================================================
@@ -534,35 +535,31 @@
 - name: OS Update | Determine post-check status
   ansible.builtin.set_fact:
     os_update_postcheck_status: >-
-      {{
-        'SUCCESS'
-        if (
-          os_update_postcheck_kernel.rc | default(1) == 0
-
-          and
-          (
-            ansible_os_family != 'Debian'
-            or
-            os_update_postcheck_dpkg.rc | default(1) == 0
-          )
-
-          and
-          (
-            ansible_os_family != 'RedHat'
-            or
-            os_update_postcheck_rpm.rc | default(1) == 0
-          )
-
-          and
-          (
-            ansible_os_family != 'Suse'
-            or
-            os_update_postcheck_zypper.rc | default(1) == 0
-          )
+      {% if
+        (os_update_postcheck_kernel.rc | default(1) | int) == 0
+        and
+        (
+          ansible_os_family != 'Debian'
+          or
+          (os_update_postcheck_dpkg.rc | default(1) | int) == 0
         )
-        else
-        'FAILED'
-      }
+        and
+        (
+          ansible_os_family != 'RedHat'
+          or
+          (os_update_postcheck_rpm.rc | default(1) | int) == 0
+        )
+        and
+        (
+          ansible_os_family != 'Suse'
+          or
+          (os_update_postcheck_zypper.rc | default(1) | int) == 0
+        )
+      %}
+      SUCCESS
+      {% else %}
+      FAILED
+      {% endif %}
 
 
 # ============================================================
