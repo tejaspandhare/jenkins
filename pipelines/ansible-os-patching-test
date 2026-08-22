@@ -3,698 +3,373 @@ pipeline {
     agent any
 
     parameters {
-
         string(
             name: 'SERVER_NAME',
-            description: 'Target server(s), for example: lb2 or lb1,lb2'
+            description: 'Target server(s) from Ansible inventory'
         )
 
         string(
             name: 'EXCLUDE_PKGS',
-            description: 'Packages to exclude. Leave empty for none.'
+            description: 'Packages to exclude from patching'
         )
     }
 
     environment {
-
         INVENTORY = 'inventory/hosts'
-
-        PLAYBOOK = 'ansible-roles/linux/os_update.yml'
-
+        PLAYBOOK  = 'ansible-roles/linux/os_update.yml'
         REPORT_DIR = 'reports'
-
-        ANSIBLE_HOST_KEY_CHECKING = 'False'
-
-        ANSIBLE_RETRY_FILES_ENABLED = 'False'
-
-        ANSIBLE_DISPLAY_SKIPPED_HOSTS = 'False'
-
-        ANSIBLE_NOCOLOR = 'False'
-
-        ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
-
-        ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
-
-        ANSIBLE_SSH_PIPELINING = 'True'
     }
 
     options {
-
         timestamps()
-
         ansiColor('xterm')
-
-        buildDiscarder(
-            logRotator(
-                numToKeepStr: '20',
-                artifactNumToKeepStr: '20'
-            )
-        )
+        skipDefaultCheckout(false)
     }
-
 
     stages {
 
-
-        // ============================================================
-        // VALIDATE INPUT
-        // ============================================================
-
         stage('Validate Input') {
-
             steps {
-
                 script {
+                    echo '============================================'
+                    echo 'PATCH MANAGEMENT'
+                    echo '============================================'
+                    echo "Servers      : ${params.SERVER_NAME}"
+                    echo "Exclude pkgs : ${params.EXCLUDE_PKGS}"
+                    echo '============================================'
 
                     if (!params.SERVER_NAME?.trim()) {
-
-                        error(
-                            'SERVER_NAME is required. Please enter the target server.'
-                        )
+                        error('SERVER_NAME is required')
                     }
 
-
-                    echo '============================================'
-
-                    echo 'PATCH MANAGEMENT'
-
-                    echo '============================================'
-
-                    echo "Servers      : ${params.SERVER_NAME}"
-
-                    if (params.EXCLUDE_PKGS?.trim()) {
-
-                        echo "Exclude pkgs : ${params.EXCLUDE_PKGS}"
-
-                    } else {
-
-                        echo 'Exclude pkgs : NONE'
+                    if (!fileExists(env.INVENTORY)) {
+                        error("Inventory not found: ${env.INVENTORY}")
                     }
 
-                    echo '============================================'
+                    if (!fileExists(env.PLAYBOOK)) {
+                        error("Playbook not found: ${env.PLAYBOOK}")
+                    }
                 }
             }
         }
 
-
-        // ============================================================
-        // PREPARE
-        // ============================================================
-
         stage('Prepare') {
-
             steps {
-
                 sh '''
                     set -eu
 
-                    echo "============================================"
-                    echo "PREPARING ANSIBLE ENVIRONMENT"
-                    echo "============================================"
+                    echo "Preparing Ansible environment..."
 
-                    mkdir -p "$ANSIBLE_LOCAL_TEMP"
-
+                    mkdir -p reports
                     mkdir -p /tmp/ansible_cp
-
-                    mkdir -p "$REPORT_DIR"
-
-                    chmod 700 "$ANSIBLE_LOCAL_TEMP"
-
                     chmod 700 /tmp/ansible_cp
 
                     echo "Workspace : $(pwd)"
+                    echo "Inventory : ${INVENTORY}"
+                    echo "Playbook  : ${PLAYBOOK}"
+                    echo "Reports   : ${REPORT_DIR}"
 
-                    echo "Inventory : $INVENTORY"
-
-                    echo "Playbook  : $PLAYBOOK"
-
-                    echo "Reports   : $REPORT_DIR"
-
-                    echo ""
-
-                    echo "Checking required files..."
-
-                    test -f "$INVENTORY"
-
-                    test -f "$PLAYBOOK"
-
-                    echo "Inventory found."
-
-                    echo "Playbook found."
-
-                    echo ""
+                    test -f "${INVENTORY}"
+                    test -f "${PLAYBOOK}"
 
                     echo "Environment ready."
-
-                    echo "============================================"
                 '''
             }
         }
 
-
-        // ============================================================
-        // RUN ANSIBLE PATCHING
-        // ============================================================
-
         stage('Run Ansible Patching') {
-
             steps {
-
                 withCredentials([
                     file(
                         credentialsId: 'automation-key',
                         variable: 'ANSIBLE_KEY_FILE'
                     )
                 ]) {
-
                     script {
 
-                        if (!params.SERVER_NAME?.trim()) {
-
-                            error('SERVER_NAME is required.')
-                        }
-
+                        /*
+                         * IMPORTANT:
+                         *
+                         * Do not put ${SERVER_NAME} or ${EXCLUDE_PKGS}
+                         * inside the shell script.
+                         *
+                         * Jenkins/Groovy would try to interpolate them
+                         * before the shell runs.
+                         *
+                         * Pass them through environment variables instead.
+                         */
 
                         withEnv([
-                            "PATCH_SERVER=${params.SERVER_NAME}",
-                            "PATCH_EXCLUDE_PKGS=${params.EXCLUDE_PKGS ?: ''}"
+                            "PATCH_TARGET=${params.SERVER_NAME}",
+                            "PATCH_EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
                         ]) {
 
-
-                            int ansibleResult = sh(
+                            def rc = sh(
                                 script: '''
-                                    set -u
+                                    set -eu
 
                                     echo ""
-
                                     echo "============================================"
-
                                     echo "ANSIBLE PATCH EXECUTION"
-
                                     echo "============================================"
+                                    echo "Servers      : ${PATCH_TARGET}"
 
-                                    echo "Servers      : $PATCH_SERVER"
-
-
-                                    if [ -n "$PATCH_EXCLUDE_PKGS" ]; then
-
-                                        echo "Exclude pkgs : $PATCH_EXCLUDE_PKGS"
-
+                                    if [ -n "${PATCH_EXCLUDE_PKGS}" ]; then
+                                        echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
                                     else
-
                                         echo "Exclude pkgs : NONE"
-
                                     fi
 
-
                                     echo "============================================"
 
-
-                                    mkdir -p "$REPORT_DIR"
-
-                                    mkdir -p "$ANSIBLE_LOCAL_TEMP"
-
+                                    mkdir -p "${REPORT_DIR}"
                                     mkdir -p /tmp/ansible_cp
-
-
-                                    chmod 700 "$ANSIBLE_LOCAL_TEMP"
-
                                     chmod 700 /tmp/ansible_cp
 
+                                    rm -f ansible-output.log
 
-                                    echo ""
+                                    export ANSIBLE_LOCAL_TEMP=/tmp/ansible_tmp
+                                    export ANSIBLE_REMOTE_TEMP=/tmp/ansible_tmp
+                                    export ANSIBLE_SSH_PIPELINING=true
+                                    export ANSIBLE_HOST_KEY_CHECKING=false
+
+                                    mkdir -p /tmp/ansible_tmp
+                                    chmod 700 /tmp/ansible_tmp
 
                                     echo "Starting Ansible..."
-
                                     echo ""
 
+                                    set +e
 
-                                    if [ -n "$PATCH_EXCLUDE_PKGS" ]; then
+                                    ansible-playbook \
+                                        -i "${INVENTORY}" \
+                                        "${PLAYBOOK}" \
+                                        --private-key="${ANSIBLE_KEY_FILE}" \
+                                        -e "target_hosts=${PATCH_TARGET}" \
+                                        -e "EXCLUDE_PKGS=${PATCH_EXCLUDE_PKGS}" \
+                                        2>&1 | tee ansible-output.log
 
-                                        ansible-playbook \
-                                            -i "$INVENTORY" \
-                                            "$PLAYBOOK" \
-                                            --private-key="$ANSIBLE_KEY_FILE" \
-                                            -e "target_hosts=$PATCH_SERVER" \
-                                            -e "EXCLUDE_PKGS=$PATCH_EXCLUDE_PKGS" \
-                                            > ansible-output.log 2>&1
+                                    ANSIBLE_RC=${PIPESTATUS[0]}
 
-                                    else
-
-                                        ansible-playbook \
-                                            -i "$INVENTORY" \
-                                            "$PLAYBOOK" \
-                                            --private-key="$ANSIBLE_KEY_FILE" \
-                                            -e "target_hosts=$PATCH_SERVER" \
-                                            > ansible-output.log 2>&1
-
-                                    fi
-
-
-                                    RC=$?
-
+                                    set -e
 
                                     echo ""
-
+                                    echo "============================================"
+                                    echo "ANSIBLE EXIT CODE : ${ANSIBLE_RC}"
                                     echo "============================================"
 
-                                    echo "ANSIBLE EXECUTION RESULT"
-
-                                    echo "============================================"
-
-                                    echo "Exit code : $RC"
-
-                                    echo "============================================"
-
-
-                                    echo ""
-
-                                    echo "Last 80 lines of Ansible output:"
-
-                                    echo "--------------------------------------------"
-
-
-                                    if [ -f ansible-output.log ]; then
-
-                                        tail -n 80 ansible-output.log
-
-                                    else
-
-                                        echo "WARNING: ansible-output.log was not created."
-
-                                    fi
-
-
-                                    echo "--------------------------------------------"
-
-
-                                    exit "$RC"
+                                    exit "${ANSIBLE_RC}"
                                 ''',
-
                                 returnStatus: true
                             )
 
+                            env.ANSIBLE_EXIT_CODE = rc.toString()
 
-                            env.ANSIBLE_RESULT = ansibleResult.toString()
+                            echo "Ansible exit code : ${env.ANSIBLE_EXIT_CODE}"
 
-
-                            if (ansibleResult != 0) {
-
-                                echo ""
-                                echo "============================================"
-                                echo "ANSIBLE FAILED"
-                                echo "============================================"
-                                echo "Ansible exit code : ${ansibleResult}"
-                                echo "Report collection will continue."
-                                echo "============================================"
-
-                            } else {
-
-                                echo ""
-                                echo "============================================"
-                                echo "ANSIBLE COMPLETED"
-                                echo "============================================"
-                                echo "Ansible exit code : 0"
-                                echo "============================================"
-                            }
+                            /*
+                             * Do not fail this stage immediately.
+                             *
+                             * This allows Check Report / Archive / Publish
+                             * to execute even when Ansible fails.
+                             */
                         }
                     }
                 }
             }
         }
 
-
-        // ============================================================
-        // CHECK REPORT
-        // ============================================================
-
         stage('Check Report') {
-
             steps {
-
                 sh '''
-                    set +e
-
-                    echo ""
+                    set -eu
 
                     echo "============================================"
-
                     echo "REPORT CHECK"
-
                     echo "============================================"
 
+                    if [ -d "${REPORT_DIR}" ]; then
 
-                    echo ""
+                        echo "Reports directory:"
+                        ls -lah "${REPORT_DIR}"
 
-                    echo "Current workspace:"
+                        echo ""
+                        echo "HTML reports:"
 
-                    pwd
-
-
-                    echo ""
-
-                    echo "Reports directory:"
-
-                    if [ -d "$REPORT_DIR" ]; then
-
-                        ls -lah "$REPORT_DIR"
-
-                    else
-
-                        echo "Reports directory does not exist."
-
-                    fi
-
-
-                    echo ""
-
-                    echo "HTML reports inside reports/:"
-
-                    if [ -d "$REPORT_DIR" ]; then
-
-                        find "$REPORT_DIR" \
+                        find "${REPORT_DIR}" \
                             -type f \
                             -name '*.html' \
                             -print
 
                     else
-
-                        echo "No reports directory."
-
+                        echo "Reports directory does not exist."
                     fi
 
-
                     echo ""
-
-                    echo "ALL HTML FILES IN WORKSPACE:"
-
-                    find . \
-                        -type f \
-                        -name '*.html' \
-                        -print
-
-
-                    echo ""
-
-                    echo "ALL REPORT-RELATED FILES:"
-
-                    find . \
-                        -type f \
-                        | grep -E 'report|\\.html$' \
-                        || true
-
-
-                    echo ""
-
                     echo "Ansible log:"
 
                     if [ -f ansible-output.log ]; then
-
                         ls -lh ansible-output.log
-
                     else
-
                         echo "ansible-output.log does not exist."
-
                     fi
 
-
                     echo ""
-
                     echo "============================================"
-
                     echo "REPORT CHECK COMPLETE"
-
                     echo "============================================"
                 '''
             }
         }
 
-
-        // ============================================================
-        // ARCHIVE REPORT
-        // ============================================================
-
         stage('Archive Report') {
-
             steps {
-
                 script {
 
-                    echo "Checking for HTML reports..."
+                    echo "Checking for generated reports..."
 
-                    sh '''
-                        echo "============================================"
-                        echo "ARCHIVE CHECK"
-                        echo "============================================"
+                    def reportExists = sh(
+                        script: '''
+                            if [ -d reports ] && \
+                               find reports -type f -name '*.html' -print -quit | grep -q .; then
+                                exit 0
+                            fi
+                            exit 1
+                        ''',
+                        returnStatus: true
+                    ) == 0
 
-                        echo "Reports directory:"
+                    if (reportExists) {
 
-                        if [ -d reports ]; then
+                        echo "HTML report found. Archiving..."
 
-                            ls -lah reports
+                        archiveArtifacts(
+                            artifacts: 'reports/**/*.html',
+                            allowEmptyArchive: true,
+                            fingerprint: true
+                        )
 
-                        else
+                    } else {
 
-                            echo "reports directory does not exist."
+                        echo "No HTML report generated. Nothing to archive."
 
-                        fi
+                    }
 
+                    if (fileExists('ansible-output.log')) {
 
-                        echo ""
+                        archiveArtifacts(
+                            artifacts: 'ansible-output.log',
+                            allowEmptyArchive: true,
+                            fingerprint: true
+                        )
 
-                        echo "HTML files:"
+                    } else {
 
-                        find reports \
-                            -type f \
-                            -name '*.html' \
-                            -print \
-                            2>/dev/null \
-                            || true
+                        echo "No ansible-output.log found."
 
-
-                        echo ""
-
-                        echo "Ansible log:"
-
-                        if [ -f ansible-output.log ]; then
-
-                            ls -lh ansible-output.log
-
-                        else
-
-                            echo "ansible-output.log does not exist."
-
-                        fi
-
-                        echo "============================================"
-                    '''
-
-
-                    archiveArtifacts(
-                        artifacts: 'reports/*.html',
-                        allowEmptyArchive: true,
-                        fingerprint: true
-                    )
-
-
-                    archiveArtifacts(
-                        artifacts: 'ansible-output.log',
-                        allowEmptyArchive: true,
-                        fingerprint: false
-                    )
+                    }
                 }
             }
         }
-
-
-        // ============================================================
-        // PUBLISH HTML REPORT
-        // ============================================================
 
         stage('Publish HTML Report') {
-
             steps {
-
                 script {
 
-                    if (fileExists('reports')) {
+                    def reportExists = sh(
+                        script: '''
+                            if [ -d reports ] && \
+                               find reports -type f -name '*.html' -print -quit | grep -q .; then
+                                exit 0
+                            fi
+                            exit 1
+                        ''',
+                        returnStatus: true
+                    ) == 0
 
-                        publishHTML(
-                            target: [
+                    if (reportExists) {
 
-                                allowMissing: true,
+                        echo "Publishing HTML report..."
 
-                                alwaysLinkToLastBuild: true,
-
-                                keepAll: true,
-
-                                reportDir: 'reports',
-
-                                reportFiles: '*.html',
-
-                                reportName: 'Linux Patch Report',
-
-                                reportTitles: 'Linux Patch Report'
-                            ]
-                        )
+                        publishHTML([
+                            allowMissing: true,
+                            alwaysLinkToLastBuild: true,
+                            keepAll: true,
+                            reportDir: 'reports',
+                            reportFiles: '*.html',
+                            reportName: 'Linux Patch Report',
+                            reportTitles: 'Linux OS Patching Report'
+                        ])
 
                     } else {
 
-                        echo 'No reports directory found.'
+                        echo "No HTML report generated. Skipping HTML publication."
 
                     }
                 }
             }
         }
 
-
-        // ============================================================
-        // FINALIZE RESULT
-        //
-        // This stage is deliberately AFTER report publishing.
-        //
-        // Therefore:
-        //
-        // Ansible fails
-        //       ↓
-        // report is checked
-        //       ↓
-        // report is archived
-        //       ↓
-        // report is published
-        //       ↓
-        // Jenkins build becomes FAILED
-        //
-        // ============================================================
-
         stage('Finalize Result') {
-
             steps {
-
                 script {
 
-                    if (
-                        env.ANSIBLE_RESULT &&
-                        env.ANSIBLE_RESULT != '0'
-                    ) {
+                    def rc = env.ANSIBLE_EXIT_CODE ?: '999'
 
-                        error(
-                            "Ansible patching failed with exit code ${env.ANSIBLE_RESULT}"
-                        )
+                    echo "============================================"
+                    echo "FINAL PATCH RESULT"
+                    echo "============================================"
+                    echo "Servers          : ${params.SERVER_NAME}"
+                    echo "Ansible exit code: ${rc}"
+                    echo "============================================"
 
-                    } else {
-
-                        echo 'Ansible patching completed successfully.'
+                    if (rc != '0') {
+                        error("Ansible patching failed with exit code ${rc}")
                     }
+
+                    echo "Patching completed successfully."
                 }
             }
         }
     }
 
-
-    // ================================================================
-    // POST ACTIONS
-    // ================================================================
-
     post {
 
-
-        always {
-
-            echo ""
-
-            echo "============================================"
-
-            echo "PATCHING JOB SUMMARY"
-
-            echo "============================================"
-
-            echo "Servers : ${params.SERVER_NAME}"
-
-
-            script {
-
-                if (env.ANSIBLE_RESULT) {
-
-                    echo "Ansible exit code : ${env.ANSIBLE_RESULT}"
-
-                } else {
-
-                    echo "Ansible exit code : NOT EXECUTED"
-                }
-            }
-
-
-            echo "============================================"
-        }
-
-
         success {
-
             echo ""
-
             echo "============================================"
-
+            echo "PATCHING JOB SUMMARY"
+            echo "============================================"
+            echo "Servers          : ${params.SERVER_NAME}"
+            echo "Ansible exit code: ${env.ANSIBLE_EXIT_CODE}"
+            echo "============================================"
             echo "✅ PATCHING COMPLETED SUCCESSFULLY"
-
-            echo "============================================"
-
-            echo "Servers: ${params.SERVER_NAME}"
-
             echo "============================================"
         }
-
 
         failure {
-
             echo ""
-
             echo "============================================"
-
+            echo "PATCHING JOB SUMMARY"
+            echo "============================================"
+            echo "Servers          : ${params.SERVER_NAME}"
+            echo "Ansible exit code: ${env.ANSIBLE_EXIT_CODE ?: 'UNKNOWN'}"
+            echo "============================================"
             echo "❌ PATCHING FAILED"
-
             echo "============================================"
-
-            echo "Servers: ${params.SERVER_NAME}"
-
-
-            script {
-
-                if (env.ANSIBLE_RESULT) {
-
-                    echo "Ansible exit code : ${env.ANSIBLE_RESULT}"
-                }
-            }
-
-
-            echo ""
-
-            echo "The HTML report, if generated, has been"
-            echo "published/archived before the failure."
-
-            echo ""
-
-            echo "Check the Ansible output/log for details."
-
+            echo "Check the Ansible output above for details."
             echo "============================================"
         }
 
-
-        cleanup {
-
+        always {
             echo ""
-
             echo "============================================"
-
             echo "CLEANING WORKSPACE"
-
             echo "============================================"
 
             cleanWs()
 
             echo "Workspace cleaned."
-
             echo "============================================"
         }
     }
