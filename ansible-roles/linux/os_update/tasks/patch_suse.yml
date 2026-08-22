@@ -1,0 +1,52 @@
+---
+# ============================================================
+# SUSE Linux Enterprise Server Patching
+# ============================================================
+
+- name: OS Update | SLES | Refresh repositories
+  ansible.builtin.command:
+    cmd: zypper --non-interactive refresh
+  register: os_update_zypper_refresh
+  changed_when: false
+
+
+- name: OS Update | SLES | Update all packages
+  ansible.builtin.command:
+    cmd: zypper --non-interactive update --no-confirm
+  register: os_update_patch_result
+  changed_when: >-
+    'Nothing to do' not in
+    (
+      os_update_patch_result.stdout
+      | default('')
+    )
+
+
+- name: OS Update | SLES | Verify package dependencies
+  ansible.builtin.command:
+    cmd: zypper --non-interactive verify
+  register: os_update_zypper_verify
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | SLES | Set patch status
+  ansible.builtin.set_fact:
+    os_update_patch_status: >-
+      {{
+        'SUCCESS'
+        if os_update_zypper_verify.rc | default(1) == 0
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | SLES | Display patch result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "SLES PATCH"
+      - "============================================================"
+      - "Package changes : {{ os_update_patch_result.changed | default(false) }}"
+      - "Patch status    : {{ os_update_patch_status }}"
+      - "============================================================"

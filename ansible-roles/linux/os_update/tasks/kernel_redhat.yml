@@ -1,0 +1,221 @@
+---
+# ============================================================
+# RHEL-family Kernel Cleanup
+#
+# Supports:
+#   RHEL 8
+#   RHEL 9
+#   RHEL 10
+#   Rocky Linux
+#   AlmaLinux
+#   CentOS
+#
+# Rules:
+#   - Never remove running kernel.
+#   - Keep configured number of old kernels.
+#   - Remove the complete kernel package generation.
+# ============================================================
+
+- name: OS Update | RedHat | Get running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: os_update_redhat_running_kernel_cmd
+  changed_when: false
+
+
+- name: OS Update | RedHat | Get installed kernel packages
+  ansible.builtin.shell: |
+    rpm -qa --qf '%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}\n' |
+    grep -E '^(kernel|kernel-core|kernel-modules|kernel-modules-extra|kernel-devel|kernel-headers)\|'
+  register: os_update_redhat_kernel_packages
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | RedHat | Get installed kernel versions
+  ansible.builtin.shell: |
+    rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null |
+    sort -Vu
+  register: os_update_redhat_kernel_versions
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | RedHat | Normalize running kernel
+  ansible.builtin.set_fact:
+    os_update_redhat_running_kernel: >-
+      {{ os_update_redhat_running_kernel_cmd.stdout | trim }}
+
+
+- name: OS Update | RedHat | Build kernel generation list
+  ansible.builtin.set_fact:
+    os_update_redhat_kernel_generations: >-
+      {{
+        os_update_redhat_kernel_versions.stdout_lines
+        | default([])
+        | map('trim')
+        | reject('equalto', '')
+        | list
+      }}
+
+
+- name: OS Update | RedHat | Display installed kernels
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel : {{ os_update_redhat_running_kernel }}"
+      - "Installed kernels:"
+      - "{{ os_update_redhat_kernel_generations }}"
+
+
+# ============================================================
+# Determine kernels to retain
+# ============================================================
+
+- name: OS Update | RedHat | Determine kernels to retain
+  ansible.builtin.set_fact:
+    os_update_redhat_keep_kernels: >-
+      {{
+        (
+          [os_update_redhat_running_kernel]
+          +
+          (
+            os_update_redhat_kernel_generations
+            | sort(reverse=true)
+          )
+        )
+        | unique
+        | list
+      }}
+
+
+- name: OS Update | RedHat | Determine old kernels
+  ansible.builtin.set_fact:
+    os_update_redhat_old_kernels: >-
+      {{
+        os_update_redhat_kernel_generations
+        | difference(
+            os_update_redhat_keep_kernels[:(
+              (os_update_kernel_keep | int) + 1
+            )]
+          )
+        | list
+      }}
+
+
+# ============================================================
+# Protect running kernel
+# ============================================================
+
+- name: OS Update | RedHat | Protect running kernel
+  ansible.builtin.set_fact:
+    os_update_redhat_old_kernels: >-
+      {{
+        os_update_redhat_old_kernels
+        | difference([os_update_redhat_running_kernel])
+        | list
+      }}
+
+
+- name: OS Update | RedHat | Display cleanup plan
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel : {{ os_update_redhat_running_kernel }}"
+      - "Keep kernels   : {{ os_update_redhat_keep_kernels }}"
+      - "Remove kernels : {{ os_update_redhat_old_kernels }}"
+
+
+# ============================================================
+# Remove complete kernel package generations
+# ============================================================
+
+- name: OS Update | RedHat | Build package removal list
+  ansible.builtin.set_fact:
+    os_update_redhat_kernel_packages_to_remove: >-
+      {{
+        os_update_redhat_kernel_packages.stdout_lines
+        | default([])
+        | select(
+            'search',
+            (
+              os_update_redhat_old_kernels
+              | map('regex_escape')
+              | join('|')
+            )
+          )
+        | map('regex_replace', '\|.*$', '')
+        | list
+        | unique
+      }}
+  when:
+    - os_update_redhat_old_kernels | length > 0
+
+
+- name: OS Update | RedHat | Set empty removal list
+  ansible.builtin.set_fact:
+    os_update_redhat_kernel_packages_to_remove: []
+  when:
+    - os_update_redhat_old_kernels | length == 0
+
+
+- name: OS Update | RedHat | Display packages to remove
+  ansible.builtin.debug:
+    msg:
+      - "Kernel generations:"
+      - "{{ os_update_redhat_old_kernels }}"
+      - "Packages:"
+      - "{{ os_update_redhat_kernel_packages_to_remove }}"
+
+
+# ============================================================
+# Remove old kernel package sets
+# ============================================================
+
+- name: OS Update | RedHat | Remove old kernel packages
+  ansible.builtin.dnf:
+    name: "{{ os_update_redhat_kernel_packages_to_remove }}"
+    state: absent
+  register: os_update_redhat_kernel_cleanup
+  when:
+    - ansible_facts.pkg_mgr == 'dnf'
+    - os_update_redhat_kernel_packages_to_remove | length > 0
+
+
+- name: OS Update | RedHat | Remove old kernel packages with YUM
+  ansible.builtin.yum:
+    name: "{{ os_update_redhat_kernel_packages_to_remove }}"
+    state: absent
+  register: os_update_redhat_kernel_cleanup
+  when:
+    - ansible_facts.pkg_mgr == 'yum'
+    - os_update_redhat_kernel_packages_to_remove | length > 0
+
+
+# ============================================================
+# Final status
+# ============================================================
+
+- name: OS Update | RedHat | Set kernel cleanup status
+  ansible.builtin.set_fact:
+    os_update_kernel_cleanup_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_redhat_kernel_cleanup is not defined
+          or
+          os_update_redhat_kernel_cleanup.rc | default(0) == 0
+        )
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | RedHat | Display cleanup result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "RHEL KERNEL CLEANUP"
+      - "============================================================"
+      - "Running kernel : {{ os_update_redhat_running_kernel }}"
+      - "Removed        : {{ os_update_redhat_old_kernels }}"
+      - "Status         : {{ os_update_kernel_cleanup_status }}"
+      - "============================================================"

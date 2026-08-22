@@ -1,0 +1,70 @@
+---
+# ============================================================
+# SUSE / SLES PRE-PATCH CLEANUP
+# ============================================================
+
+- name: SUSE | Verify zypper exists
+  ansible.builtin.command:
+    cmd: command -v zypper
+  register: os_update_zypper_check
+  changed_when: false
+  failed_when: false
+
+- name: SUSE | Validate zypper
+  ansible.builtin.assert:
+    that:
+      - os_update_zypper_check.rc == 0
+    fail_msg: "zypper was not found on {{ inventory_hostname }}"
+
+# ------------------------------------------------------------
+# Repository/cache cleanup
+# ------------------------------------------------------------
+
+- name: SUSE | Clean zypper cache
+  ansible.builtin.command:
+    cmd: zypper clean --all
+  register: os_update_suse_cache_clean
+  changed_when: false
+  when: os_update_package_cache_cleanup | bool
+
+- name: SUSE | Refresh repositories
+  ansible.builtin.command:
+    cmd: zypper refresh
+  register: os_update_suse_refresh
+  changed_when: false
+
+# ------------------------------------------------------------
+# Orphaned packages
+# ------------------------------------------------------------
+
+- name: SUSE | Find orphaned packages
+  ansible.builtin.shell: |
+    zypper packages --orphaned
+  register: os_update_suse_orphaned
+  changed_when: false
+  failed_when: false
+  when: os_update_autoremove_enabled | bool
+
+- name: SUSE | Display orphaned packages
+  ansible.builtin.debug:
+    msg: "{{ os_update_suse_orphaned.stdout_lines | default([]) }}"
+  when: os_update_suse_orphaned is defined
+
+# IMPORTANT:
+# We intentionally do NOT automatically remove all orphaned
+# packages here. Enterprise SLES systems can have intentionally
+# installed packages that zypper reports as orphaned.
+
+- name: SUSE | Check disk usage of /boot
+  ansible.builtin.shell: |
+    df -h /boot
+  register: os_update_boot_usage
+  changed_when: false
+
+- name: SUSE | Show /boot usage
+  ansible.builtin.debug:
+    var: os_update_boot_usage.stdout
+
+- name: SUSE | Set cleanup status
+  ansible.builtin.set_fact:
+    os_update_cleanup_status: "SUCCESS"

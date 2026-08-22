@@ -1,0 +1,126 @@
+---
+# ============================================================
+# Debian / Ubuntu PRE-PATCH CLEANUP
+# ============================================================
+
+- name: OS Update | Debian | Start cleanup
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "DEBIAN / UBUNTU PRE-PATCH CLEANUP"
+      - "============================================================"
+      - "Host           : {{ inventory_hostname }}"
+      - "OS             : {{ ansible_distribution }}"
+      - "Version        : {{ ansible_distribution_version }}"
+      - "Running kernel : {{ ansible_kernel }}"
+      - "Autoremove     : {{ os_update_autoremove }}"
+      - "Cache cleanup  : {{ os_update_package_cache_cleanup }}"
+      - "============================================================"
+
+
+# ------------------------------------------------------------
+# Update package metadata
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Update APT cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+  register: os_update_cleanup_apt_update
+  when:
+    - os_update_package_cache_cleanup | bool
+
+
+# ------------------------------------------------------------
+# Remove unused packages
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Remove unused packages
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+    lock_timeout: 300
+  register: os_update_cleanup_autoremove
+  when:
+    - os_update_autoremove | bool
+
+
+# ------------------------------------------------------------
+# Remove obsolete package files
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Autoclean package cache
+  ansible.builtin.apt:
+    autoclean: true
+    lock_timeout: 300
+  register: os_update_cleanup_autoclean
+  when:
+    - os_update_package_cache_cleanup | bool
+
+
+# ------------------------------------------------------------
+# Clean complete package cache
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Clean APT cache
+  ansible.builtin.apt:
+    clean: true
+    lock_timeout: 300
+  register: os_update_cleanup_apt_clean
+  when:
+    - os_update_clean_package_cache | bool
+
+
+# ------------------------------------------------------------
+# Check /boot
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Check /boot usage
+  ansible.builtin.shell: |
+    df -P /boot 2>/dev/null || df -P /
+  register: os_update_boot_usage
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | Debian | Display /boot usage
+  ansible.builtin.debug:
+    var: os_update_boot_usage.stdout
+
+
+# ------------------------------------------------------------
+# Cleanup status
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Set cleanup status
+  ansible.builtin.set_fact:
+    os_update_cleanup_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_cleanup_apt_update.rc | default(0) == 0
+          and
+          os_update_cleanup_autoremove.rc | default(0) == 0
+          and
+          os_update_cleanup_autoclean.rc | default(0) == 0
+          and
+          os_update_cleanup_apt_clean.rc | default(0) == 0
+        )
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | Debian | Display cleanup result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "DEBIAN / UBUNTU CLEANUP RESULT"
+      - "============================================================"
+      - "APT update      : {{ os_update_cleanup_apt_update.changed | default(false) }}"
+      - "Autoremove      : {{ os_update_cleanup_autoremove.changed | default(false) }}"
+      - "Autoclean       : {{ os_update_cleanup_autoclean.changed | default(false) }}"
+      - "APT clean       : {{ os_update_cleanup_apt_clean.changed | default(false) }}"
+      - "Status          : {{ os_update_cleanup_status }}"
+      - "============================================================"

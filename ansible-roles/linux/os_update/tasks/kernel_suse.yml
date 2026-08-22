@@ -1,0 +1,226 @@
+---
+# ============================================================
+# SUSE Linux Enterprise Kernel Cleanup
+#
+# Supports:
+#   SLES 12
+#   SLES 15
+#   SLES 16
+#
+# Handles common kernel flavors:
+#   kernel-default
+#   kernel-preempt
+#   kernel-rt
+#
+# Never remove the currently running kernel.
+# ============================================================
+
+- name: OS Update | SLES | Get running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: os_update_suse_running_kernel_cmd
+  changed_when: false
+
+
+- name: OS Update | SLES | Get installed kernel packages
+  ansible.builtin.shell: |
+    rpm -qa --qf '%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}\n' |
+    grep -E '^kernel-(default|preempt|rt|vanilla)\|'
+  register: os_update_suse_kernel_packages
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | SLES | Get installed kernel versions
+  ansible.builtin.shell: |
+    rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}.%{ARCH}\n' |
+    grep -E '^kernel-(default|preempt|rt|vanilla)\|' |
+    cut -d'|' -f2 |
+    sort -Vu
+  register: os_update_suse_kernel_versions
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | SLES | Normalize running kernel
+  ansible.builtin.set_fact:
+    os_update_suse_running_kernel: >-
+      {{ os_update_suse_running_kernel_cmd.stdout | trim }}
+
+
+- name: OS Update | SLES | Build kernel generation list
+  ansible.builtin.set_fact:
+    os_update_suse_kernel_generations: >-
+      {{
+        os_update_suse_kernel_versions.stdout_lines
+        | default([])
+        | map('trim')
+        | reject('equalto', '')
+        | list
+      }}
+
+
+- name: OS Update | SLES | Display installed kernels
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel : {{ os_update_suse_running_kernel }}"
+      - "Installed kernels:"
+      - "{{ os_update_suse_kernel_generations }}"
+
+
+# ============================================================
+# Determine kernels to retain
+# ============================================================
+
+- name: OS Update | SLES | Determine kernels to retain
+  ansible.builtin.set_fact:
+    os_update_suse_keep_kernels: >-
+      {{
+        (
+          [os_update_suse_running_kernel]
+          +
+          (
+            os_update_suse_kernel_generations
+            | sort(reverse=true)
+          )
+        )
+        | unique
+        | list
+      }}
+
+
+- name: OS Update | SLES | Determine old kernels
+  ansible.builtin.set_fact:
+    os_update_suse_old_kernels: >-
+      {{
+        os_update_suse_kernel_generations
+        | difference(
+            os_update_suse_keep_kernels[:(
+              (os_update_kernel_keep | int) + 1
+            )]
+          )
+        | list
+      }}
+
+
+# ============================================================
+# Protect running kernel
+# ============================================================
+
+- name: OS Update | SLES | Protect running kernel
+  ansible.builtin.set_fact:
+    os_update_suse_old_kernels: >-
+      {{
+        os_update_suse_old_kernels
+        | difference([os_update_suse_running_kernel])
+        | list
+      }}
+
+
+- name: OS Update | SLES | Display cleanup plan
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel : {{ os_update_suse_running_kernel }}"
+      - "Keep kernels   : {{ os_update_suse_keep_kernels }}"
+      - "Remove kernels : {{ os_update_suse_old_kernels }}"
+
+
+# ============================================================
+# Build complete package set
+# ============================================================
+
+- name: OS Update | SLES | Build package removal list
+  ansible.builtin.set_fact:
+    os_update_suse_kernel_packages_to_remove: >-
+      {{
+        os_update_suse_kernel_packages.stdout_lines
+        | default([])
+        | select(
+            'search',
+            (
+              os_update_suse_old_kernels
+              | map('regex_escape')
+              | join('|')
+            )
+          )
+        | map('regex_replace', '\|.*$', '')
+        | list
+        | unique
+      }}
+  when:
+    - os_update_suse_old_kernels | length > 0
+
+
+- name: OS Update | SLES | Set empty removal list
+  ansible.builtin.set_fact:
+    os_update_suse_kernel_packages_to_remove: []
+  when:
+    - os_update_suse_old_kernels | length == 0
+
+
+- name: OS Update | SLES | Display packages to remove
+  ansible.builtin.debug:
+    msg:
+      - "Kernel generations:"
+      - "{{ os_update_suse_old_kernels }}"
+      - "Packages:"
+      - "{{ os_update_suse_kernel_packages_to_remove }}"
+
+
+# ============================================================
+# Remove old kernel package sets
+# ============================================================
+
+- name: OS Update | SLES | Remove old kernel packages
+  community.general.zypper:
+    name: "{{ os_update_suse_kernel_packages_to_remove }}"
+    state: absent
+  register: os_update_suse_kernel_cleanup
+  when:
+    - os_update_suse_kernel_packages_to_remove | length > 0
+
+
+# ============================================================
+# Refresh bootloader
+# ============================================================
+
+- name: OS Update | SLES | Refresh bootloader configuration
+  ansible.builtin.command:
+    cmd: grub2-mkconfig -o /boot/grub2/grub.cfg
+  register: os_update_suse_grub
+  changed_when: true
+  failed_when: false
+  when:
+    - os_update_suse_kernel_cleanup is defined
+    - os_update_suse_kernel_cleanup.changed | default(false)
+
+
+# ============================================================
+# Final status
+# ============================================================
+
+- name: OS Update | SLES | Set kernel cleanup status
+  ansible.builtin.set_fact:
+    os_update_kernel_cleanup_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_suse_kernel_cleanup is not defined
+          or
+          os_update_suse_kernel_cleanup.rc | default(0) == 0
+        )
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | SLES | Display cleanup result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "SLES KERNEL CLEANUP"
+      - "============================================================"
+      - "Running kernel : {{ os_update_suse_running_kernel }}"
+      - "Removed        : {{ os_update_suse_old_kernels }}"
+      - "Status         : {{ os_update_kernel_cleanup_status }}"
+      - "============================================================"

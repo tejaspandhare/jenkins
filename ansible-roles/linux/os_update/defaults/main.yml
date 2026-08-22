@@ -1,0 +1,115 @@
+---
+# ============================================================
+# Linux OS Update Role - Defaults
+# ============================================================
+
+# ------------------------------------------------------------
+# General
+# ------------------------------------------------------------
+
+os_update_enabled: true
+
+ansible_remote_tmp: "/tmp/ansible_tmp"
+
+
+# ------------------------------------------------------------
+# PRE-PATCH CLEANUP
+# ------------------------------------------------------------
+
+os_update_cleanup_enabled: true
+
+# Package-manager cache cleanup
+os_update_package_cache_cleanup: true
+
+# Remove unused/orphaned packages
+os_update_autoremove: true
+
+# Clean package-manager cache
+os_update_clean_package_cache: true
+
+
+# ------------------------------------------------------------
+# PATCHING
+# ------------------------------------------------------------
+
+os_update_patch_enabled: true
+
+
+# ------------------------------------------------------------
+# KERNEL CLEANUP
+# ------------------------------------------------------------
+
+# Enable old kernel cleanup
+os_update_kernel_cleanup_enabled: true
+
+# Kernel cleanup is performed after reboot when a new kernel
+# was installed.
+os_update_kernel_cleanup_after_reboot: true
+
+# Number of OLD kernel generations to retain in addition to
+# the currently running kernel.
+#
+# Example:
+#
+# running kernel = 6.8.0-138
+# keep = 1
+#
+# Keep:
+#   6.8.0-138   <- running
+#   6.8.0-137   <- one additional generation
+#
+# Remove older generations.
+os_update_kernel_keep: 1
+
+# Never remove the currently running kernel.
+os_update_protect_running_kernel: true
+
+
+# ------------------------------------------------------------
+# /boot SAFETY
+# ------------------------------------------------------------
+
+os_update_boot_safety_check: true
+
+os_update_boot_warning_percent: 80
+
+os_update_boot_critical_percent: 95
+
+
+# ------------------------------------------------------------
+# REBOOT
+# ------------------------------------------------------------
+
+# Reboot is permitted only when a new kernel is detected.
+os_update_reboot_enabled: true
+
+os_update_reboot_timeout: 1200
+
+# Verify that the expected kernel is running after reboot.
+os_update_verify_kernel_after_reboot: true
+
+
+# ------------------------------------------------------------
+# REPORTING
+# ------------------------------------------------------------
+
+os_update_report_enabled: true
+
+os_update_collect_package_summary: true
+
+os_update_collect_kernel_summary: true
+
+os_update_collect_disk_summary: true
+
+
+# ------------------------------------------------------------
+# PACKAGE EXCLUSIONS
+# ------------------------------------------------------------
+
+# Example:
+#
+# os_update_exclude_packages:
+#   - docker-ce
+#   - nginx
+#
+os_update_exclude_packages: []

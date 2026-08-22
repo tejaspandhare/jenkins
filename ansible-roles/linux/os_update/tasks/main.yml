@@ -1,0 +1,720 @@
+---
+# ============================================================
+# Linux OS Update Role
+#
+# Supported:
+#   Debian / Ubuntu
+#   RHEL / Rocky / Alma / CentOS
+#   SLES
+#
+# Flow:
+#
+#   1. Pre-check
+#   2. Cleanup
+#   3. Patch
+#   4. Detect installed kernel
+#   5. Reboot ONLY if new kernel detected
+#   6. Verify running kernel
+#   7. Kernel cleanup
+#   8. Post-check
+#   9. Build report data
+# ============================================================
+
+
+# ============================================================
+# 1. PRE-CHECK
+# ============================================================
+
+- name: OS Update | Gather initial facts
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+      - distribution
+      - hardware
+      - network
+
+
+- name: OS Update | Display operating system
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "OS UPDATE - PRE CHECK"
+      - "============================================================"
+      - "Host           : {{ inventory_hostname }}"
+      - "FQDN           : {{ ansible_fqdn | default(inventory_hostname) }}"
+      - "OS             : {{ ansible_distribution }}"
+      - "OS Version     : {{ ansible_distribution_version }}"
+      - "OS Family      : {{ ansible_os_family }}"
+      - "Architecture   : {{ ansible_architecture }}"
+      - "Running Kernel : {{ ansible_kernel }}"
+      - "============================================================"
+
+
+# ============================================================
+# 2. VALIDATE SUPPORTED OS
+# ============================================================
+
+- name: OS Update | Validate supported OS family
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['Debian', 'RedHat', 'Suse']
+    fail_msg: >-
+      Unsupported OS family:
+      {{ ansible_os_family }}
+      ({{ ansible_distribution }} {{ ansible_distribution_version }})
+
+    success_msg: >-
+      Supported OS:
+      {{ ansible_distribution }}
+      {{ ansible_distribution_version }}
+
+
+# ============================================================
+# 3. CAPTURE PRE-PATCH INFORMATION
+# ============================================================
+
+- name: OS Update | Save old running kernel
+  ansible.builtin.set_fact:
+    os_update_old_kernel: "{{ ansible_kernel }}"
+
+
+- name: OS Update | Save start timestamp
+  ansible.builtin.set_fact:
+    os_update_start_time: "{{ ansible_date_time.iso8601 }}"
+
+
+- name: OS Update | Check /boot before patching
+  ansible.builtin.shell: |
+    df -h /boot 2>/dev/null || df -h /
+  register: os_update_boot_before
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 4. PRE-PATCH CLEANUP
+# ============================================================
+
+- name: OS Update | Debian/Ubuntu cleanup
+  ansible.builtin.include_tasks: cleanup_debian.yml
+  when:
+    - os_update_cleanup_enabled | bool
+    - ansible_os_family == 'Debian'
+
+
+- name: OS Update | RHEL/Rocky/Alma/CentOS cleanup
+  ansible.builtin.include_tasks: cleanup_redhat.yml
+  when:
+    - os_update_cleanup_enabled | bool
+    - ansible_os_family == 'RedHat'
+
+
+- name: OS Update | SLES cleanup
+  ansible.builtin.include_tasks: cleanup_suse.yml
+  when:
+    - os_update_cleanup_enabled | bool
+    - ansible_os_family == 'Suse'
+
+
+- name: OS Update | Set cleanup status when disabled
+  ansible.builtin.set_fact:
+    os_update_cleanup_status: "SKIPPED"
+  when:
+    - not (os_update_cleanup_enabled | bool)
+
+
+# ============================================================
+# 5. PATCH OPERATING SYSTEM
+# ============================================================
+
+- name: OS Update | Patch Debian/Ubuntu
+  ansible.builtin.include_tasks: patch_debian.yml
+  when:
+    - os_update_patch_enabled | bool
+    - ansible_os_family == 'Debian'
+
+
+- name: OS Update | Patch RHEL/Rocky/Alma/CentOS
+  ansible.builtin.include_tasks: patch_redhat.yml
+  when:
+    - os_update_patch_enabled | bool
+    - ansible_os_family == 'RedHat'
+
+
+- name: OS Update | Patch SLES
+  ansible.builtin.include_tasks: patch_suse.yml
+  when:
+    - os_update_patch_enabled | bool
+    - ansible_os_family == 'Suse'
+
+
+- name: OS Update | Set patch status when disabled
+  ansible.builtin.set_fact:
+    os_update_patch_status: "SKIPPED"
+  when:
+    - not (os_update_patch_enabled | bool)
+
+
+# ============================================================
+# 6. DETECT INSTALLED KERNEL AFTER PATCH
+#
+# IMPORTANT:
+#
+# ansible_kernel is the CURRENTLY RUNNING kernel.
+#
+# A package manager can install a new kernel without rebooting.
+# Therefore we inspect the installed kernel packages here.
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Debian / Ubuntu
+# ------------------------------------------------------------
+
+- name: OS Update | Detect installed kernel - Debian/Ubuntu
+  ansible.builtin.shell: |
+    dpkg-query -W -f='${Package}\n' 2>/dev/null |
+    grep -E '^linux-image-[0-9]' |
+    sed 's/^linux-image-//' |
+    sort -V |
+    tail -1
+  register: os_update_installed_kernel_debian
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+
+
+# ------------------------------------------------------------
+# RHEL
+# ------------------------------------------------------------
+
+- name: OS Update | Detect installed kernel - RHEL
+  ansible.builtin.shell: |
+    rpm -q kernel --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null |
+    sort -V |
+    tail -1
+  register: os_update_installed_kernel_redhat
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'RedHat'
+
+
+# ------------------------------------------------------------
+# SLES
+# ------------------------------------------------------------
+
+- name: OS Update | Detect installed kernel - SLES
+  ansible.builtin.shell: |
+    rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}.%{ARCH}\n' |
+    grep -E '^kernel-(default|preempt|rt)\|' |
+    cut -d'|' -f2 |
+    sort -V |
+    tail -1
+  register: os_update_installed_kernel_suse
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Suse'
+
+
+# ============================================================
+# 7. NORMALIZE INSTALLED KERNEL
+# ============================================================
+
+- name: OS Update | Set installed kernel - Debian
+  ansible.builtin.set_fact:
+    os_update_new_installed_kernel: >-
+      {{ os_update_installed_kernel_debian.stdout | trim }}
+  when:
+    - ansible_os_family == 'Debian'
+
+
+- name: OS Update | Set installed kernel - RedHat
+  ansible.builtin.set_fact:
+    os_update_new_installed_kernel: >-
+      {{ os_update_installed_kernel_redhat.stdout | trim }}
+  when:
+    - ansible_os_family == 'RedHat'
+
+
+- name: OS Update | Set installed kernel - SLES
+  ansible.builtin.set_fact:
+    os_update_new_installed_kernel: >-
+      {{ os_update_installed_kernel_suse.stdout | trim }}
+  when:
+    - ansible_os_family == 'Suse'
+
+
+# ============================================================
+# 8. DETERMINE WHETHER NEW KERNEL WAS INSTALLED
+#
+# We compare the newest installed kernel against the kernel
+# that was running before patching.
+#
+# Same kernel:
+#     NO REBOOT
+#
+# Different kernel:
+#     REBOOT
+# ============================================================
+
+- name: OS Update | Determine new kernel
+  ansible.builtin.set_fact:
+    os_update_new_kernel_detected: >-
+      {{
+        (
+          os_update_new_installed_kernel | default('')
+        ) != (
+          os_update_old_kernel | default('')
+        )
+        and
+        (
+          os_update_new_installed_kernel | default('')
+        ) != ''
+      }}
+
+
+- name: OS Update | Display kernel detection
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "KERNEL DETECTION"
+      - "============================================================"
+      - "Old running kernel    : {{ os_update_old_kernel }}"
+      - "Newest installed      : {{ os_update_new_installed_kernel | default('NOT DETECTED') }}"
+      - "New kernel detected   : {{ os_update_new_kernel_detected }}"
+      - "============================================================"
+
+
+# ============================================================
+# 9. DETERMINE REBOOT REQUIREMENT
+# ============================================================
+
+- name: OS Update | Set reboot requirement
+  ansible.builtin.set_fact:
+    os_update_reboot_required: "{{ os_update_new_kernel_detected | bool }}"
+
+
+- name: OS Update | Display reboot decision
+  ansible.builtin.debug:
+    msg: >-
+      Reboot decision:
+      {{
+        'REBOOT REQUIRED - NEW KERNEL DETECTED'
+        if os_update_reboot_required | bool
+        else
+        'NO REBOOT - NO NEW KERNEL DETECTED'
+      }}
+
+
+# ============================================================
+# 10. REBOOT ONLY IF NEW KERNEL DETECTED
+# ============================================================
+
+- name: OS Update | Reboot because new kernel was installed
+  ansible.builtin.reboot:
+    msg: "OS Update: rebooting because a new kernel was installed"
+    reboot_timeout: "{{ os_update_reboot_timeout }}"
+    connect_timeout: 10
+    pre_reboot_delay: 5
+    post_reboot_delay: 15
+    test_command: "uname -r"
+  register: os_update_reboot_result
+  when:
+    - os_update_reboot_enabled | bool
+    - os_update_reboot_required | bool
+
+
+# ============================================================
+# 11. SET REBOOT STATUS
+# ============================================================
+
+- name: OS Update | Set reboot status - rebooted
+  ansible.builtin.set_fact:
+    os_update_reboot_status: "REBOOTED"
+  when:
+    - os_update_reboot_result is defined
+    - os_update_reboot_result.changed | default(false) | bool
+
+
+- name: OS Update | Set reboot status - disabled
+  ansible.builtin.set_fact:
+    os_update_reboot_status: "DISABLED"
+  when:
+    - os_update_reboot_required | bool
+    - not (os_update_reboot_enabled | bool)
+
+
+- name: OS Update | Set reboot status - not required
+  ansible.builtin.set_fact:
+    os_update_reboot_status: "NOT_REQUIRED"
+  when:
+    - not (os_update_reboot_required | bool)
+
+
+# ============================================================
+# 12. GATHER FACTS AFTER REBOOT
+# ============================================================
+
+- name: OS Update | Refresh facts after reboot
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+      - distribution
+      - hardware
+  when:
+    - os_update_reboot_result is defined
+    - os_update_reboot_result.changed | default(false) | bool
+
+
+# ============================================================
+# 13. CAPTURE CURRENT RUNNING KERNEL
+# ============================================================
+
+- name: OS Update | Get current running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: os_update_final_kernel_command
+  changed_when: false
+
+
+- name: OS Update | Save final running kernel
+  ansible.builtin.set_fact:
+    os_update_final_kernel: >-
+      {{ os_update_final_kernel_command.stdout | trim }}
+
+
+# ============================================================
+# 14. VERIFY NEW KERNEL AFTER REBOOT
+# ============================================================
+
+- name: OS Update | Verify new kernel is running
+  ansible.builtin.assert:
+    that:
+      - os_update_final_kernel == os_update_new_installed_kernel
+    fail_msg: >-
+      NEW KERNEL VERIFICATION FAILED.
+
+      Installed kernel:
+      {{ os_update_new_installed_kernel }}
+
+      Running kernel:
+      {{ os_update_final_kernel }}
+
+      The server rebooted but did not boot the expected kernel.
+
+    success_msg: >-
+      New kernel verified successfully:
+      {{ os_update_final_kernel }}
+  when:
+    - os_update_new_kernel_detected | bool
+    - os_update_reboot_result is defined
+    - os_update_reboot_result.changed | default(false) | bool
+
+
+# ============================================================
+# 15. KERNEL CLEANUP
+#
+# IMPORTANT:
+#
+# This happens AFTER reboot.
+#
+# Therefore the currently running kernel is protected.
+#
+# OS-specific tasks remove the COMPLETE package set belonging
+# to old kernel generations.
+# ============================================================
+
+- name: OS Update | Kernel cleanup - Debian/Ubuntu
+  ansible.builtin.include_tasks: kernel_debian.yml
+  when:
+    - os_update_kernel_cleanup_enabled | bool
+    - ansible_os_family == 'Debian'
+
+
+- name: OS Update | Kernel cleanup - RHEL/Rocky/Alma/CentOS
+  ansible.builtin.include_tasks: kernel_redhat.yml
+  when:
+    - os_update_kernel_cleanup_enabled | bool
+    - ansible_os_family == 'RedHat'
+
+
+- name: OS Update | Kernel cleanup - SLES
+  ansible.builtin.include_tasks: kernel_suse.yml
+  when:
+    - os_update_kernel_cleanup_enabled | bool
+    - ansible_os_family == 'Suse'
+
+
+- name: OS Update | Set kernel cleanup status when disabled
+  ansible.builtin.set_fact:
+    os_update_kernel_cleanup_status: "SKIPPED"
+  when:
+    - not (os_update_kernel_cleanup_enabled | bool)
+
+
+# ============================================================
+# 16. FINAL SYSTEM CHECKS
+# ============================================================
+
+- name: OS Update | Check final running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: os_update_postcheck_kernel
+  changed_when: false
+
+
+- name: OS Update | Check uptime
+  ansible.builtin.command:
+    cmd: uptime
+  register: os_update_postcheck_uptime
+  changed_when: false
+
+
+- name: OS Update | Check /boot after patching
+  ansible.builtin.shell: |
+    df -h /boot 2>/dev/null || df -h /
+  register: os_update_boot_after
+  changed_when: false
+  failed_when: false
+
+
+# ============================================================
+# 17. PACKAGE DATABASE POST-CHECK
+# ============================================================
+
+# ------------------------------------------------------------
+# Debian / Ubuntu
+# ------------------------------------------------------------
+
+- name: OS Update | Debian package database check
+  ansible.builtin.command:
+    cmd: dpkg --audit
+  register: os_update_postcheck_dpkg
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Debian'
+
+
+# ------------------------------------------------------------
+# RHEL
+# ------------------------------------------------------------
+
+- name: OS Update | RHEL RPM database check
+  ansible.builtin.command:
+    cmd: rpm --verifydb
+  register: os_update_postcheck_rpm
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'RedHat'
+
+
+# ------------------------------------------------------------
+# SLES
+# ------------------------------------------------------------
+
+- name: OS Update | SLES package verification
+  ansible.builtin.command:
+    cmd: zypper verify
+  register: os_update_postcheck_zypper
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == 'Suse'
+
+
+# ============================================================
+# 18. DETERMINE POST-CHECK STATUS
+# ============================================================
+
+- name: OS Update | Determine post-check status
+  ansible.builtin.set_fact:
+    os_update_postcheck_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_postcheck_kernel.rc | default(1) == 0
+
+          and
+          (
+            ansible_os_family != 'Debian'
+            or
+            os_update_postcheck_dpkg.rc | default(1) == 0
+          )
+
+          and
+          (
+            ansible_os_family != 'RedHat'
+            or
+            os_update_postcheck_rpm.rc | default(1) == 0
+          )
+
+          and
+          (
+            ansible_os_family != 'Suse'
+            or
+            os_update_postcheck_zypper.rc | default(1) == 0
+          )
+        )
+        else
+        'FAILED'
+      }
+
+
+# ============================================================
+# 19. FINAL KERNEL STATUS
+# ============================================================
+
+- name: OS Update | Determine kernel status
+  ansible.builtin.set_fact:
+    os_update_kernel_status: >-
+      {{
+        'UPDATED'
+        if os_update_new_kernel_detected | bool
+        else
+        'UNCHANGED'
+      }}
+
+
+# ============================================================
+# 20. BUILD FINAL HOST RESULT
+# ============================================================
+
+- name: OS Update | Save final timestamp
+  ansible.builtin.set_fact:
+    os_update_end_time: "{{ ansible_date_time.iso8601 }}"
+
+
+- name: OS Update | Build host result
+  ansible.builtin.set_fact:
+    os_update_result:
+
+      # ------------------------------------------------------
+      # Host
+      # ------------------------------------------------------
+
+      host: "{{ inventory_hostname }}"
+      fqdn: "{{ ansible_fqdn | default(inventory_hostname) }}"
+
+      # ------------------------------------------------------
+      # OS
+      # ------------------------------------------------------
+
+      os: "{{ ansible_distribution }}"
+      os_version: "{{ ansible_distribution_version }}"
+      os_family: "{{ ansible_os_family }}"
+      architecture: "{{ ansible_architecture }}"
+
+      # ------------------------------------------------------
+      # Kernel
+      # ------------------------------------------------------
+
+      old_kernel: "{{ os_update_old_kernel }}"
+      new_kernel: "{{ os_update_new_installed_kernel | default('N/A') }}"
+      running_kernel: "{{ os_update_final_kernel }}"
+      kernel_status: "{{ os_update_kernel_status }}"
+      new_kernel_detected: "{{ os_update_new_kernel_detected }}"
+
+      # ------------------------------------------------------
+      # Operations
+      # ------------------------------------------------------
+
+      cleanup_status: "{{ os_update_cleanup_status | default('UNKNOWN') }}"
+      patch_status: "{{ os_update_patch_status | default('UNKNOWN') }}"
+      kernel_cleanup_status: "{{ os_update_kernel_cleanup_status | default('UNKNOWN') }}"
+
+      # ------------------------------------------------------
+      # Reboot
+      # ------------------------------------------------------
+
+      reboot_required: "{{ os_update_reboot_required }}"
+      reboot_status: "{{ os_update_reboot_status | default('UNKNOWN') }}"
+
+      # ------------------------------------------------------
+      # Post-check
+      # ------------------------------------------------------
+
+      postcheck_status: "{{ os_update_postcheck_status }}"
+
+      # ------------------------------------------------------
+      # Timing
+      # ------------------------------------------------------
+
+      start_time: "{{ os_update_start_time }}"
+      end_time: "{{ os_update_end_time }}"
+
+      # ------------------------------------------------------
+      # Final status
+      # ------------------------------------------------------
+
+      status: >-
+        {{
+          'SUCCESS'
+          if (
+            os_update_cleanup_status | default('FAILED') in ['SUCCESS', 'SKIPPED']
+
+            and
+            os_update_patch_status | default('FAILED') in ['SUCCESS', 'SKIPPED']
+
+            and
+            os_update_kernel_cleanup_status | default('FAILED') in ['SUCCESS', 'SKIPPED']
+
+            and
+            os_update_postcheck_status | default('FAILED') == 'SUCCESS'
+
+            and
+            (
+              not os_update_new_kernel_detected | bool
+              or
+              os_update_final_kernel ==
+              os_update_new_installed_kernel
+            )
+          )
+          else
+          'FAILED'
+        }}
+
+
+# ============================================================
+# 21. DISPLAY FINAL RESULT
+# ============================================================
+
+- name: OS Update | Display final result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "OS UPDATE FINAL RESULT"
+      - "============================================================"
+      - "Host              : {{ os_update_result.host }}"
+      - "OS                : {{ os_update_result.os }}"
+      - "OS Version        : {{ os_update_result.os_version }}"
+      - "OS Family         : {{ os_update_result.os_family }}"
+      - "------------------------------------------------------------"
+      - "Old Kernel        : {{ os_update_result.old_kernel }}"
+      - "New Kernel        : {{ os_update_result.new_kernel }}"
+      - "Running Kernel    : {{ os_update_result.running_kernel }}"
+      - "Kernel Status     : {{ os_update_result.kernel_status }}"
+      - "------------------------------------------------------------"
+      - "Cleanup           : {{ os_update_result.cleanup_status }}"
+      - "Patch             : {{ os_update_result.patch_status }}"
+      - "Kernel Cleanup    : {{ os_update_result.kernel_cleanup_status }}"
+      - "Reboot Required   : {{ os_update_result.reboot_required }}"
+      - "Reboot Status     : {{ os_update_result.reboot_status }}"
+      - "Post Check        : {{ os_update_result.postcheck_status }}"
+      - "------------------------------------------------------------"
+      - "FINAL STATUS      : {{ os_update_result.status }}"
+      - "============================================================"
+
+
+# ============================================================
+# 22. REPORT
+# ============================================================
+
+- name: OS Update | Generate report
+  ansible.builtin.include_tasks: report.yml
+  when:
+    - os_update_report_enabled | bool

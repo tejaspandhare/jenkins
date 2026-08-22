@@ -1,0 +1,11 @@
+---
+- name: Linux OS Update v2
+  hosts: "{{ target_hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
+  become: true
+  gather_facts: true
+
+  vars:
+    ansible_remote_tmp: "/tmp/ansible_tmp"
+
+  roles:
+    - os_update

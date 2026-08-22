@@ -1,0 +1,72 @@
+---
+# ============================================================
+# RHEL / Rocky / Alma / CentOS OS Patching
+# ============================================================
+
+- name: OS Update | RedHat | Detect package manager
+  ansible.builtin.set_fact:
+    os_update_redhat_package_manager: >-
+      {{
+        'dnf'
+        if ansible_facts.pkg_mgr == 'dnf'
+        else 'yum'
+      }}
+
+
+- name: OS Update | RedHat | Clean package metadata
+  ansible.builtin.command:
+    cmd: "{{ os_update_redhat_package_manager }} clean all"
+  register: os_update_redhat_clean
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | RedHat | Update all packages with DNF
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_cache: true
+  register: os_update_patch_result
+  when:
+    - os_update_redhat_package_manager == 'dnf'
+
+
+- name: OS Update | RedHat | Update all packages with YUM
+  ansible.builtin.yum:
+    name: "*"
+    state: latest
+    update_cache: true
+  register: os_update_patch_result
+  when:
+    - os_update_redhat_package_manager == 'yum'
+
+
+- name: OS Update | RedHat | Verify RPM database
+  ansible.builtin.command:
+    cmd: rpm --verifydb
+  register: os_update_rpm_verify
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | RedHat | Set patch status
+  ansible.builtin.set_fact:
+    os_update_patch_status: >-
+      {{
+        'SUCCESS'
+        if os_update_rpm_verify.rc | default(1) == 0
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | RedHat | Display patch result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "RHEL / REDHAT PATCH"
+      - "============================================================"
+      - "Package manager : {{ os_update_redhat_package_manager }}"
+      - "Package changes : {{ os_update_patch_result.changed | default(false) }}"
+      - "Patch status    : {{ os_update_patch_status }}"
+      - "============================================================"

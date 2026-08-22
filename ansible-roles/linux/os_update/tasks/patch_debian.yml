@@ -1,0 +1,73 @@
+---
+# ============================================================
+# Debian / Ubuntu OS Patching
+# ============================================================
+
+- name: OS Update | Debian | Refresh APT cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  register: os_update_apt_cache
+
+
+- name: OS Update | Debian | Upgrade packages
+  ansible.builtin.apt:
+    name: "*"
+    state: latest
+    update_cache: false
+    install_recommends: true
+  register: os_update_patch_result
+
+
+- name: OS Update | Debian | Fix broken packages
+  ansible.builtin.command:
+    cmd: dpkg --configure -a
+  register: os_update_dpkg_configure
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | Debian | Check package status
+  ansible.builtin.command:
+    cmd: dpkg --audit
+  register: os_update_dpkg_audit
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | Debian | Calculate updated package count
+  ansible.builtin.set_fact:
+    os_update_updated_packages: >-
+      {{
+        os_update_patch_result.changed
+        | ternary(
+            os_update_patch_result.results | default([]) | length,
+            0
+          )
+      }}
+
+
+- name: OS Update | Debian | Set patch status
+  ansible.builtin.set_fact:
+    os_update_patch_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_dpkg_configure.rc | default(1) == 0
+          and
+          os_update_dpkg_audit.rc | default(1) == 0
+        )
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | Debian | Display patch result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "DEBIAN / UBUNTU PATCH"
+      - "============================================================"
+      - "Package changes : {{ os_update_patch_result.changed | default(false) }}"
+      - "Patch status    : {{ os_update_patch_status }}"
+      - "============================================================"

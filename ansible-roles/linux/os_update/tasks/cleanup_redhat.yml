@@ -1,0 +1,82 @@
+---
+# ============================================================
+# RHEL / Rocky / Alma / CentOS PRE-PATCH CLEANUP
+# ============================================================
+
+- name: RedHat | Detect DNF
+  ansible.builtin.command:
+    cmd: command -v dnf
+  register: os_update_dnf_check
+  changed_when: false
+  failed_when: false
+
+- name: RedHat | Detect YUM
+  ansible.builtin.command:
+    cmd: command -v yum
+  register: os_update_yum_check
+  changed_when: false
+  failed_when: false
+
+- name: RedHat | Select package manager
+  ansible.builtin.set_fact:
+    os_update_rpm_package_manager: >-
+      {{
+        'dnf'
+        if os_update_dnf_check.rc == 0
+        else 'yum'
+        if os_update_yum_check.rc == 0
+        else 'unsupported'
+      }}
+
+- name: RedHat | Validate package manager
+  ansible.builtin.assert:
+    that:
+      - os_update_rpm_package_manager != 'unsupported'
+    fail_msg: >-
+      Neither dnf nor yum was found on
+      {{ ansible_distribution }} {{ ansible_distribution_version }}
+
+- name: RedHat | Display package manager
+  ansible.builtin.debug:
+    msg: "Using package manager: {{ os_update_rpm_package_manager }}"
+
+# ------------------------------------------------------------
+# Package cleanup
+# ------------------------------------------------------------
+
+- name: RedHat | Clean DNF/YUM cache
+  ansible.builtin.command:
+    cmd: "{{ os_update_rpm_package_manager }} clean all"
+  register: os_update_rpm_cache_clean
+  changed_when: false
+  when: os_update_package_cache_cleanup | bool
+
+- name: RedHat | Autoremove unused packages with DNF
+  ansible.builtin.dnf:
+    autoremove: true
+  register: os_update_redhat_autoremove
+  when:
+    - os_update_rpm_package_manager == 'dnf'
+    - os_update_autoremove_enabled | bool
+
+- name: RedHat | Autoremove unused packages with YUM
+  ansible.builtin.yum:
+    autoremove: true
+  register: os_update_redhat_autoremove
+  when:
+    - os_update_rpm_package_manager == 'yum'
+    - os_update_autoremove_enabled | bool
+
+- name: RedHat | Check disk usage of /boot
+  ansible.builtin.shell: |
+    df -h /boot
+  register: os_update_boot_usage
+  changed_when: false
+
+- name: RedHat | Show /boot usage
+  ansible.builtin.debug:
+    var: os_update_boot_usage.stdout
+
+- name: RedHat | Set cleanup status
+  ansible.builtin.set_fact:
+    os_update_cleanup_status: "SUCCESS"

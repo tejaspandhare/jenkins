@@ -1,0 +1,276 @@
+---
+# ============================================================
+# Debian / Ubuntu Kernel Cleanup
+#
+# Rules:
+#
+# 1. NEVER remove the currently running kernel.
+# 2. A complete kernel generation is treated as one unit.
+# 3. Keep the running kernel.
+# 4. Keep os_update_kernel_keep additional generations.
+# 5. Remove everything older.
+# 6. Cleanup occurs after reboot.
+# ============================================================
+
+
+# ------------------------------------------------------------
+# Running kernel
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Get running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: os_update_debian_running_kernel_cmd
+  changed_when: false
+
+
+- name: OS Update | Debian | Save running kernel
+  ansible.builtin.set_fact:
+    os_update_debian_running_kernel: >-
+      {{ os_update_debian_running_kernel_cmd.stdout | trim }}
+
+
+# ------------------------------------------------------------
+# Installed kernel packages
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Get installed kernel packages
+  ansible.builtin.shell: |
+    dpkg-query -W -f='${binary:Package}\n' 2>/dev/null |
+    grep -E '^(linux-image|linux-modules|linux-headers)' |
+    sort -V
+  register: os_update_debian_kernel_packages
+  changed_when: false
+  failed_when: false
+
+
+# ------------------------------------------------------------
+# Installed kernel generations
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Get installed kernel images
+  ansible.builtin.shell: |
+    dpkg-query -W -f='${Package}\n' 2>/dev/null |
+    grep -E '^linux-image-[0-9]' |
+    sed -E 's/^linux-image-//' |
+    sed -E 's/:.*$//' |
+    sort -Vu
+  register: os_update_debian_kernel_versions
+  changed_when: false
+  failed_when: false
+
+
+- name: OS Update | Debian | Build kernel generation list
+  ansible.builtin.set_fact:
+    os_update_debian_kernel_generations: >-
+      {{
+        os_update_debian_kernel_versions.stdout_lines
+        | default([])
+        | map('trim')
+        | reject('equalto', '')
+        | list
+      }}
+
+
+# ------------------------------------------------------------
+# Display
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Display installed kernels
+  ansible.builtin.debug:
+    msg:
+      - "Running kernel : {{ os_update_debian_running_kernel }}"
+      - "Installed      : {{ os_update_debian_kernel_generations }}"
+
+
+# ------------------------------------------------------------
+# Determine kernels to KEEP
+#
+# Keep:
+#
+#   1. Running kernel
+#   2. N newest other kernels
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Determine kernels to retain
+  ansible.builtin.set_fact:
+    os_update_debian_keep_kernels: >-
+      {{
+        (
+          [os_update_debian_running_kernel]
+          +
+          (
+            os_update_debian_kernel_generations
+            | difference([os_update_debian_running_kernel])
+            | sort(reverse=true)
+            | list
+          )[:(os_update_kernel_keep | int)]
+        )
+        | unique
+        | list
+      }}
+
+
+# ------------------------------------------------------------
+# Determine kernels to REMOVE
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Determine old kernels
+  ansible.builtin.set_fact:
+    os_update_debian_old_kernels: >-
+      {{
+        os_update_debian_kernel_generations
+        | difference(os_update_debian_keep_kernels)
+        | difference([os_update_debian_running_kernel])
+        | list
+      }}
+
+
+# ------------------------------------------------------------
+# Display cleanup plan
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Display kernel cleanup plan
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "DEBIAN / UBUNTU KERNEL CLEANUP PLAN"
+      - "============================================================"
+      - "Running kernel : {{ os_update_debian_running_kernel }}"
+      - "Keep kernels   : {{ os_update_debian_keep_kernels }}"
+      - "Remove kernels : {{ os_update_debian_old_kernels }}"
+      - "============================================================"
+
+
+# ------------------------------------------------------------
+# Build COMPLETE package set
+#
+# This catches:
+#
+# linux-image-<version>
+# linux-image-extra-<version>
+# linux-modules-<version>
+# linux-modules-extra-<version>
+# linux-headers-<version>
+# linux-headers-<version>-generic
+#
+# etc.
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Build complete package removal list
+  ansible.builtin.set_fact:
+    os_update_debian_kernel_packages_to_remove: >-
+      {{
+        os_update_debian_kernel_packages.stdout_lines
+        | default([])
+        | select(
+            'search',
+            (
+              os_update_debian_old_kernels
+              | map('regex_escape')
+              | join('|')
+            )
+          )
+        | list
+      }}
+  when:
+    - os_update_debian_old_kernels | length > 0
+
+
+- name: OS Update | Debian | Set empty package removal list
+  ansible.builtin.set_fact:
+    os_update_debian_kernel_packages_to_remove: []
+  when:
+    - os_update_debian_old_kernels | length == 0
+
+
+# ------------------------------------------------------------
+# Safety check
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Verify running kernel is protected
+  ansible.builtin.assert:
+    that:
+      - os_update_debian_running_kernel not in os_update_debian_old_kernels
+    fail_msg: >-
+      SAFETY FAILURE:
+      Running kernel {{ os_update_debian_running_kernel }}
+      was selected for removal.
+    success_msg: >-
+      Running kernel {{ os_update_debian_running_kernel }}
+      is protected.
+
+
+# ------------------------------------------------------------
+# Display package removal list
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Display packages to remove
+  ansible.builtin.debug:
+    msg:
+      - "Kernel generations to remove:"
+      - "{{ os_update_debian_old_kernels }}"
+      - "Complete package set:"
+      - "{{ os_update_debian_kernel_packages_to_remove }}"
+
+
+# ------------------------------------------------------------
+# Remove old kernel package sets
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Remove old kernel package sets
+  ansible.builtin.apt:
+    name: "{{ os_update_debian_kernel_packages_to_remove }}"
+    state: absent
+    purge: true
+    autoremove: false
+    lock_timeout: 300
+  register: os_update_debian_kernel_cleanup
+  when:
+    - os_update_debian_kernel_packages_to_remove | length > 0
+
+
+# ------------------------------------------------------------
+# Update GRUB
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Update GRUB
+  ansible.builtin.command:
+    cmd: update-grub
+  register: os_update_debian_update_grub
+  changed_when: true
+  when:
+    - os_update_debian_kernel_cleanup is defined
+    - os_update_debian_kernel_cleanup.changed | default(false) | bool
+
+
+# ------------------------------------------------------------
+# Final status
+# ------------------------------------------------------------
+
+- name: OS Update | Debian | Set kernel cleanup status
+  ansible.builtin.set_fact:
+    os_update_kernel_cleanup_status: >-
+      {{
+        'SUCCESS'
+        if (
+          os_update_debian_kernel_cleanup is not defined
+          or
+          os_update_debian_kernel_cleanup.rc | default(0) == 0
+        )
+        else
+        'FAILED'
+      }}
+
+
+- name: OS Update | Debian | Display cleanup result
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "DEBIAN / UBUNTU KERNEL CLEANUP RESULT"
+      - "============================================================"
+      - "Running kernel : {{ os_update_debian_running_kernel }}"
+      - "Kept kernels   : {{ os_update_debian_keep_kernels }}"
+      - "Removed        : {{ os_update_debian_old_kernels }}"
+      - "Status         : {{ os_update_kernel_cleanup_status }}"
+      - "============================================================"
