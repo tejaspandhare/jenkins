@@ -60,7 +60,7 @@ pipeline {
 
                             ansible-playbook \
                                 -i inventory/hosts \
-                                ansible-roles/ansible-roles/linux/os_update.yml \
+                                ansible-roles/linux/os_update.yml \
                                 --private-key="\$ANSIBLE_KEY_FILE" \
                                 -e "target_hosts=${params.SERVER_NAME}" \
                                 -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
