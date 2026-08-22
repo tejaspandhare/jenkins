@@ -32,6 +32,7 @@ pipeline {
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
         ANSIBLE_HOST_KEY_CHECKING = 'false'
+
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
@@ -40,6 +41,7 @@ pipeline {
         stage('Validate Input') {
             steps {
                 script {
+
                     if (!params.SERVER_NAME?.trim()) {
                         error('SERVER_NAME cannot be empty')
                     }
@@ -81,6 +83,7 @@ pipeline {
 
         stage('Run Ansible Patching') {
             steps {
+
                 withCredentials([
                     file(
                         credentialsId: 'automation-key',
@@ -88,57 +91,76 @@ pipeline {
                     )
                 ]) {
 
-                    /*
-                     * Copy Jenkins parameters into environment variables.
-                     *
-                     * Using withEnv here avoids Groovy injecting parameter
-                     * values directly into the shell script.
-                     */
-                    withEnv([
-                        "PATCH_TARGETS=${params.SERVER_NAME}",
-                        "PATCH_EXCLUDE_PKGS=${params.EXCLUDE_PKGS ?: ''}"
-                    ]) {
+                    script {
 
-                        sh '''
-                            set -eu
+                        /*
+                         * Normalize the Jenkins parameters in Groovy.
+                         */
+                        def targetHosts = params.SERVER_NAME?.trim() ?: ''
+                        def excludePkgs = params.EXCLUDE_PKGS?.trim() ?: ''
 
-                            echo ""
-                            echo "============================================"
-                            echo "ANSIBLE PATCH EXECUTION"
-                            echo "============================================"
-                            echo "Servers      : ${PATCH_TARGETS}"
-                            
-                            if [ -n "${PATCH_EXCLUDE_PKGS}" ]; then
-                                echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
-                            else
-                                echo "Exclude pkgs : NONE"
-                            fi
+                        /*
+                         * Pass values into the shell as environment variables.
+                         */
+                        withEnv([
+                            "PATCH_TARGETS=${targetHosts}",
+                            "PATCH_EXCLUDE_PKGS=${excludePkgs}"
+                        ]) {
 
-                            echo "============================================"
+                            sh '''
+                                set -eu
 
-                            mkdir -p reports
+                                echo ""
+                                echo "============================================"
+                                echo "ANSIBLE PATCH EXECUTION"
+                                echo "============================================"
 
-                            /*
-                             * IMPORTANT:
-                             *
-                             * Quote every variable.
-                             * Do not use ${EXCLUDE_PKGS} unquoted because
-                             * values such as kernel* can be expanded by
-                             * the shell.
-                             */
+                                echo "Servers      : ${PATCH_TARGETS:-}"
 
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/linux/os_update.yml \
-                                --private-key="$ANSIBLE_KEY_FILE" \
-                                -e "target_hosts=$PATCH_TARGETS" \
-                                -e "EXCLUDE_PKGS=$PATCH_EXCLUDE_PKGS"
+                                if [ -n "${PATCH_EXCLUDE_PKGS:-}" ]; then
+                                    echo "Exclude pkgs : ${PATCH_EXCLUDE_PKGS}"
+                                else
+                                    echo "Exclude pkgs : NONE"
+                                fi
 
-                            echo ""
-                            echo "============================================"
-                            echo "ANSIBLE PATCH EXECUTION COMPLETED"
-                            echo "============================================"
-                        '''
+                                echo "============================================"
+
+                                mkdir -p reports
+
+                                /*
+                                 * Always use the default expansion.
+                                 * This prevents "parameter not set".
+                                 */
+
+                                TARGETS="${PATCH_TARGETS:-}"
+                                EXCLUDES="${PATCH_EXCLUDE_PKGS:-}"
+
+                                if [ -n "$EXCLUDES" ]; then
+
+                                    ansible-playbook \
+                                        -i inventory/hosts \
+                                        ansible-roles/linux/os_update.yml \
+                                        --private-key="$ANSIBLE_KEY_FILE" \
+                                        -e "target_hosts=$TARGETS" \
+                                        -e "EXCLUDE_PKGS=$EXCLUDES"
+
+                                else
+
+                                    ansible-playbook \
+                                        -i inventory/hosts \
+                                        ansible-roles/linux/os_update.yml \
+                                        --private-key="$ANSIBLE_KEY_FILE" \
+                                        -e "target_hosts=$TARGETS" \
+                                        -e "EXCLUDE_PKGS="
+
+                                fi
+
+                                echo ""
+                                echo "============================================"
+                                echo "ANSIBLE PATCH EXECUTION COMPLETED"
+                                echo "============================================"
+                            '''
+                        }
                     }
                 }
             }
@@ -170,10 +192,12 @@ pipeline {
                         -name '*.html' \
                         -print
 
-                    REPORT_COUNT=$(find reports \
-                        -type f \
-                        -name '*.html' \
-                        | wc -l)
+                    REPORT_COUNT=$(
+                        find reports \
+                            -type f \
+                            -name '*.html' \
+                            | wc -l
+                    )
 
                     echo ""
                     echo "Report count: ${REPORT_COUNT}"
@@ -192,6 +216,7 @@ pipeline {
 
         stage('Archive Report') {
             steps {
+
                 archiveArtifacts(
                     artifacts: 'reports/*.html',
                     fingerprint: true,
