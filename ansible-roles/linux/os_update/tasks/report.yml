@@ -1,0 +1,59 @@
+---
+# ============================================================
+# OS UPDATE - HTML REPORT GENERATION
+#
+# This file:
+#   1. Creates the reports directory on the Jenkins controller
+#   2. Generates one HTML report per target host
+#
+# Reports are stored in:
+#
+#   <jenkins-workspace>/reports/<hostname>.html
+#
+# The directory is controlled by:
+#
+#   os_update_report_directory
+#
+# ============================================================
+
+
+# ============================================================
+# 1. CREATE REPORT DIRECTORY
+# ============================================================
+
+- name: OS Update | Create report directory
+  ansible.builtin.file:
+    path: "{{ os_update_report_directory }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+
+# ============================================================
+# 2. GENERATE HTML REPORT
+# ============================================================
+
+- name: OS Update | Generate HTML report
+  ansible.builtin.template:
+    src: report.j2
+    dest: "{{ os_update_report_directory }}/{{ inventory_hostname }}.html"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+
+# ============================================================
+# 3. DISPLAY REPORT LOCATION
+# ============================================================
+
+- name: OS Update | Display report location
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "OS UPDATE REPORT"
+      - "============================================================"
+      - "Host          : {{ inventory_hostname }}"
+      - "Report file   : {{ os_update_report_directory }}/{{ inventory_hostname }}.html"
+      - "Report status : GENERATED"
+      - "============================================================"
