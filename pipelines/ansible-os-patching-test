@@ -30,7 +30,6 @@ pipeline {
 
         ANSIBLE_HOST_KEY_CHECKING = 'false'
 
-        // Keep SSH control sockets on local agent storage
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
@@ -63,7 +62,6 @@ pipeline {
                     mkdir -p /tmp/ansible_tmp
                     chmod 700 /tmp/ansible_tmp
 
-                    # Predictable Jenkins report directory
                     rm -rf reports
                     mkdir -p reports
 
@@ -96,7 +94,7 @@ pipeline {
                             ansible-roles/linux/os_update.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "target_hosts=${SERVER_NAME}" \
-                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
                             --syntax-check
                     '''
                 }
@@ -127,7 +125,7 @@ pipeline {
                             ansible-roles/linux/os_update.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "target_hosts=${SERVER_NAME}" \
-                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS}"
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}"
                     '''
                 }
             }
