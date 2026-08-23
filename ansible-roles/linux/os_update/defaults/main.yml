@@ -93,8 +93,6 @@ os_update_verify_kernel_after_reboot: true
 # REPORTING
 # ------------------------------------------------------------
 
-os_update_report_enabled: true
-
 os_update_collect_package_summary: true
 
 os_update_collect_kernel_summary: true
@@ -113,6 +111,8 @@ os_update_collect_disk_summary: true
 #   - nginx
 #
 os_update_exclude_packages: []
+
+
 # ============================================================
 # REPORT CONFIGURATION
 # ============================================================
