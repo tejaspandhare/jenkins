@@ -14,5 +14,5 @@ cworker1 ansible_ssh_host=172.18.18.201 ansible_ssh_port=22 ansible_user=root
 [lb]
 lb1 ansible_ssh_host=172.16.16.51 ansible_ssh_port=22 ansible_user=root
 lb2 ansible_ssh_host=172.16.16.52 ansible_ssh_port=22 ansible_user=root
-clb1 ansible_ssh_host=172.18.18.51 ansible_ssh_port=22 ansible_user=root
-clb2 ansible_ssh_host=172.18.18.52 ansible_ssh_port=22 ansible_user=root
+cb1 ansible_ssh_host=172.18.18.51 ansible_ssh_port=22 ansible_user=root
+cb2 ansible_ssh_host=172.18.18.52 ansible_ssh_port=22 ansible_user=root
