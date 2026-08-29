@@ -3,6 +3,7 @@ pipeline {
 
     options {
         timestamps()
+        ansiColor('xterm')
     }
 
     parameters {
@@ -20,29 +21,45 @@ pipeline {
     }
 
     environment {
+        /*
+         * Locale
+         */
         LANG = 'C.UTF-8'
         LC_ALL = 'C.UTF-8'
 
         /*
-         * Keep Ansible output standard.
-         * Do NOT use "minimal" - your Ansible version does not support it.
+         * Ansible output
+         *
+         * "minimal" is NOT supported by this Ansible version.
+         * Valid values for the default callback are json/yaml.
          */
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
 
+        /*
+         * Temporary directories
+         */
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
+        /*
+         * SSH
+         */
         ANSIBLE_HOST_KEY_CHECKING = 'false'
-
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
     stages {
 
+        /*
+         * ============================================================
+         * VALIDATE INPUT
+         * ============================================================
+         */
         stage('Validate Input') {
             steps {
                 script {
+
                     if (!params.SERVER_NAME?.trim()) {
                         error('SERVER_NAME cannot be empty')
                     }
@@ -54,6 +71,11 @@ pipeline {
         }
 
 
+        /*
+         * ============================================================
+         * PREPARE ANSIBLE
+         * ============================================================
+         */
         stage('Prepare Ansible') {
             steps {
                 sh '''
@@ -70,6 +92,11 @@ pipeline {
         }
 
 
+        /*
+         * ============================================================
+         * SYNTAX CHECK
+         * ============================================================
+         */
         stage('Syntax Check') {
             steps {
                 withCredentials([
@@ -82,6 +109,8 @@ pipeline {
                         set -eu
                         set +x
 
+                        echo "Checking Ansible syntax..."
+
                         ansible-playbook \
                             -i inventory/hosts \
                             ansible-roles/linux/os_update.yml \
@@ -89,12 +118,19 @@ pipeline {
                             -e "target_hosts=${SERVER_NAME}" \
                             -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
                             --syntax-check
+
+                        echo "Syntax check: OK"
                     '''
                 }
             }
         }
 
 
+        /*
+         * ============================================================
+         * PATCH
+         * ============================================================
+         */
         stage('Patch') {
             steps {
                 withCredentials([
@@ -107,6 +143,7 @@ pipeline {
                         set -eu
                         set +x
 
+                        echo ""
                         echo "Starting patching: ${SERVER_NAME}"
 
                         ansible-playbook \
@@ -116,6 +153,7 @@ pipeline {
                             -e "target_hosts=${SERVER_NAME}" \
                             -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}"
 
+                        echo ""
                         echo "Patching completed."
                     '''
                 }
@@ -123,6 +161,11 @@ pipeline {
         }
 
 
+        /*
+         * ============================================================
+         * CHECK REPORT
+         * ============================================================
+         */
         stage('Check Report') {
             steps {
                 sh '''
@@ -142,7 +185,13 @@ pipeline {
     }
 
 
+    /*
+     * ================================================================
+     * POST ACTIONS
+     * ================================================================
+     */
     post {
+
         success {
             echo "PATCH JOB SUCCESSFUL"
         }
