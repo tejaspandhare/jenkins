@@ -3,7 +3,6 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')
     }
 
     parameters {
@@ -21,68 +20,45 @@ pipeline {
     }
 
     environment {
-        /*
-         * Locale
-         */
         LANG = 'C.UTF-8'
         LC_ALL = 'C.UTF-8'
 
         /*
-         * Ansible
-         *
-         * minimal result format reduces unnecessary result details.
+         * Keep Ansible output standard.
+         * Do NOT use "minimal" - your Ansible version does not support it.
          */
         ANSIBLE_STDOUT_CALLBACK = 'default'
-        ANSIBLE_CALLBACK_RESULT_FORMAT = 'minimal'
+        ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
 
-        /*
-         * Temporary directories
-         */
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
 
-        /*
-         * SSH
-         */
         ANSIBLE_HOST_KEY_CHECKING = 'false'
+
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
     stages {
 
-        /*
-         * ============================================================
-         * VALIDATE INPUT
-         * ============================================================
-         */
         stage('Validate Input') {
             steps {
                 script {
-
                     if (!params.SERVER_NAME?.trim()) {
                         error('SERVER_NAME cannot be empty')
                     }
 
-                    echo '============================================'
-                    echo 'PATCH REQUEST'
-                    echo '============================================'
                     echo "Servers : ${params.SERVER_NAME}"
                     echo "Exclude : ${params.EXCLUDE_PKGS ?: 'none'}"
-                    echo '============================================'
                 }
             }
         }
 
 
-        /*
-         * ============================================================
-         * PREPARE ANSIBLE
-         * ============================================================
-         */
-        stage('Prepare Ansible Environment') {
+        stage('Prepare Ansible') {
             steps {
                 sh '''
                     set -eu
+                    set +x
 
                     mkdir -p /tmp/ansible_tmp
                     mkdir -p /tmp/ansible_cp
@@ -94,12 +70,7 @@ pipeline {
         }
 
 
-        /*
-         * ============================================================
-         * ANSIBLE SYNTAX CHECK
-         * ============================================================
-         */
-        stage('Ansible Syntax Check') {
+        stage('Syntax Check') {
             steps {
                 withCredentials([
                     file(
@@ -109,8 +80,7 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
-
-                        echo 'Checking Ansible playbook syntax...'
+                        set +x
 
                         ansible-playbook \
                             -i inventory/hosts \
@@ -119,20 +89,13 @@ pipeline {
                             -e "target_hosts=${SERVER_NAME}" \
                             -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
                             --syntax-check
-
-                        echo 'Syntax check: OK'
                     '''
                 }
             }
         }
 
 
-        /*
-         * ============================================================
-         * RUN PATCHING
-         * ============================================================
-         */
-        stage('Run Ansible Patching') {
+        stage('Patch') {
             steps {
                 withCredentials([
                     file(
@@ -142,15 +105,9 @@ pipeline {
                 ]) {
                     sh '''
                         set -eu
+                        set +x
 
-                        echo ''
-                        echo '============================================'
-                        echo 'PATCH EXECUTION'
-                        echo '============================================'
-                        echo "Servers : ${SERVER_NAME}"
-                        echo "Exclude : ${EXCLUDE_PKGS:-none}"
-                        echo '============================================'
-                        echo ''
+                        echo "Starting patching: ${SERVER_NAME}"
 
                         ansible-playbook \
                             -i inventory/hosts \
@@ -159,30 +116,17 @@ pipeline {
                             -e "target_hosts=${SERVER_NAME}" \
                             -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}"
 
-                        echo ''
-                        echo '============================================'
-                        echo 'PATCH EXECUTION COMPLETED'
-                        echo '============================================'
+                        echo "Patching completed."
                     '''
                 }
             }
         }
 
 
-        /*
-         * ============================================================
-         * CHECK REPORT
-         * ============================================================
-         */
         stage('Check Report') {
             steps {
                 sh '''
-                    set +e
-
-                    echo ''
-                    echo '============================================'
-                    echo 'REPORT'
-                    echo '============================================'
+                    set +x
 
                     if [ -d reports ]; then
                         find reports \
@@ -190,38 +134,27 @@ pipeline {
                             -name '*.html' \
                             -print
                     else
-                        echo 'No reports directory found.'
+                        echo "No reports directory found."
                     fi
-
-                    echo '============================================'
                 '''
             }
         }
     }
 
 
-    /*
-     * ================================================================
-     * POST ACTIONS
-     * ================================================================
-     */
     post {
-
         success {
-            echo '============================================'
-            echo 'JENKINS JOB: SUCCESS'
-            echo '============================================'
+            echo "PATCH JOB SUCCESSFUL"
         }
 
         failure {
-            echo '============================================'
-            echo 'JENKINS JOB: FAILED'
-            echo 'Check the Ansible output above.'
-            echo '============================================'
+            echo "PATCH JOB FAILED"
         }
 
         always {
             sh '''
+                set +x
+
                 rm -rf /tmp/ansible_tmp/* 2>/dev/null || true
                 rm -rf /tmp/ansible_cp/* 2>/dev/null || true
             '''
