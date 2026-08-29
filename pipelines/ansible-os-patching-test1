@@ -28,11 +28,15 @@ pipeline {
         LC_ALL = 'C.UTF-8'
 
         /*
-         * Ansible output
+         * Ansible
          *
-         * "minimal" is NOT supported by this Ansible version.
-         * Valid values for the default callback are json/yaml.
+         * FORCE_COLOR is required because Ansible may disable
+         * colors when running inside Jenkins/non-interactive shell.
+         *
+         * Do NOT use "minimal" here.
+         * This Ansible version supports yaml/json.
          */
+        ANSIBLE_FORCE_COLOR = 'true'
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
 
@@ -144,7 +148,10 @@ pipeline {
                         set +x
 
                         echo ""
+                        echo "============================================"
                         echo "Starting patching: ${SERVER_NAME}"
+                        echo "============================================"
+                        echo ""
 
                         ansible-playbook \
                             -i inventory/hosts \
