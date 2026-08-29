@@ -1,1 +1,230 @@
+pipeline {
+    agent any
 
+    options {
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    parameters {
+        string(
+            name: 'SERVER_NAME',
+            defaultValue: '',
+            description: 'Enter servers (semicolon separated): server1;server2'
+        )
+
+        string(
+            name: 'EXCLUDE_PKGS',
+            defaultValue: '',
+            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
+        )
+    }
+
+    environment {
+        /*
+         * Locale
+         */
+        LANG = 'C.UTF-8'
+        LC_ALL = 'C.UTF-8'
+
+        /*
+         * Ansible
+         *
+         * minimal result format reduces unnecessary result details.
+         */
+        ANSIBLE_STDOUT_CALLBACK = 'default'
+        ANSIBLE_CALLBACK_RESULT_FORMAT = 'minimal'
+
+        /*
+         * Temporary directories
+         */
+        ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
+        ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+
+        /*
+         * SSH
+         */
+        ANSIBLE_HOST_KEY_CHECKING = 'false'
+        ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
+    }
+
+    stages {
+
+        /*
+         * ============================================================
+         * VALIDATE INPUT
+         * ============================================================
+         */
+        stage('Validate Input') {
+            steps {
+                script {
+
+                    if (!params.SERVER_NAME?.trim()) {
+                        error('SERVER_NAME cannot be empty')
+                    }
+
+                    echo '============================================'
+                    echo 'PATCH REQUEST'
+                    echo '============================================'
+                    echo "Servers : ${params.SERVER_NAME}"
+                    echo "Exclude : ${params.EXCLUDE_PKGS ?: 'none'}"
+                    echo '============================================'
+                }
+            }
+        }
+
+
+        /*
+         * ============================================================
+         * PREPARE ANSIBLE
+         * ============================================================
+         */
+        stage('Prepare Ansible Environment') {
+            steps {
+                sh '''
+                    set -eu
+
+                    mkdir -p /tmp/ansible_tmp
+                    mkdir -p /tmp/ansible_cp
+
+                    chmod 700 /tmp/ansible_tmp
+                    chmod 700 /tmp/ansible_cp
+                '''
+            }
+        }
+
+
+        /*
+         * ============================================================
+         * ANSIBLE SYNTAX CHECK
+         * ============================================================
+         */
+        stage('Ansible Syntax Check') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'automation-key',
+                        variable: 'ANSIBLE_KEY_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        echo 'Checking Ansible playbook syntax...'
+
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}" \
+                            --syntax-check
+
+                        echo 'Syntax check: OK'
+                    '''
+                }
+            }
+        }
+
+
+        /*
+         * ============================================================
+         * RUN PATCHING
+         * ============================================================
+         */
+        stage('Run Ansible Patching') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'automation-key',
+                        variable: 'ANSIBLE_KEY_FILE'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        echo ''
+                        echo '============================================'
+                        echo 'PATCH EXECUTION'
+                        echo '============================================'
+                        echo "Servers : ${SERVER_NAME}"
+                        echo "Exclude : ${EXCLUDE_PKGS:-none}"
+                        echo '============================================'
+                        echo ''
+
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/linux/os_update.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts=${SERVER_NAME}" \
+                            -e "EXCLUDE_PKGS=${EXCLUDE_PKGS:-}"
+
+                        echo ''
+                        echo '============================================'
+                        echo 'PATCH EXECUTION COMPLETED'
+                        echo '============================================'
+                    '''
+                }
+            }
+        }
+
+
+        /*
+         * ============================================================
+         * CHECK REPORT
+         * ============================================================
+         */
+        stage('Check Report') {
+            steps {
+                sh '''
+                    set +e
+
+                    echo ''
+                    echo '============================================'
+                    echo 'REPORT'
+                    echo '============================================'
+
+                    if [ -d reports ]; then
+                        find reports \
+                            -type f \
+                            -name '*.html' \
+                            -print
+                    else
+                        echo 'No reports directory found.'
+                    fi
+
+                    echo '============================================'
+                '''
+            }
+        }
+    }
+
+
+    /*
+     * ================================================================
+     * POST ACTIONS
+     * ================================================================
+     */
+    post {
+
+        success {
+            echo '============================================'
+            echo 'JENKINS JOB: SUCCESS'
+            echo '============================================'
+        }
+
+        failure {
+            echo '============================================'
+            echo 'JENKINS JOB: FAILED'
+            echo 'Check the Ansible output above.'
+            echo '============================================'
+        }
+
+        always {
+            sh '''
+                rm -rf /tmp/ansible_tmp/* 2>/dev/null || true
+                rm -rf /tmp/ansible_cp/* 2>/dev/null || true
+            '''
+        }
+    }
+}
