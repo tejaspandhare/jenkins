@@ -14,3 +14,11 @@
 
   roles:
     - role: "{{ playbook_dir }}/os_update"
+
+- name: Update last patch date
+  ansible.builtin.copy:
+    content: "{{ lookup('pipe', 'date +%Y-%m-%d') }}\n"
+    dest: /etc/lastpatchdate
+    owner: root
+    group: root
+    mode: '0644'
