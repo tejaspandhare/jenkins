@@ -1,0 +1,94 @@
+---
+- name: Enterprise Linux Patching and Reporting
+  # ✅ Fix: Changed variable from 'hosts' to 'target_hosts' to avoid Ansible reserved keyword warnings
+  hosts: "{{ target_hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
+  gather_facts: true
+
+  vars:
+    ansible_remote_tmp: "/tmp/ansible_tmp"
+
+    exclude_packages_list: >-
+      {{ EXCLUDE_PKGS | default('') | split(';')
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
+
+    report_dir: "{{ playbook_dir }}/reports"
+    report_file: "{{ report_dir }}/patch_report.html"
+
+  roles:
+    - precheck
+    - patch
+    - reboot
+    - postcheck
+
+  tasks:
+    - name: Update last patch date
+      ansible.builtin.copy:
+       content: "{{ lookup('pipe', 'date +%Y-%m-%d') }}\n"
+       dest: /etc/lastpatchdate
+       owner: root
+       group: root
+       mode: '0600'
+    
+ 
+  tasks:
+
+    # ------------------------------
+    # Generate summary and report
+    # ------------------------------tasks:
+    - name: Generate patch report on controller
+      run_once: true
+      delegate_to: localhost
+      block:
+
+        # ✅ Fix: Target /tmp/ansible_tmp/run subdirectory. Deleting /tmp/ansible_tmp fails because it is a Kubernetes mount point.
+        - name: Reset temp directory subfolder
+          ansible.builtin.file:
+            path: /tmp/ansible_tmp/run
+            state: absent
+
+        - name: Create temp directory subfolder
+          ansible.builtin.file:
+            path: /tmp/ansible_tmp/run
+            state: directory
+            mode: '0777'
+
+        - name: Ensure reports directory exists
+          ansible.builtin.file:
+            path: "{{ report_dir }}"
+            state: directory
+            mode: '0755'
+
+        - name: Build patch results summary
+          ansible.builtin.set_fact:
+            patch_results_summary: >-
+              {{ groups['all']
+                 | map('extract', hostvars, 'patch_result')
+                 | select('defined')
+                 | list }}
+
+        - name: Print clean patch summary
+          ansible.builtin.debug:
+            msg: |
+              ================= PATCH SUMMARY =================
+
+              {% for h in patch_results_summary %}
+              Host    : {{ h.host }}
+              OS      : {{ h.os }}
+              Kernel  : {{ h.old_kernel | default('N/A') }} → {{ h.new_kernel | default('N/A') }}
+              Updated : {{ h.updated | default('No') }}
+              Reboot  : {{ h.reboot | default('No') }}
+              Status  : {{ h.status | default('UNKNOWN') }}
+              -------------------------------------------------
+              {% endfor %}
+
+        - name: Create HTML report
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/templates/report.j2"
+            dest: "{{ report_file }}"
+            mode: '0644'
+
+        - name: Show report path
+          ansible.builtin.debug:
+            msg: "Report generated at {{ report_file }}"
