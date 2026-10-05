@@ -1,48 +1,86 @@
 ---
 - name: Enterprise Linux Patching and Reporting
-  # ✅ Fix: Changed variable from 'hosts' to 'target_hosts' to avoid Ansible reserved keyword warnings
+  # target_hosts should be a semicolon-separated list, for example:
+  # server01;server02;server03
   hosts: "{{ target_hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
+
   gather_facts: true
 
   vars:
+    # Ansible temporary directory on managed hosts
     ansible_remote_tmp: "/tmp/ansible_tmp"
 
+    # Convert EXCLUDE_PKGS=vim;kernel;httpd
+    # into a clean list
     exclude_packages_list: >-
-      {{ EXCLUDE_PKGS | default('') | split(';')
+      {{ EXCLUDE_PKGS | default('')
+         | split(';')
          | map('trim')
          | reject('equalto', '')
          | list }}
 
+    # Report configuration
     report_dir: "{{ playbook_dir }}/reports"
     report_file: "{{ report_dir }}/patch_report.html"
 
+  # ------------------------------------------------------------
+  # PATCHING ROLES
+  # ------------------------------------------------------------
   roles:
     - precheck
     - patch
     - reboot
     - postcheck
 
-  tasks:
-    - name: Update last patch date
-      ansible.builtin.copy:
-       content: "{{ lookup('pipe', 'date +%Y-%m-%d') }}\n"
-       dest: /etc/lastpatchdate
-       owner: root
-       group: root
-       mode: '0600'
-    
- 
+  # ------------------------------------------------------------
+  # POST-PATCH TASKS
+  # ------------------------------------------------------------
   tasks:
 
-    # ------------------------------
-    # Generate summary and report
-    # ------------------------------tasks:
+    # ----------------------------------------------------------
+    # Update /etc/lastpatchdate on the TARGET HOST
+    # ----------------------------------------------------------
+    - name: Get current date from target host
+      ansible.builtin.command:
+        cmd: date +%Y-%m-%d
+      register: current_patch_date
+      changed_when: false
+
+    - name: Update last patch date
+      ansible.builtin.copy:
+        content: "{{ current_patch_date.stdout | trim }}\n"
+        dest: /etc/lastpatchdate
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Verify last patch date
+      ansible.builtin.slurp:
+        src: /etc/lastpatchdate
+      register: last_patch_date_file
+
+    - name: Show last patch date
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} last patch date:
+          {{ last_patch_date_file.content | b64decode | trim }}
+
+    # ----------------------------------------------------------
+    # GENERATE SUMMARY AND REPORT
+    # ----------------------------------------------------------
+
     - name: Generate patch report on controller
       run_once: true
       delegate_to: localhost
       block:
 
-        # ✅ Fix: Target /tmp/ansible_tmp/run subdirectory. Deleting /tmp/ansible_tmp fails because it is a Kubernetes mount point.
+        # ------------------------------------------------------
+        # Reset temporary run directory
+        # ------------------------------------------------------
+        # Do NOT delete /tmp/ansible_tmp itself because it may
+        # be a Kubernetes mount point.
+        # ------------------------------------------------------
+
         - name: Reset temp directory subfolder
           ansible.builtin.file:
             path: /tmp/ansible_tmp/run
@@ -54,11 +92,19 @@
             state: directory
             mode: '0777'
 
+        # ------------------------------------------------------
+        # Create reports directory on controller
+        # ------------------------------------------------------
+
         - name: Ensure reports directory exists
           ansible.builtin.file:
             path: "{{ report_dir }}"
             state: directory
             mode: '0755'
+
+        # ------------------------------------------------------
+        # Build patch results summary
+        # ------------------------------------------------------
 
         - name: Build patch results summary
           ansible.builtin.set_fact:
@@ -68,14 +114,18 @@
                  | select('defined')
                  | list }}
 
+        # ------------------------------------------------------
+        # Print patch summary
+        # ------------------------------------------------------
+
         - name: Print clean patch summary
           ansible.builtin.debug:
             msg: |
               ================= PATCH SUMMARY =================
 
               {% for h in patch_results_summary %}
-              Host    : {{ h.host }}
-              OS      : {{ h.os }}
+              Host    : {{ h.host | default('N/A') }}
+              OS      : {{ h.os | default('N/A') }}
               Kernel  : {{ h.old_kernel | default('N/A') }} → {{ h.new_kernel | default('N/A') }}
               Updated : {{ h.updated | default('No') }}
               Reboot  : {{ h.reboot | default('No') }}
@@ -83,11 +133,19 @@
               -------------------------------------------------
               {% endfor %}
 
+        # ------------------------------------------------------
+        # Create HTML report
+        # ------------------------------------------------------
+
         - name: Create HTML report
           ansible.builtin.template:
             src: "{{ playbook_dir }}/templates/report.j2"
             dest: "{{ report_file }}"
             mode: '0644'
+
+        # ------------------------------------------------------
+        # Show report path
+        # ------------------------------------------------------
 
         - name: Show report path
           ansible.builtin.debug:
