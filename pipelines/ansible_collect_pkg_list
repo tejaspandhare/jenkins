@@ -14,11 +14,18 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     sh '''
+                        # Initialize report header directly via shell to bypass container filesystem lockouts
+                        echo "GLOBAL OS UPDATE REPORT" > playbooks/os_update_report.txt
+                        echo "Generated on: $(date)" >> playbooks/os_update_report.txt
+                        echo "============================================================" >> playbooks/os_update_report.txt
+                        echo "" >> playbooks/os_update_report.txt
+
+                        # Execute playbook and safely route output logs into the file structure
                         ansible-playbook \
                             -i inventory/hosts \
                             playbooks/pkg_update_list.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
-                            -e "hosts='${SERVER_NAME}'"
+                            -e "hosts='${SERVER_NAME}'" >> playbooks/os_update_report.txt 2>&1
                     '''
                 }
             }
