@@ -1,144 +1,171 @@
 ---
-- name: Enterprise Package Update Audit Report
-  hosts: "{{ target_hosts | default('all') }}"
-  gather_facts: yes
-  become: yes
-
+- name: Global OS Update Auditor
+  hosts: "{{ hosts | default('all') }}"
+  gather_facts: true
+  become: true
   vars:
-    update_list: []
+    report_path: "{{ playbook_dir }}/os_update_report.txt"
 
   tasks:
-
-    ########################################################
-    # DEBIAN / UBUNTU PARSING
-    ########################################################
-    - name: Fetch upgradeable packages (Debian/Ubuntu)
-      block:
-        - name: Refresh APT cache metadata
-          apt:
-            update_cache: yes
-            cache_valid_time: 3600
-          failed_when: false
-
-        - name: Run apt list query
-          shell: "apt list --upgradable 2>/dev/null | tail -n +2"
-          register: apt_raw
-          changed_when: false
-          failed_when: false
-
-        - name: Structure APT updates into memory table
-          set_fact:
-            update_list: >-
-              {{
-                update_list + [{
-                  'package': item.split('/')[0],
-                  'current': (item | regex_search('from:\\s+([^\\s\\]]+)', '\\1')) | default(['Unknown'], true) | first,
-                  'target': item.split(' ')[1] | default('Unknown')
-                }]
-              }}
-          loop: "{{ apt_raw.stdout_lines }}"
-          when: 
-            - apt_raw.stdout_lines is defined
-            - item.strip() != ""
-      when: ansible_os_family == "Debian"
-
-    ########################################################
-    # RHEL / CENTOS / ROCKY PARSING
-    ########################################################
-    - name: Fetch upgradeable packages (RedHat/CentOS)
-      block:
-        - name: Run DNF/YUM check-update query
-          shell: "dnf check-update -q 2>/dev/null || yum check-update -q 2>/dev/null"
-          register: dnf_raw
-          changed_when: false
-          failed_when: false
-
-        - name: Structure DNF/YUM updates into memory table
-          set_fact:
-            update_list: >-
-              {{
-                update_list + [{
-                  'package': item.split()[0],
-                  'current': 'Installed',
-                  'target': item.split()[1]
-                }]
-              }}
-          loop: "{{ dnf_raw.stdout_lines | select('match\(', '^\S+\\.\S+\\s+\S+'\)) | list }}"
-          when: 
-            - dnf_raw.rc == 100
-            - dnf_raw.stdout_lines is defined
-      when: ansible_os_family == "RedHat"
-
-    ########################################################
-    # SUSE / SLES PARSING
-    ########################################################
-    - name: Fetch upgradeable packages (SUSE/SLES)
-      block:
-        - name: Refresh Zypper channels
-          shell: "zypper --non-interactive refresh -q"
-          failed_when: false
-          changed_when: false
-
-        - name: Run Zypper updates query
-          shell: "zypper --non-interactive list-updates -g 2>/dev/null | tail -n +5"
-          register: zypper_raw
-          changed_when: false
-          failed_when: false
-
-        - name: Structure Zypper updates into memory table
-          set_fact:
-            update_list: >-
-              {{
-                update_list + [{
-                  'package': item.split('|')[2] | trim,
-                  'current': item.split('|')[3] | trim,
-                  'target': item.split('|')[4] | trim
-                }]
-              }}
-          loop: "{{ zypper_raw.stdout_lines }}"
-          when: 
-            - zypper_raw.stdout_lines is defined
-            - item.strip() != ""
-            - item.split('|') | length >= 5
-      when: ansible_os_family == "Suse"
-
-    ########################################################
-    # COMPILING THE LOGICAL WORKSPACE REPORT
-    ########################################################
-    - name: Purge previous patch lists from Jenkins workspace
-      run_once: true
-      delegate_to: localhost
-      become: false
-      file:
-        path: "{{ lookup('env','WORKSPACE') | default('.', true) }}/pending_updates_report.txt"
-        state: absent
-
-    - name: Generate Global Markdown Patch Manifest
+    # -------------------------------------------------------------
+    # 1. INITIALIZE BLANK REPORT ON CONTROLLER
+    # -------------------------------------------------------------
+    - name: Initialize Report Header on Master
       run_once: true
       delegate_to: localhost
       become: false
       copy:
-        dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/pending_updates_report.txt"
+        dest: "{{ report_path }}"
         content: |
-          # INFRASTRUCTURE PATCH COMPLIANCE MANIFEST
+          GLOBAL OS UPDATE REPORT
           Generated on: {{ lookup('pipe', 'date') }}
           ============================================================
 
-          {% for host in ansible_play_hosts %}
-          ## 🖥️ Target Node: {{ host }} [{{ hostvars[host].ansible_distribution }} {{ hostvars[host].ansible_distribution_version }}]
-          Total Pending Updates: **{{ hostvars[host].update_list | length }}**
+    # -------------------------------------------------------------
+    # 2. RUN PACKAGE MANAGER DRY RUNS BASED ON DISTRO
+    # -------------------------------------------------------------
+    
+    # --- DEBIAN / UBUNTU FLAVORS ---
+    - name: Check Debian/Ubuntu Updates
+      when: ansible_os_family == "Debian"
+      block:
+        - name: Refresh APT cache
+          apt:
+            update_cache: true
+            cache_valid_time: 0
+          ignore_errors: true
 
-          {% if hostvars[host].update_list | length > 0 %}
+        - name: Query APT Upgradable Packages
+          shell: "apt list --upgradable 2>/dev/null | tail -n +2"
+          register: apt_out
+          changed_when: false
 
-          | Package Name | Current Version | Target Upgrade Version |
-          | :--- | :--- | :--- |
-          {% for pkg in hostvars[host].update_list %}
+        - name: Format APT output
+          set_fact:
+            package_report: |
+              {% if apt_out.stdout_lines | length > 0 %}
+              Package name                   Current version           Target version           
+              --------------------------------------------------------------------------------
+              {% for line in apt_out.stdout_lines %}
+              {% set parts = line.split() %}
+              {% set pkg = parts[0].split('/') %}
+              {% set target = parts[1] %}
+              {% set current = 'Unknown' %}
+              {% if 'from:' in line %}
+                {% set idx = parts.index('from:') %}
+                {% set current = parts[idx+1] | replace(']', '') %}
+              {% endif %}
+              {{ "%-30s %-25s %-25s" | format(pkg[0], current, target) }}
+              {% endfor %}
+              {% else %}
+              System is up to date.
+              {% endif %}
+            update_count: "{{ apt_out.stdout_lines | length }}"
 
-          | `{{ pkg.package }}` | {{ pkg.current }} | **{{ pkg.target }}** |
-          {% endfor %}
-          {% else %}
-          *No packages require patching. This system is up-to-date.*
+    # --- REDHAT / CENTOS / FEDORA / AMAZON LINUX FLAVORS ---
+    - name: Check RedHat Updates
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: Query DNF/YUM Upgradable Packages
+          shell: "dnf check-update -q || yum check-update -q"
+          register: dnf_raw
+          failed_when: dnf_raw.rc not in [0, 100]
+          changed_when: false
+
+        # Clean up lines securely without broken regex filters
+        - name: Filter and Format DNF Output
+          set_fact:
+            cleaned_lines: "{{ dnf_raw.stdout_lines | select('match', '^\\S+\\.\\S+\\s+\\S+') | reject('search', 'Obsoleting Packages') | list }}"
+
+        - name: Generate RedHat Report Block
+          set_fact:
+            package_report: |
+              {% if cleaned_lines | length > 0 %}
+              Package name                   Current version           Target version           
+              --------------------------------------------------------------------------------
+              {% for line in cleaned_lines %}
+              {% set parts = line.split() %}
+              {{ "%-30s %-25s %-25s" | format(parts[0], 'Installed', parts[1]) }}
+              {% endfor %}
+              {% else %}
+              System is up to date.
+              {% endif %}
+            update_count: "{{ cleaned_lines | length }}"
+
+    # --- SUSE / OPENSUSE FLAVORS ---
+    - name: Check Suse Updates
+      when: ansible_os_family == "Suse"
+      block:
+        - name: Refresh Zypper Repos
+          zypper_repository:
+            repo: '*'
+            run_refresh: true
+          ignore_errors: true
+
+        - name: Query Zypper Upgradable Packages
+          shell: "zypper --non-interactive list-updates -g 2>/dev/null | tail -n +5"
+          register: suse_out
+          changed_when: false
+
+        - name: Format Zypper Output
+          set_fact:
+            package_report: |
+              {% if suse_out.stdout_lines | length > 0 %}
+              Package name                   Current version           Target version           
+              --------------------------------------------------------------------------------
+              {% for line in suse_out.stdout_lines %}
+              {% set parts = line.split('|') %}
+              {% if parts | length >= 5 %}
+              {{ "%-30s %-25s %-25s" | format(parts[2]|trim, parts[3]|trim, parts[4]|trim) }}
+              {% endif %}
+              {% endfor %}
+              {% else %}
+              System is up to date.
+              {% endif %}
+            update_count: "{{ suse_out.stdout_lines | length }}"
+
+    # -------------------------------------------------------------
+    # 3. CONSOLIDATE RESULTS AND APPEND TO CONTROLLER REPORT
+    # -------------------------------------------------------------
+    - name: Append Node Metadata to Master Report
+      delegate_to: localhost
+      become: false
+      lineinfile:
+        path: "{{ report_path }}"
+        insertafter: EOF
+        line: |
+          Server name: {{ inventory_hostname }}
+          ============================================================
+          Server hostname: {{ ansible_fqdn | default(ansible_hostname) }}
+          Server OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Number of updates available: {{ update_count | default('0') }}
+
+          {{ package_report | default('System is up to date.\n') }}
+          Status: SUCCESS
+          
+
+# -----------------------------------------------------------------
+# 4. CAPTURE UNREACHABLE / FAILED NODES
+# -----------------------------------------------------------------
+- name: Handle Failure Audits
+  hosts: "{{ hosts | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: Record Offline Host Details
+      run_once: true
+      delegate_to: localhost
+      become: false
+      lineinfile:
+        path: "{{ playbook_dir }}/os_update_report.txt"
+        insertafter: EOF
+        line: |
+          {% for host in groups['all'] %}
+          {% if hostvars[host]['update_count'] is undefined %}
+          Server name: {{ host }}
+          ============================================================
+          Status: FAILED
+          Reason: Unreachable via SSH or framework setup error.
+          
+
           {% endif %}
-
-          ------------------------------------------------------------
           {% endfor %}
