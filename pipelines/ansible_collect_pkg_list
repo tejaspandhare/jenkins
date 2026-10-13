@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_FORCE_COLOR = 'false' // Disables ANSI color injection inside logs
     }
 
     parameters {
@@ -14,18 +14,12 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
                     sh '''
-                        # Initialize report header directly via shell to bypass container filesystem lockouts
-                        echo "GLOBAL OS UPDATE REPORT" > playbooks/os_update_report.txt
-                        echo "Generated on: $(date)" >> playbooks/os_update_report.txt
-                        echo "============================================================" >> playbooks/os_update_report.txt
-                        echo "" >> playbooks/os_update_report.txt
-
-                        # Execute playbook and safely route output logs into the file structure
+                        # Run playbook cleanly to let it generate the static report file natively
                         ansible-playbook \
                             -i inventory/hosts \
                             playbooks/pkg_update_list.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
-                            -e "hosts='${SERVER_NAME}'" >> playbooks/os_update_report.txt 2>&1
+                            -e "hosts='${SERVER_NAME}'"
                     '''
                 }
             }
@@ -34,7 +28,11 @@ pipeline {
 
     post {
         always {
-            sh 'ls -lah playbooks/'
+            script {
+                // Safely migrate the cleanly built text file to your playbooks archive directory
+                sh 'if [ -f os_update_report.txt ]; then mv os_update_report.txt playbooks/os_update_report.txt; fi'
+                sh 'ls -lah playbooks/'
+            }
             archiveArtifacts artifacts: 'playbooks/os_update_report.txt', allowEmptyArchive: true
         }
     }
