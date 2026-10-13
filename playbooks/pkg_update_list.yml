@@ -26,7 +26,7 @@
         - name: Refresh APT cache
           apt:
             update_cache: true
-            cache_valid_time: 0
+            cache_valid_time: 3600
           ignore_errors: true
 
         - name: Query APT Upgradable Packages
@@ -49,12 +49,13 @@
                 {% set idx = parts.index('from:') %}
                 {% set current = parts[idx+1] | replace(']', '') %}
               {% endif %}
-              {{ "%-30s %-25s %-25s" | format(pkg[0], current, target) }}
+              {{ "    %-30s %-25s %-25s" | format(pkg[0], current, target) }}
               {% endfor %}
               {% else %}
-              System is up to date.
+                  System is up to date.
               {% endif %}
             update_count: "{{ apt_out.stdout_lines | length }}"
+            node_status: "SUCCESS"
 
     # --- REDHAT / CENTOS / FEDORA / AMAZON LINUX FLAVORS ---
     - name: Check RedHat Updates
@@ -79,12 +80,13 @@
               --------------------------------------------------------------------------------
               {% for line in cleaned_lines %}
               {% set parts = line.split() %}
-              {{ "%-30s %-25s %-25s" | format(parts[0], 'Installed', parts[1]) }}
+              {{ "    %-30s %-25s %-25s" | format(parts[0], 'Installed', parts[1]) }}
               {% endfor %}
               {% else %}
-              System is up to date.
+                  System is up to date.
               {% endif %}
             update_count: "{{ cleaned_lines | length }}"
+            node_status: "SUCCESS"
 
     # --- SUSE / OPENSUSE FLAVORS ---
     - name: Check Suse Updates
@@ -111,25 +113,44 @@
               {% for line in suse_out.stdout_lines %}
               {% set parts = line.split('|') %}
               {% if parts | length >= 5 %}
-              {{ "%-30s %-25s %-25s" | format(parts[2]|trim, parts[3]|trim, parts[4]|trim) }}
+              {{ "    %-30s %-25s %-25s" | format(parts[2]|trim, parts[3]|trim, parts[4]|trim) }}
               {% endif %}
               {% endfor %}
               {% else %}
-              System is up to date.
+                  System is up to date.
               {% endif %}
             update_count: "{{ suse_out.stdout_lines | length }}"
+            node_status: "SUCCESS"
 
-    # -------------------------------------------------------------
-    # 3. PRINT OUTPUT DIRECTLY TO CONSOLE STREAM
-    # -------------------------------------------------------------
-    - name: Output Node Metadata to Standard Output
-      debug:
-        msg: |
-          Server name: {{ inventory_hostname }}
+# -----------------------------------------------------------------
+# 3. COMPILE CENTRAL REPORT (Bypasses Docker 524 Syscall Rename Bug)
+# -----------------------------------------------------------------
+- name: Compile Unified Text Report
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Generate Text File Output
+      copy:
+        # Saving inside active current directory path avoids dynamic container cross-device issues
+        dest: "./os_update_report.txt"
+        content: |
+          GLOBAL OS UPDATE REPORT
+          Generated on: {{ lookup('pipe', 'date') }}
           ============================================================
-          Server hostname: {{ ansible_fqdn | default(ansible_hostname) | default(inventory_hostname) }}
-          Server OS: {{ ansible_distribution | default('Unknown') }} {{ ansible_distribution_version | default('') }}
-          Number of updates available: {{ update_count | default('0') }}
+          {% for host in groups['all'] | default([]) %}
+          
+          Server name: {{ host }}
+          ============================================================
+          {% if hostvars[host]['node_status'] is defined and hostvars[host]['node_status'] == 'SUCCESS' %}
+          Server hostname: {{ hostvars[host]['ansible_fqdn'] | default(hostvars[host]['ansible_hostname']) | default(host) }}
+          Server OS: {{ hostvars[host]['ansible_distribution'] }} {{ hostvars[host]['ansible_distribution_version'] }}
+          Number of updates available: {{ hostvars[host]['update_count'] | default('0') }}
 
-          {{ package_report | default('System is up to date.\n') }}
+          {{ hostvars[host]['package_report'] }}
           Status: SUCCESS
+          {% else %}
+          Status: FAILED
+          Reason: Unreachable via SSH, execution error, or framework setup layout failed.
+          {% endif %}
+          ============================================================
+          {% endfor %}
