@@ -1,0 +1,144 @@
+---
+- name: Enterprise Package Update Audit Report
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    update_list: []
+
+  tasks:
+
+    ########################################################
+    # DEBIAN / UBUNTU PARSING
+    ########################################################
+    - name: Fetch upgradeable packages (Debian/Ubuntu)
+      block:
+        - name: Refresh APT cache metadata
+          apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          failed_when: false
+
+        - name: Run apt list query
+          shell: "apt list --upgradable 2>/dev/null | tail -n +2"
+          register: apt_raw
+          changed_when: false
+          failed_when: false
+
+        - name: Structure APT updates into memory table
+          set_fact:
+            update_list: >-
+              {{
+                update_list + [{
+                  'package': item.split('/')[0],
+                  'current': (item | regex_search('from:\\s+([^\\s\\]]+)', '\\1')) | default(['Unknown'], true) | first,
+                  'target': item.split(' ')[1] | default('Unknown')
+                }]
+              }}
+          loop: "{{ apt_raw.stdout_lines }}"
+          when: 
+            - apt_raw.stdout_lines is defined
+            - item.strip() != ""
+      when: ansible_os_family == "Debian"
+
+    ########################################################
+    # RHEL / CENTOS / ROCKY PARSING
+    ########################################################
+    - name: Fetch upgradeable packages (RedHat/CentOS)
+      block:
+        - name: Run DNF/YUM check-update query
+          shell: "dnf check-update -q 2>/dev/null || yum check-update -q 2>/dev/null"
+          register: dnf_raw
+          changed_when: false
+          failed_when: false
+
+        - name: Structure DNF/YUM updates into memory table
+          set_fact:
+            update_list: >-
+              {{
+                update_list + [{
+                  'package': item.split()[0],
+                  'current': 'Installed',
+                  'target': item.split()[1]
+                }]
+              }}
+          loop: "{{ dnf_raw.stdout_lines | select('match\(', '^\S+\\.\S+\\s+\S+'\)) | list }}"
+          when: 
+            - dnf_raw.rc == 100
+            - dnf_raw.stdout_lines is defined
+      when: ansible_os_family == "RedHat"
+
+    ########################################################
+    # SUSE / SLES PARSING
+    ########################################################
+    - name: Fetch upgradeable packages (SUSE/SLES)
+      block:
+        - name: Refresh Zypper channels
+          shell: "zypper --non-interactive refresh -q"
+          failed_when: false
+          changed_when: false
+
+        - name: Run Zypper updates query
+          shell: "zypper --non-interactive list-updates -g 2>/dev/null | tail -n +5"
+          register: zypper_raw
+          changed_when: false
+          failed_when: false
+
+        - name: Structure Zypper updates into memory table
+          set_fact:
+            update_list: >-
+              {{
+                update_list + [{
+                  'package': item.split('|')[2] | trim,
+                  'current': item.split('|')[3] | trim,
+                  'target': item.split('|')[4] | trim
+                }]
+              }}
+          loop: "{{ zypper_raw.stdout_lines }}"
+          when: 
+            - zypper_raw.stdout_lines is defined
+            - item.strip() != ""
+            - item.split('|') | length >= 5
+      when: ansible_os_family == "Suse"
+
+    ########################################################
+    # COMPILING THE LOGICAL WORKSPACE REPORT
+    ########################################################
+    - name: Purge previous patch lists from Jenkins workspace
+      run_once: true
+      delegate_to: localhost
+      become: false
+      file:
+        path: "{{ lookup('env','WORKSPACE') | default('.', true) }}/pending_updates_report.txt"
+        state: absent
+
+    - name: Generate Global Markdown Patch Manifest
+      run_once: true
+      delegate_to: localhost
+      become: false
+      copy:
+        dest: "{{ lookup('env','WORKSPACE') | default('.', true) }}/pending_updates_report.txt"
+        content: |
+          # INFRASTRUCTURE PATCH COMPLIANCE MANIFEST
+          Generated on: {{ lookup('pipe', 'date') }}
+          ============================================================
+
+          {% for host in ansible_play_hosts %}
+          ## 🖥️ Target Node: {{ host }} [{{ hostvars[host].ansible_distribution }} {{ hostvars[host].ansible_distribution_version }}]
+          Total Pending Updates: **{{ hostvars[host].update_list | length }}**
+
+          {% if hostvars[host].update_list | length > 0 %}
+
+          | Package Name | Current Version | Target Upgrade Version |
+          | :--- | :--- | :--- |
+          {% for pkg in hostvars[host].update_list %}
+
+          | `{{ pkg.package }}` | {{ pkg.current }} | **{{ pkg.target }}** |
+          {% endfor %}
+          {% else %}
+          *No packages require patching. This system is up-to-date.*
+          {% endif %}
+
+          ------------------------------------------------------------
+          {% endfor %}
