@@ -6,7 +6,6 @@ pipeline {
     }
 
     parameters {
-        // Example input: ://domain.com;://domain.com
         string(name: 'SERVER_NAME', defaultValue: 'localhost', description: 'Target hosts separated by a semicolon (;)')
     }
 
