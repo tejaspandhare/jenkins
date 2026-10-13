@@ -1,12 +1,22 @@
 ---
 - name: Global OS Update Auditor
-  hosts: "{{ hosts.split(';') }}"
+  hosts: "{{ (hosts | default('localhost')).split(';') }}"
   gather_facts: false
   
   vars:
     report_path: "{{ playbook_dir }}/os_update_report.txt"
 
   tasks:
+    # -------------------------------------------------------------
+    # 0. DYNAMIC FACT GATHERING (Required because gather_facts is false)
+    # -------------------------------------------------------------
+    - name: Dynamically gather system layout facts for target nodes
+      setup:
+        gather_subset:
+          - 'distribution'
+          - 'system'
+      ignore_errors: true
+
     # -------------------------------------------------------------
     # 1. INITIALIZE BLANK REPORT ON CONTROLLER
     # -------------------------------------------------------------
@@ -27,7 +37,8 @@
     
     # --- DEBIAN / UBUNTU FLAVORS ---
     - name: Check Debian/Ubuntu Updates
-      when: ansible_os_family == "Debian"
+      when: ansible_os_family | default('') == "Debian"
+      become: true
       block:
         - name: Refresh APT cache
           apt:
@@ -64,7 +75,8 @@
 
     # --- REDHAT / CENTOS / FEDORA / AMAZON LINUX FLAVORS ---
     - name: Check RedHat Updates
-      when: ansible_os_family == "RedHat"
+      when: ansible_os_family | default('') == "RedHat"
+      become: true
       block:
         - name: Query DNF/YUM Upgradable Packages
           shell: "dnf check-update -q || yum check-update -q"
@@ -72,7 +84,6 @@
           failed_when: dnf_raw.rc not in [0, 100]
           changed_when: false
 
-        # Clean up lines securely without broken regex filters
         - name: Filter and Format DNF Output
           set_fact:
             cleaned_lines: "{{ dnf_raw.stdout_lines | select('match', '^\\S+\\.\\S+\\s+\\S+') | reject('search', 'Obsoleting Packages') | list }}"
@@ -94,7 +105,8 @@
 
     # --- SUSE / OPENSUSE FLAVORS ---
     - name: Check Suse Updates
-      when: ansible_os_family == "Suse"
+      when: ansible_os_family | default('') == "Suse"
+      become: true
       block:
         - name: Refresh Zypper Repos
           zypper_repository:
@@ -136,8 +148,8 @@
         line: |
           Server name: {{ inventory_hostname }}
           ============================================================
-          Server hostname: {{ ansible_fqdn | default(ansible_hostname) }}
-          Server OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Server hostname: {{ ansible_fqdn | default(ansible_hostname) | default(inventory_hostname) }}
+          Server OS: {{ ansible_distribution | default('Unknown') }} {{ ansible_distribution_version | default('') }}
           Number of updates available: {{ update_count | default('0') }}
 
           {{ package_report | default('System is up to date.\n') }}
@@ -148,7 +160,7 @@
 # 4. CAPTURE UNREACHABLE / FAILED NODES
 # -----------------------------------------------------------------
 - name: Handle Failure Audits
-  hosts: "{{ hosts | default('all') }}"
+  hosts: "{{ (hosts | default('localhost')).split(';') }}"
   gather_facts: false
   tasks:
     - name: Record Offline Host Details
@@ -159,7 +171,7 @@
         path: "{{ playbook_dir }}/os_update_report.txt"
         insertafter: EOF
         line: |
-          {% for host in groups['all'] %}
+          {% for host in groups['all'] | default([]) %}
           {% if hostvars[host]['update_count'] is undefined %}
           Server name: {{ host }}
           ============================================================
