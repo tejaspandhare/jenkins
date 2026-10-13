@@ -1,6 +1,6 @@
 ---
 - name: Global OS Update Auditor
-  hosts: "{{ (hosts | default('localhost')).split(';') }}"
+  hosts: "{{ hosts.split(';') }}"
   gather_facts: false
   
   vars:
