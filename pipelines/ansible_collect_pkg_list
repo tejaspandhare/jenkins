@@ -1,0 +1,89 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        ansiColor('xterm')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+        ANSIBLE_FORCE_COLOR = 'true'
+    }
+
+    parameters {
+        string(
+            name: 'SERVER_NAME',
+            defaultValue: '',
+            description: 'Target server(s) for package updates separated by ; e.g. lb1;lb2;kmaster1'
+        )
+    }
+
+    stages {
+
+        stage('Checkout Repository') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Run Package Update Audit') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
+                ]) {
+                    script {
+                        echo "Running Package Update Audit on: ${params.SERVER_NAME}"
+
+                        // Pass the SERVER_NAME semicolon-separated string matching your playbook variable setup
+                        def rc = sh(
+                            script: """
+                                ansible-playbook \
+                                    -i inventory/hosts \
+                                    playbooks/pkg_update_list.yml \
+                                    --private-key="\$ANSIBLE_KEY_FILE" \
+                                    -e "target_hosts=${params.SERVER_NAME}"
+                            """,
+                            returnStatus: true
+                        )
+
+                        echo "Ansible Package Audit Exit Code: ${rc}"
+
+                        // Ansible exit code 0 = Success, 2 = Changed/Success
+                        if (rc == 0 || rc == 2) {
+                            echo "Ansible package audit completed successfully."
+                        } else {
+                            error("Ansible package audit failed with exit code ${rc}")
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Verify & Archive Generated Reports') {
+            steps {
+                sh '''
+                    echo "Listing generated package manifests and reports:"
+                    ls -lah *.html *.txt *.csv 2>/dev/null || true
+                '''
+                
+                // Automatically archives the pending update lists directly onto your Jenkins build dashboard
+                archiveArtifacts artifacts: '*pending_updates_report.txt', fingerprint: true, allowEmptyArchive: true
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Package audit pipeline run completed."
+        }
+
+        success {
+            echo "Package manifest report generated successfully."
+        }
+
+        failure {
+            echo "Package manifest generation failed."
+        }
+    }
+}
