@@ -1,6 +1,6 @@
 ---
 - name: Global OS Update Auditor
-  hosts: "{{ hosts.split(';') }}"
+  hosts: "{{ (hosts | default('localhost')).split(';') }}"
   gather_facts: false
   
   vars:
@@ -22,9 +22,8 @@
     # -------------------------------------------------------------
     - name: Initialize Report Header on Master
       run_once: true
-      delegate_to: localhost
-      become: false
-      copy:
+      local_action:
+        module: copy
         dest: "{{ report_path }}"
         content: |
           GLOBAL OS UPDATE REPORT
@@ -140,9 +139,8 @@
     # 3. CONSOLIDATE RESULTS AND APPEND TO CONTROLLER REPORT
     # -------------------------------------------------------------
     - name: Append Node Metadata to Master Report
-      delegate_to: localhost
-      become: false
-      lineinfile:
+      local_action:
+        module: lineinfile
         path: "{{ report_path }}"
         insertafter: EOF
         line: |
@@ -165,10 +163,9 @@
   tasks:
     - name: Record Offline Host Details
       run_once: true
-      delegate_to: localhost
-      become: false
-      lineinfile:
-        path: "{{ playbook_dir }}/os_update_report.txt"
+      local_action:
+        module: lineinfile
+        path: "{{ report_path }}"
         insertafter: EOF
         line: |
           {% for host in groups['all'] | default([]) %}
