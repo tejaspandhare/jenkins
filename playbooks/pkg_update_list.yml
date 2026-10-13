@@ -2,13 +2,10 @@
 - name: Global OS Update Auditor
   hosts: "{{ (hosts | default('localhost')).split(';') }}"
   gather_facts: false
-  
-  vars:
-    report_path: "{{ playbook_dir }}/os_update_report.txt"
 
   tasks:
     # -------------------------------------------------------------
-    # 0. DYNAMIC FACT GATHERING (Required because gather_facts is false)
+    # 0. DYNAMIC FACT GATHERING
     # -------------------------------------------------------------
     - name: Dynamically gather system layout facts for target nodes
       setup:
@@ -18,20 +15,7 @@
       ignore_errors: true
 
     # -------------------------------------------------------------
-    # 1. INITIALIZE BLANK REPORT ON CONTROLLER
-    # -------------------------------------------------------------
-    - name: Initialize Report Header on Master
-      run_once: true
-      local_action:
-        module: copy
-        dest: "{{ report_path }}"
-        content: |
-          GLOBAL OS UPDATE REPORT
-          Generated on: {{ lookup('pipe', 'date') }}
-          ============================================================
-
-    # -------------------------------------------------------------
-    # 2. RUN PACKAGE MANAGER DRY RUNS BASED ON DISTRO
+    # 1. RUN PACKAGE MANAGER DRY RUNS BASED ON DISTRO
     # -------------------------------------------------------------
     
     # --- DEBIAN / UBUNTU FLAVORS ---
@@ -136,14 +120,11 @@
             update_count: "{{ suse_out.stdout_lines | length }}"
 
     # -------------------------------------------------------------
-    # 3. CONSOLIDATE RESULTS AND APPEND TO CONTROLLER REPORT
+    # 3. PRINT OUTPUT DIRECTLY TO CONSOLE STREAM
     # -------------------------------------------------------------
-    - name: Append Node Metadata to Master Report
-      local_action:
-        module: lineinfile
-        path: "{{ report_path }}"
-        insertafter: EOF
-        line: |
+    - name: Output Node Metadata to Standard Output
+      debug:
+        msg: |
           Server name: {{ inventory_hostname }}
           ============================================================
           Server hostname: {{ ansible_fqdn | default(ansible_hostname) | default(inventory_hostname) }}
@@ -152,29 +133,3 @@
 
           {{ package_report | default('System is up to date.\n') }}
           Status: SUCCESS
-          
-
-# -----------------------------------------------------------------
-# 4. CAPTURE UNREACHABLE / FAILED NODES
-# -----------------------------------------------------------------
-- name: Handle Failure Audits
-  hosts: "{{ (hosts | default('localhost')).split(';') }}"
-  gather_facts: false
-  tasks:
-    - name: Record Offline Host Details
-      run_once: true
-      local_action:
-        module: lineinfile
-        path: "{{ report_path }}"
-        insertafter: EOF
-        line: |
-          {% for host in groups['all'] | default([]) %}
-          {% if hostvars[host]['update_count'] is undefined %}
-          Server name: {{ host }}
-          ============================================================
-          Status: FAILED
-          Reason: Unreachable via SSH or framework setup error.
-          
-
-          {% endif %}
-          {% endfor %}
