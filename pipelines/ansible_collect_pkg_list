@@ -86,11 +86,15 @@ for record in records:
     package_rows = []
     in_details = False
     
-    host_meta['SERVER_RECORD'] = lines[0].strip()
+    host_meta['SERVER_RECORD'] = lines.strip()
     
     for line in lines[1:]:
         clean_line = line.strip()
-        if not clean_line or '----------------------------------------' in clean_line:
+        
+        # Skip garbage text lines, blank dividers, and leftover raw text headers
+        if not clean_line or '----' in clean_line:
+            continue
+        if clean_line.lower().startswith('package name') or clean_line.lower().startswith('package_name'):
             continue
             
         if 'DETAILS_START' in clean_line:
@@ -101,12 +105,11 @@ for record in records:
             continue
             
         if in_details:
-            # Parse package column fields by splitting whitespace sequences
             parts = clean_line.split()
             if len(parts) >= 3:
-                package_rows.append([parts[0], parts[1], parts[2]])
+                package_rows.append([parts, parts, parts])
             elif len(parts) == 2:
-                package_rows.append([parts[0], "Unknown", parts[1]])
+                package_rows.append([parts, "Unknown", parts])
             elif "System is up to date." in clean_line:
                 package_rows.append(["System is up to date.", "", ""])
         else:
@@ -117,7 +120,6 @@ for record in records:
     srv = host_meta.get('SERVER_RECORD', 'Unknown Node')
     story.append(Paragraph(f"Server Instance Summary: {srv}", section_style))
     
-    # Render main host properties container grid
     status_str = host_meta.get("STATUS", "SUCCESS")
     status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
     
@@ -127,7 +129,7 @@ for record in records:
         [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
         [Paragraph("<b>Execution Status:</b>", body_style), Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", body_style)]
     ]
-    meta_table = Table(meta_data, colWidths=[140, 400])
+    meta_table = Table(meta_data, colWidths=)
     meta_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F7FAFC')),
         ('PADDING', (0,0), (-1,-1), 5),
@@ -136,12 +138,10 @@ for record in records:
     story.append(meta_table)
     story.append(Spacer(1, 10))
     
-    # Build package list in a clean table grid with matching header fields
     if package_rows:
         story.append(Paragraph("<b>Available Package Update Matrix:</b>", body_style))
         story.append(Spacer(1, 4))
         
-        # Build headers row block
         table_content = [[
             Paragraph("Package Name", header_cell_style), 
             Paragraph("Current Version", header_cell_style), 
@@ -150,17 +150,17 @@ for record in records:
         
         for row in package_rows:
             table_content.append([
-                Paragraph(row[0], tbl_cell_style),
-                Paragraph(row[1], tbl_cell_style),
-                Paragraph(row[2], tbl_cell_style)
+                Paragraph(row, tbl_cell_style),
+                Paragraph(row, tbl_cell_style),
+                Paragraph(row, tbl_cell_style)
             ])
             
-        pkg_table = Table(table_content, colWidths=[240, 150, 150])
+        pkg_table = Table(table_content, colWidths=)
         pkg_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), # Indigo header fill
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
             ('PADDING', (0,0), (-1,-1), 4),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]), # Zebra striping
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]), 
         ]))
         story.append(pkg_table)
         
@@ -183,8 +183,14 @@ EOF
 
     post {
         always {
-            sh 'ls -lah playbooks/'
-            archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: true
+            // Exposes the file system paths directly under the Build Build Artifacts frame
+            archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: false, fingerprint: true
+            
+            script {
+                echo "========================================================================="
+                echo "🚀 DOWNLOAD LINK: ${BUILD_URL}artifact/playbooks/os_update_report.pdf"
+                echo "========================================================================="
+            }
         }
     }
 }
