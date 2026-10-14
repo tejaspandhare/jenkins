@@ -122,7 +122,7 @@ for record in records:
         [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
         [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "SUCCESS"), body_style)]
     ]
-    t = Table(meta_data, colWidths=[150, 350])
+    t = Table(meta_data, colWidths=[130, 390])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F7FAFC')),
         ('PADDING', (0,0), (-1,-1), 6),
