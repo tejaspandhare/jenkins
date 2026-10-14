@@ -98,31 +98,35 @@ doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36
 story = []
 styles = getSampleStyleSheet()
 
+# Typography configuration profiles
 title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
 meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
+section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, spaceBefore=12, spaceAfter=6, textColor=colors.HexColor('#2B6CB0'))
 header_cell_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.white)
 tbl_cell_style = ParagraphStyle('TblCellStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica')
+code_cell_style = ParagraphStyle('CodeCellStyle', parent=styles['Normal'], fontSize=9, fontName='Courier')
 
 story.append(Paragraph("ENTERPRISE LINUX PATCHING REPORT", title_style))
 gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
 story.append(Spacer(1, 10))
 
-table_content = [[
-    Paragraph("Host Target", header_cell_style),
-    Paragraph("Operating System", header_cell_style),
-    Paragraph("Kernel Version Change", header_cell_style),
-    Paragraph("Updated", header_cell_style),
-    Paragraph("Reboot", header_cell_style),
-    Paragraph("Status", header_cell_style)
-]]
-
 records = re.split(r'HOST_RECORD:', raw_data)
 for record in records:
     if not record.strip():
         continue
     
-    lines = record.splitlines()
+    # Extract package section from data chunk safely
+    pkg_match = re.search(r'PATCHED_PACKAGES_START(.*?)PATCHED_PACKAGES_END', record, re.DOTALL)
+    pkg_lines = []
+    if pkg_match:
+        pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
+        # Isolate the metadata block
+        record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
+    else:
+        record_meta_part = record
+
+    lines = record_meta_part.splitlines()
     meta = {}
     for line in lines:
         clean_line = line.strip()
@@ -130,33 +134,87 @@ for record in records:
             k, v = clean_line.split(':', 1)
             meta[k.strip()] = v.strip()
             
+    # FIX: Updated lookup index to perfectly capture the exact HOST_RECORD variable string passed from Ansible
+    host_name = meta.get("HOST_RECORD", "Unknown Target")
+    if host_name == "Unknown Target" and lines:
+        # Fallback if split leaves the name on the first index slot line
+        host_name = lines[0].strip().split(' ')[0].split('\n')[0]
+        
+    story.append(Paragraph(f"Host Execution Target: {host_name}", section_style))
+    
     status_str = meta.get("STATUS", "FAILED")
     status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
-    
     kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
     
-    table_content.append([
-        Paragraph(meta.get("HOST_RECORD", "Unknown"), tbl_cell_style),
-        Paragraph(meta.get("OS", "Unknown"), tbl_cell_style),
-        Paragraph(kernel_change, tbl_cell_style),
-        Paragraph(meta.get("UPDATED", "No"), tbl_cell_style),
-        Paragraph(meta.get("REBOOT", "No"), tbl_cell_style),
-        Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
-    ])
-
-# FINAL SECURE FIX: List comprehension completely protects brackets from the Jenkins parser
-width_string = "90,110,140,60,60,80"
-calculated_widths = [int(w) for w in width_string.split(',')]
-
-pkg_table = Table(table_content, colWidths=calculated_widths)
-pkg_table.setStyle(TableStyle([
-    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
-    ('PADDING', (0,0), (-1,-1), 6),
-    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
-    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]),
-    ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
-]))
-story.append(pkg_table)
+    # 1. Main Overview Summary Grid Table
+    summary_content = [
+        [Paragraph("Host Target", header_cell_style),
+         Paragraph("Operating System", header_cell_style),
+         Paragraph("Kernel Version Change", header_cell_style),
+         Paragraph("Updated", header_cell_style),
+         Paragraph("Reboot", header_cell_style),
+         Paragraph("Status", header_cell_style)],
+        [Paragraph(host_name, tbl_cell_style),
+         Paragraph(meta.get("OS", "Unknown"), tbl_cell_style),
+         Paragraph(kernel_change, tbl_cell_style),
+         Paragraph(meta.get("UPDATED", "No"), tbl_cell_style),
+         Paragraph(meta.get("REBOOT", "No"), tbl_cell_style),
+         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)]
+    ]
+    
+    width_string = "90,110,140,60,60,80"
+    calculated_widths = [int(w) for w in width_string.split(',')]
+    
+    summary_table = Table(summary_content, colWidths=calculated_widths)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 10))
+    
+    # 2. Package Details Breakdown Table Grid
+    package_content = [[
+        Paragraph("Package Name", header_cell_style),
+        Paragraph("Last Version", header_cell_style),
+        Paragraph("Updated Version", header_cell_style)
+    ]]
+    
+    has_packages = False
+    for p_line in pkg_lines:
+        if "No packages updated." in p_line:
+            break
+        parts = p_line.split()
+        if len(parts) >= 3:
+            has_packages = True
+            package_content.append([
+                Paragraph(parts[0], code_cell_style),
+                Paragraph(parts[1], code_cell_style),
+                Paragraph(parts[2], code_cell_style)
+            ])
+            
+    if has_packages:
+        story.append(Paragraph("<b>Patched Packages Details Breakdown:</b>", tbl_cell_style))
+        story.append(Spacer(1, 4))
+        
+        pkg_width_str = "240,150,150"
+        pkg_widths = [int(w) for w in pkg_width_str.split(',')]
+        
+        pkg_table = Table(package_content, colWidths=pkg_widths)
+        pkg_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4A5568')), 
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+        ]))
+        story.append(pkg_table)
+    else:
+        story.append(Paragraph("<i>No package modifications occurred during this run layout window.</i>", tbl_cell_style))
+        
+    story.append(Spacer(1, 15))
 
 doc.build(story)
 print("PDF compilation successful.")
