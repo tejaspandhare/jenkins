@@ -1,42 +1,36 @@
 ---
-- name: Enterprise Linux Patching and Reporting
-  # target_hosts should be a semicolon-separated list, for example:
-  # server01;server02;server03
-  hosts: "{{ target_hosts | default('localhost') | split(';') | select('match', '.+') | join(':') }}"
-
-  gather_facts: true
-
+# -----------------------------------------------------------------
+# PLAY 1: DYNAMIC INVENTORY SETUP
+# -----------------------------------------------------------------
+- name: Parse and Map Dynamic Target Scope
+  hosts: localhost
+  gather_facts: false
   vars:
-    # Ansible temporary directory on managed hosts
+    target_hosts: ""
+  tasks:
+    - name: Dynamically append target nodes to runtime environment
+      ansible.builtin.add_host:
+        name: "{{ item.strip() }}"
+        groups: patching_execution_group
+      loop: "{{ target_hosts.split(';') }}"
+      when: target_hosts.strip() != ""
+
+# -----------------------------------------------------------------
+# PLAY 2: ENTERPRISE PATCHING ENGINE
+# -----------------------------------------------------------------
+- name: Enterprise Linux Patching and Reporting
+  hosts: patching_execution_group
+  gather_facts: true
+  vars:
     ansible_remote_tmp: "/tmp/ansible_tmp"
 
-    # Convert EXCLUDE_PKGS=vim;kernel;httpd
-    # into a clean list
-    exclude_packages_list: >-
-      {{ EXCLUDE_PKGS | default('')
-         | split(';')
-         | map('trim')
-         | reject('equalto', '')
-         | list }}
-
-    # Report configuration
-    report_dir: "{{ playbook_dir }}/reports"
-    report_file: "{{ report_dir }}/patch_report.html"
-
-  # ------------------------------------------------------------
-  # PATCHING ROLES
-  # ------------------------------------------------------------
   roles:
     - precheck
     - patch
     - reboot
     - postcheck
 
-  # ------------------------------------------------------------
-  # POST-PATCH TASKS
-  # ------------------------------------------------------------
   tasks:
-
     # ----------------------------------------------------------
     # Update /etc/lastpatchdate on the TARGET HOST
     # ----------------------------------------------------------
@@ -47,6 +41,7 @@
       changed_when: false
 
     - name: Update last patch date
+      become: true
       ansible.builtin.copy:
         content: "{{ current_patch_date.stdout | trim }}\n"
         dest: /etc/lastpatchdate
@@ -54,99 +49,26 @@
         group: root
         mode: '0600'
 
-    - name: Verify last patch date
-      ansible.builtin.slurp:
-        src: /etc/lastpatchdate
-      register: last_patch_date_file
-
-    - name: Show last patch date
+    # ----------------------------------------------------------
+    # EMIT RAW TELEMETRY DATA STREAM FOR THE JENKINS ENGINE
+    # ----------------------------------------------------------
+- name: Output Patching Metrics Collection
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display Structured Telemetry Stream
       ansible.builtin.debug:
-        msg: >-
-          {{ inventory_hostname }} last patch date:
-          {{ last_patch_date_file.content | b64decode | trim }}
-
-    # ----------------------------------------------------------
-    # GENERATE SUMMARY AND REPORT
-    # ----------------------------------------------------------
-
-    - name: Generate patch report on controller
-      run_once: true
-      delegate_to: localhost
-      block:
-
-        # ------------------------------------------------------
-        # Reset temporary run directory
-        # ------------------------------------------------------
-        # Do NOT delete /tmp/ansible_tmp itself because it may
-        # be a Kubernetes mount point.
-        # ------------------------------------------------------
-
-        - name: Reset temp directory subfolder
-          ansible.builtin.file:
-            path: /tmp/ansible_tmp/run
-            state: absent
-
-        - name: Create temp directory subfolder
-          ansible.builtin.file:
-            path: /tmp/ansible_tmp/run
-            state: directory
-            mode: '0777'
-
-        # ------------------------------------------------------
-        # Create reports directory on controller
-        # ------------------------------------------------------
-
-        - name: Ensure reports directory exists
-          ansible.builtin.file:
-            path: "{{ report_dir }}"
-            state: directory
-            mode: '0755'
-
-        # ------------------------------------------------------
-        # Build patch results summary
-        # ------------------------------------------------------
-
-        - name: Build patch results summary
-          ansible.builtin.set_fact:
-            patch_results_summary: >-
-              {{ groups['all']
-                 | map('extract', hostvars, 'patch_result')
-                 | select('defined')
-                 | list }}
-
-        # ------------------------------------------------------
-        # Print patch summary
-        # ------------------------------------------------------
-
-        - name: Print clean patch summary
-          ansible.builtin.debug:
-            msg: |
-              ================= PATCH SUMMARY =================
-
-              {% for h in patch_results_summary %}
-              Host    : {{ h.host | default('N/A') }}
-              OS      : {{ h.os | default('N/A') }}
-              Kernel  : {{ h.old_kernel | default('N/A') }} → {{ h.new_kernel | default('N/A') }}
-              Updated : {{ h.updated | default('No') }}
-              Reboot  : {{ h.reboot | default('No') }}
-              Status  : {{ h.status | default('UNKNOWN') }}
-              -------------------------------------------------
-              {% endfor %}
-
-        # ------------------------------------------------------
-        # Create HTML report
-        # ------------------------------------------------------
-
-        - name: Create HTML report
-          ansible.builtin.template:
-            src: "{{ playbook_dir }}/templates/report.j2"
-            dest: "{{ report_file }}"
-            mode: '0644'
-
-        # ------------------------------------------------------
-        # Show report path
-        # ------------------------------------------------------
-
-        - name: Show report path
-          ansible.builtin.debug:
-            msg: "Report generated at {{ report_file }}"
+        msg: |
+          REPORT_DATA_START
+          {% for host in groups['patching_execution_group'] | default([]) %}
+          HOST_RECORD:{{ host }}
+          OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
+          {% set h = hostvars[host]['patch_result'] | default({}) %}
+          OLD_KERNEL:{{ h.old_kernel | default('N/A') }}
+          NEW_KERNEL:{{ h.new_kernel | default('N/A') }}
+          UPDATED:{{ h.updated | default('No') }}
+          REBOOT:{{ h.reboot | default('No') }}
+          STATUS:{{ h.status | default('FAILED') }}
+          HOST_RECORD_END
+          {% endfor %}
+          REPORT_DATA_END
