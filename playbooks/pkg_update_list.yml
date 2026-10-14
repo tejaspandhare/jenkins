@@ -1,15 +1,29 @@
 ---
-- name: Global OS Update Auditor
-  hosts: "{{ hosts_param.split(';') }}"
+# -----------------------------------------------------------------
+# PHASE 1: DYNAMIC INVENTORY INJECTION (Handles unmanaged inputs)
+# -----------------------------------------------------------------
+- name: Initialize Target Host Environment
+  hosts: localhost
   gather_facts: false
-  
   vars:
     hosts_param: ""
+  tasks:
+    - name: Dynamically parse and add target servers to inventory
+      add_host:
+        name: "{{ item.strip() }}"
+        groups: dynamic_target_group
+      loop: "{{ hosts_param.split(';') }}"
+      when: hosts_param.strip() != ""
+
+# -----------------------------------------------------------------
+# PHASE 2: RUN ARCHITECTURE AUDITS AGAINST TARGET NODES
+# -----------------------------------------------------------------
+- name: Global OS Update Auditor
+  hosts: dynamic_target_group
+  gather_facts: false
 
   tasks:
-    # -------------------------------------------------------------
-    # 0. DYNAMIC FACT GATHERING
-    # -------------------------------------------------------------
+    # 0. Fetch metadata properties dynamically
     - name: Dynamically gather system layout facts for target nodes
       setup:
         gather_subset:
@@ -17,10 +31,6 @@
           - 'system'
       ignore_errors: true
 
-    # -------------------------------------------------------------
-    # 1. RUN PACKAGE MANAGER DRY RUNS BASED ON DISTRO
-    # -------------------------------------------------------------
-    
     # --- DEBIAN / UBUNTU FLAVORS ---
     - name: Check Debian/Ubuntu Updates
       when: ansible_os_family | default('') == "Debian"
@@ -114,24 +124,24 @@
             node_status: "SUCCESS"
 
 # -----------------------------------------------------------------
-# 2. EMIT RAW RESULTS PATTERN FOR JENKINS PARSER
+# PHASE 3: CONSOLIDATE DATA PATTERNS AND PRINT METRIC LOGS
 # -----------------------------------------------------------------
 - name: Output Clean Data Collection
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Display Text Engine
+    - name: Display Text Engine Output
       debug:
         msg: |
           REPORT_JSON_DATA_START
-          {% for host in ansible_play_batch %}
+          {% for host in groups['dynamic_target_group'] | default([]) %}
           SERVER_RECORD:{{ host }}
           HOSTNAME:{{ hostvars[host]['ansible_fqdn'] | default(hostvars[host]['ansible_hostname']) | default(host) }}
           OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
           COUNT:{{ hostvars[host]['update_count'] | default('0') }}
           STATUS:{{ hostvars[host]['node_status'] | default('FAILED') }}
           DETAILS_START
-          {{ hostvars[host]['package_report'] | default('   Reason: Unreachable via SSH or run layout failed.\n') }}
+          {{ hostvars[host]['package_report'] | default('   Reason: Unreachable via SSH or patch dry-run execution failed.\n') }}
           DETAILS_END
           {% endfor %}
           REPORT_JSON_DATA_END
