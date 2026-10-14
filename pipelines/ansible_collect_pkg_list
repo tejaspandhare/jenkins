@@ -90,7 +90,13 @@ for record in records:
     
     for line in lines[1:]:
         clean_line = line.strip()
-        if not clean_line or '----------------------------------------' in clean_line:
+        
+        # Skip dividers and blank lines
+        if not clean_line or '----' in clean_line:
+            continue
+            
+        # FIX: Filter out duplicate text headers originating from raw package managers
+        if clean_line.lower().startswith('package name') or clean_line.lower().startswith('package_name'):
             continue
             
         if 'DETAILS_START' in clean_line:
@@ -183,8 +189,14 @@ EOF
 
     post {
         always {
-            sh 'ls -lah playbooks/'
-            archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: true
+            // Fingerprint configuration enables the Jenkins Dashboard layout link seamlessly
+            archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: false, fingerprint: true
+            
+            script {
+                echo "========================================================================="
+                echo "🚀 DOWNLOAD LINK: ${BUILD_URL}artifact/playbooks/os_update_report.pdf"
+                echo "========================================================================="
+            }
         }
     }
 }
