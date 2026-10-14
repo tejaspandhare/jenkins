@@ -88,9 +88,10 @@ if not match:
 
 raw_data = match.group(1)
 
-# FIX: Using chr(27) eliminates the backslash extraction failure in Groovy completely
-raw_data = re.sub(chr(27) + r'\[[0-9;]*[a-zA-Z]', '', raw_data)
-raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
+# FIX: Using character code string operations completely eliminates backslashes, making Groovy parse perfectly
+ansi_regex = chr(27) + chr(91) + '[0-9;]*[a-zA-Z]'
+raw_data = re.sub(ansi_regex, '', raw_data)
+raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
 doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
@@ -143,7 +144,7 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-pkg_table = Table(table_content, colWidths=[90, 100, 170, 55, 55, 70])
+pkg_table = Table(table_content, colWidths=)
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
@@ -154,7 +155,7 @@ pkg_table.setStyle(TableStyle([
 story.append(pkg_table)
 
 doc.build(story)
-print("PDF metrics compilation complete.")
+print("PDF compilation successful.")
 EOF
 
                     python3 generate_pdf.py
