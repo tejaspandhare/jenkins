@@ -87,8 +87,9 @@ if not match:
     exit(0)
 
 raw_data = match.group(1)
-# Clean up ANSI console color escaping blocks before parsing fields
-raw_data = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', raw_data)
+
+# FIX: Using chr(27) eliminates the backslash extraction failure in Groovy completely
+raw_data = re.sub(chr(27) + r'\[[0-9;]*[a-zA-Z]', '', raw_data)
 raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
@@ -142,8 +143,7 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-# FIX: Explicit list values passed here prevent python compilation crash window
-pkg_table = Table(table_content, colWidths=[80, 100, 180, 60, 60, 60])
+pkg_table = Table(table_content, colWidths=[90, 100, 170, 55, 55, 70])
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
