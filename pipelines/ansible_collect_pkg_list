@@ -78,7 +78,8 @@ story.append(Spacer(1, 10))
 records = re.findall(r'SERVER_RECORD:(.*?)(?=SERVER_RECORD:|$)', data_block, re.DOTALL)
 
 for record in records:
-    lines = record.strip().split('\n')
+    # Fix: splitlines() completely avoids literal string carriage escape issues
+    lines = record.strip().splitlines()
     host_meta = {}
     details = []
     in_details = False
@@ -119,7 +120,7 @@ for record in records:
     
     # Table details presentation block
     if details:
-        clean_details = "\\n".join(details).replace('\n', '<br/>')
+        clean_details = "<br/>".join(details)
         story.append(Paragraph("<b>Package Audit Details:</b>", body_style))
         story.append(Spacer(1, 4))
         story.append(Paragraph(clean_details, code_style))
