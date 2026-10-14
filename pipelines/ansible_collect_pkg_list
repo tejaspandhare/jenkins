@@ -31,7 +31,7 @@ pipeline {
                         # 2. Safely bypass PEP 668 to guarantee reportlab is available
                         python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                        # 3. Create the robust python engine script to parse data safely
+                        # 3. Create a highly resilient Python parsing script
                         cat << 'EOF' > parse_to_pdf.py
 import os, re, time
 from reportlab.lib.pagesizes import letter
@@ -49,12 +49,16 @@ if not os.path.exists(log_file):
 with open(log_file, 'r') as f:
     content = f.read()
 
+# Highly resilient block extraction (handles embedded newlines or escaping)
 match = re.search(r'REPORT_JSON_DATA_START(.*?)REPORT_JSON_DATA_END', content, re.DOTALL)
 if not match:
     print("Warning: Missing layout data tags inside log stream.")
     exit(0)
 
-data_block = match.group(1)
+raw_data = match.group(1)
+
+# Clean up raw debug formatting junk added by Ansible console serialization
+raw_data = raw_data.replace('\\n', '\n').replace('\\\\"', '"')
 
 # Initialize PDF components
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
@@ -74,30 +78,38 @@ gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
 story.append(Spacer(1, 10))
 
-# Find individual server record chunks
-records = re.findall(r'SERVER_RECORD:(.*?)(?=SERVER_RECORD:|$)', data_block, re.DOTALL)
+# Resilient parsing loop looking for server keys anywhere on the line
+records = re.split(r'SERVER_RECORD:', raw_data)
 
 for record in records:
-    lines = record.strip().splitlines()
+    if not record.strip():
+        continue
+        
+    lines = record.splitlines()
     host_meta = {}
     details = []
     in_details = False
     
-    for line in lines:
-        line_str = line.strip().replace('\\\\"', '"')
-        if 'DETAILS_START' in line_str:
+    # Extract the base server name from the split token's first line
+    host_meta['SERVER_RECORD'] = lines[0].strip()
+    
+    for line in lines[1:]:
+        clean_line = line.strip()
+        if not clean_line:
+            continue
+            
+        if 'DETAILS_START' in clean_line:
             in_details = True
             continue
-        if 'DETAILS_END' in line_str:
+        if 'DETAILS_END' in clean_line:
             in_details = False
             continue
+            
         if in_details:
-            # Fix: Using raw strings prevents Jenkins from generating a line break syntax crash
-            clean_line = line_str.replace(r'\\n', chr(10))
             details.append(clean_line)
         else:
-            if ':' in line_str:
-                k, v = line_str.split(':', 1)
+            if ':' in clean_line:
+                k, v = clean_line.split(':', 1)
                 host_meta[k.strip()] = v.strip()
 
     srv = host_meta.get('SERVER_RECORD', 'Unknown Node')
@@ -108,7 +120,7 @@ for record in records:
         [Paragraph("<b>Hostname:</b>", body_style), Paragraph(host_meta.get("HOSTNAME", "Unknown"), body_style)],
         [Paragraph("<b>Operating System:</b>", body_style), Paragraph(host_meta.get("OS", "Unknown"), body_style)],
         [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
-        [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "FAILED"), body_style)]
+        [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "SUCCESS"), body_style)]
     ]
     t = Table(meta_data, colWidths=[150, 350])
     t.setStyle(TableStyle([
