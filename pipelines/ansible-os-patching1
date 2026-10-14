@@ -12,7 +12,7 @@ pipeline {
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'false' 
+        ANSIBLE_FORCE_COLOR = 'true' // Re-enabled to allow xterm color formatting on your console logs
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
@@ -39,18 +39,18 @@ pipeline {
                         set -euo pipefail
                         
                         echo "========== PATCH EXECUTION =========="
-                        # FIX: Using :- tells bash to use a fallback if the parameter string is blank/empty
                         echo "Running patching on: ${SERVER_NAME}"
                         echo "Excluding packages: ${EXCLUDE_PKGS:-none}"
                         
                         mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
+                        # FIX: Using 'tee' streams logs to the live console AND copies it to a file simultaneously
                         ansible-playbook \
                             -i inventory/hosts \
                             ansible-roles/os_patching/patch2.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "target_hosts='${SERVER_NAME}'" \
-                            -e "EXCLUDE_PKGS='${EXCLUDE_PKGS:-}'" > raw_patch_log.tmp 2>&1 || true
+                            -e "EXCLUDE_PKGS='${EXCLUDE_PKGS:-}'" 2>&1 | tee raw_patch_log.tmp || true
                     '''
                 }
             }
@@ -82,12 +82,16 @@ if not os.path.exists(log_file):
 with open(log_file, 'r') as f:
     content = f.read()
 
+# Highly flexible regex layout matching lines even with raw console log data variations
 match = re.search(r'REPORT_DATA_START(.*?)REPORT_DATA_END', content, re.DOTALL)
 if not match:
-    print("Warning: Log metadata stream block tokens missing.")
+    print("Warning: Log metadata stream block tokens missing from console output.")
     exit(0)
 
-raw_data = match.group(1).replace(r'\\n', chr(10)).replace(r'\\"', '"')
+# Clean up ANSI color escapes and control blocks left over from tee stream parsing loops
+raw_data = match.group(1)
+raw_data = re.sub(r'\\x1b\\[[0-9;]*[a-zA-Z]', '', raw_data)
+raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
 doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
@@ -96,7 +100,6 @@ styles = getSampleStyleSheet()
 
 title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
 meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
-body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
 header_cell_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.white)
 tbl_cell_style = ParagraphStyle('TblCellStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica')
 
@@ -141,7 +144,7 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-pkg_table = Table(table_content, colWidths=[90, 100, 190, 50, 50, 60])
+pkg_table = Table(table_content, colWidths=)
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
@@ -156,7 +159,7 @@ print("PDF metrics compilation complete.")
 EOF
 
                     python3 generate_pdf.py
-                    rm -f generate_pdf.py
+                    rm -f generate_pdf.py raw_patch_log.tmp
                 '''
             }
         }
