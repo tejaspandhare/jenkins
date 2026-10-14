@@ -4,7 +4,6 @@
   gather_facts: false
   
   vars:
-    # Safe blank initialization to bypass the early global syntax compiler parse phase
     hosts_param: ""
 
   tasks:
@@ -125,7 +124,7 @@
       debug:
         msg: |
           REPORT_JSON_DATA_START
-          {% for host in groups['all'] | default([]) %}
+          {% for host in ansible_play_batch %}
           SERVER_RECORD:{{ host }}
           HOSTNAME:{{ hostvars[host]['ansible_fqdn'] | default(hostvars[host]['ansible_hostname']) | default(host) }}
           OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
