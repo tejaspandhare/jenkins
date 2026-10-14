@@ -1,7 +1,11 @@
 ---
 - name: Global OS Update Auditor
-  hosts: "{{ (hosts | default('localhost')).split(';') }}"
+  hosts: "{{ hosts_param.split(';') }}"
   gather_facts: false
+  
+  vars:
+    # Safe blank initialization to bypass the early global syntax compiler parse phase
+    hosts_param: ""
 
   tasks:
     # -------------------------------------------------------------
@@ -23,12 +27,6 @@
       when: ansible_os_family | default('') == "Debian"
       become: true
       block:
-        - name: Refresh APT cache
-          apt:
-            update_cache: true
-            cache_valid_time: 3600
-          ignore_errors: true
-
         - name: Query APT Upgradable Packages
           shell: "apt list --upgradable 2>/dev/null | tail -n +2"
           register: apt_out
@@ -93,12 +91,6 @@
       when: ansible_os_family | default('') == "Suse"
       become: true
       block:
-        - name: Refresh Zypper Repos
-          zypper_repository:
-            repo: '*'
-            run_refresh: true
-          ignore_errors: true
-
         - name: Query Zypper Upgradable Packages
           shell: "zypper --non-interactive list-updates -g 2>/dev/null | tail -n +5"
           register: suse_out
@@ -123,34 +115,24 @@
             node_status: "SUCCESS"
 
 # -----------------------------------------------------------------
-# 3. COMPILE CENTRAL REPORT (Bypasses Docker 524 Syscall Rename Bug)
+# 2. EMIT RAW RESULTS PATTERN FOR JENKINS PARSER
 # -----------------------------------------------------------------
-- name: Compile Unified Text Report
+- name: Output Clean Data Collection
   hosts: localhost
   gather_facts: false
   tasks:
-    - name: Generate Text File Output
-      copy:
-        # Saving inside active current directory path avoids dynamic container cross-device issues
-        dest: "./os_update_report.txt"
-        content: |
-          GLOBAL OS UPDATE REPORT
-          Generated on: {{ lookup('pipe', 'date') }}
-          ============================================================
+    - name: Display Text Engine
+      debug:
+        msg: |
+          REPORT_JSON_DATA_START
           {% for host in groups['all'] | default([]) %}
-          
-          Server name: {{ host }}
-          ============================================================
-          {% if hostvars[host]['node_status'] is defined and hostvars[host]['node_status'] == 'SUCCESS' %}
-          Server hostname: {{ hostvars[host]['ansible_fqdn'] | default(hostvars[host]['ansible_hostname']) | default(host) }}
-          Server OS: {{ hostvars[host]['ansible_distribution'] }} {{ hostvars[host]['ansible_distribution_version'] }}
-          Number of updates available: {{ hostvars[host]['update_count'] | default('0') }}
-
-          {{ hostvars[host]['package_report'] }}
-          Status: SUCCESS
-          {% else %}
-          Status: FAILED
-          Reason: Unreachable via SSH, execution error, or framework setup layout failed.
-          {% endif %}
-          ============================================================
+          SERVER_RECORD:{{ host }}
+          HOSTNAME:{{ hostvars[host]['ansible_fqdn'] | default(hostvars[host]['ansible_hostname']) | default(host) }}
+          OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
+          COUNT:{{ hostvars[host]['update_count'] | default('0') }}
+          STATUS:{{ hostvars[host]['node_status'] | default('FAILED') }}
+          DETAILS_START
+          {{ hostvars[host]['package_report'] | default('   Reason: Unreachable via SSH or run layout failed.\n') }}
+          DETAILS_END
           {% endfor %}
+          REPORT_JSON_DATA_END
