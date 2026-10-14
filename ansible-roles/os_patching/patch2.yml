@@ -50,7 +50,7 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # CONSOLIDATED REPORTING TASK
+    # CONSOLIDATED TELEMETRY GENERATION ENGINE
     # ----------------------------------------------------------
     - name: Display Structured Telemetry Stream
       run_once: true
@@ -67,6 +67,15 @@
           UPDATED:{{ h.updated | default('No') }}
           REBOOT:{{ h.reboot | default('No') }}
           STATUS:{{ h.status | default('FAILED') }}
+          PATCHED_PACKAGES_START
+          {% if hostvars[host]['packages_updated'] is defined and hostvars[host]['packages_updated'] | length > 0 %}
+          {% for pkg in hostvars[host]['packages_updated'] %}
+          {{ pkg.name }} {{ pkg.old_version }} {{ pkg.new_version }}
+          {% endfor %}
+          {% else %}
+          No packages updated.
+          {% endif %}
+          PATCHED_PACKAGES_END
           HOST_RECORD_END
           {% endfor %}
           REPORT_DATA_END
