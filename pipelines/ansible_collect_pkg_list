@@ -21,15 +21,15 @@ pipeline {
                             exit 1
                         fi
 
-                        # 1. Run the playbook to gather structural telemetry data logs
+                        # 1. Run the playbook to gather structural data logs
                         ansible-playbook \
                             -i inventory/hosts \
                             playbooks/pkg_update_list.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "hosts_param='${SERVER_NAME}'" > raw_ansible_log.tmp 2>&1 || true
 
-                        # 2. Ensure reportlab is available for PDF compilation
-                        python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab
+                        # 2. Safely bypass PEP 668 to guarantee reportlab is available
+                        python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
                         # 3. Create the robust python engine script to parse data safely
                         cat << 'EOF' > parse_to_pdf.py
@@ -108,7 +108,7 @@ for record in records:
         [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
         [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "FAILED"), body_style)]
     ]
-    t = Table(meta_data, colWidths=[150, 350])
+    t = Table(meta_data, colWidths=[150, 380])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F7FAFC')),
         ('PADDING', (0,0), (-1,-1), 6),
