@@ -12,7 +12,7 @@ pipeline {
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'false' // Turn color strings off inside logs to clean up parsing hooks
+        ANSIBLE_FORCE_COLOR = 'false' 
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
@@ -39,6 +39,10 @@ pipeline {
                         set -euo pipefail
                         
                         echo "========== PATCH EXECUTION =========="
+                        # FIX: Using :- tells bash to use a fallback if the parameter string is blank/empty
+                        echo "Running patching on: ${SERVER_NAME}"
+                        echo "Excluding packages: ${EXCLUDE_PKGS:-none}"
+                        
                         mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
                         ansible-playbook \
@@ -46,7 +50,7 @@ pipeline {
                             ansible-roles/os_patching/patch2.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "target_hosts='${SERVER_NAME}'" \
-                            -e "EXCLUDE_PKGS='${EXCLUDE_PKGS}'" > raw_patch_log.tmp 2>&1 || true
+                            -e "EXCLUDE_PKGS='${EXCLUDE_PKGS:-}'" > raw_patch_log.tmp 2>&1 || true
                     '''
                 }
             }
@@ -59,10 +63,8 @@ pipeline {
                     
                     echo "========== COMPILING PDF SYSTEM METRICS =========="
                     
-                    # Ensure reportlab is available safely matching local distribution limits
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                    # Compile the structured report generation tool script
                     cat << 'EOF' > generate_pdf.py
 import os, re, time
 from reportlab.lib.pagesizes import letter
@@ -92,7 +94,6 @@ doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36
 story = []
 styles = getSampleStyleSheet()
 
-# Typography configuration profiles
 title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
 meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
 body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
@@ -104,7 +105,6 @@ gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
 story.append(Spacer(1, 10))
 
-# Initialize dynamic tracking metrics table structure
 table_content = [[
     Paragraph("Host Target", header_cell_style),
     Paragraph("Operating System", header_cell_style),
@@ -141,8 +141,7 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-# Build clean uniform column sizing grid layout widths (Totaling 540 max text space area)
-pkg_table = Table(table_content, colWidths=)
+pkg_table = Table(table_content, colWidths=[90, 100, 190, 50, 50, 60])
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
@@ -157,7 +156,7 @@ print("PDF metrics compilation complete.")
 EOF
 
                     python3 generate_pdf.py
-                    rm -f raw_patch_log.tmp generate_pdf.py
+                    rm -f generate_pdf.py
                 '''
             }
         }
