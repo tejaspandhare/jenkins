@@ -16,7 +16,7 @@
       when: target_hosts.strip() != ""
 
 # -----------------------------------------------------------------
-# PLAY 2: ENTERPRISE PATCHING ENGINE
+# PLAY 2: ENTERPRISE PATCHING ENGINE & TELEMETRY GENERATION
 # -----------------------------------------------------------------
 - name: Enterprise Linux Patching and Reporting
   hosts: patching_execution_group
@@ -50,13 +50,11 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # EMIT RAW TELEMETRY DATA STREAM FOR THE JENKINS ENGINE
+    # CONSOLIDATED REPORTING TASK
     # ----------------------------------------------------------
-- name: Output Patching Metrics Collection
-  hosts: localhost
-  gather_facts: false
-  tasks:
     - name: Display Structured Telemetry Stream
+      run_once: true
+      delegate_to: localhost
       ansible.builtin.debug:
         msg: |
           REPORT_DATA_START
