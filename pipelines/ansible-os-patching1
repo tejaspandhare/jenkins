@@ -3,42 +3,30 @@ pipeline {
 
     options {
         timestamps()
-        ansiColor('xterm')   // ✅ Fix color output
+        ansiColor('xterm')
     }
 
     parameters {
-        string(
-            name: 'SERVER_NAME',
-            defaultValue: '',
-            description: 'Enter servers (semicolon separated): server1;server2'
-        )
-
-        string(
-            name: 'EXCLUDE_PKGS',
-            defaultValue: '',
-            description: 'Packages to exclude (semicolon separated): kernel*;docker*'
-        )
+        string(name: 'SERVER_NAME', defaultValue: '', description: 'Enter servers (semicolon separated): server1;server2')
+        string(name: 'EXCLUDE_PKGS', defaultValue: '', description: 'Packages to exclude (semicolon separated): kernel*;docker*')
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true'
+        ANSIBLE_FORCE_COLOR = 'false' // Turn color strings off inside logs to clean up parsing hooks
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_HOST_KEY_CHECKING = 'false'
-        
-        // ✅ FIX: Redirect SSH control multiplex sockets to local agent storage to prevent NFS Stale File Handle crashes
         ANSIBLE_SSH_CONTROL_PATH_DIR = '/tmp/ansible_cp'
     }
 
     stages {
-
         stage('Validate Input') {
             steps {
                 script {
                     if (!params.SERVER_NAME?.trim()) {
-                        error("SERVER_NAME cannot be empty")
+                        error("SERVER_NAME parameter cannot be empty.")
                     }
                 }
             }
@@ -46,52 +34,145 @@ pipeline {
 
         stage('Run Ansible Patching') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')
-                ]) {
-                    script {
-                        sh """
-                            echo "========== PATCH EXECUTION =========="
-                            echo "Running patching on: ${params.SERVER_NAME}"
-                            echo "Excluding packages: ${params.EXCLUDE_PKGS}"
-                            
-                            # ✅ Ensure the local control path directory exists on the agent machine
-                            mkdir -p /tmp/ansible_cp
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+                        
+                        echo "========== PATCH EXECUTION =========="
+                        mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/os_patching/patch2.yml \
-                                --private-key="\$ANSIBLE_KEY_FILE" \
-                                -e "target_hosts=${params.SERVER_NAME}" \
-                                -e "EXCLUDE_PKGS=${params.EXCLUDE_PKGS}"
-                        """
-                    }
+                        ansible-playbook \
+                            -i inventory/hosts \
+                            ansible-roles/os_patching/patch2.yml \
+                            --private-key="$ANSIBLE_KEY_FILE" \
+                            -e "target_hosts='${SERVER_NAME}'" \
+                            -e "EXCLUDE_PKGS='${EXCLUDE_PKGS}'" > raw_patch_log.tmp 2>&1 || true
+                    '''
                 }
             }
         }
 
-        stage('Archive Report') {
+        stage('Generate PDF Report') {
             steps {
-                script {
-                    echo "========== REPORT FILE =========="
-                    sh 'ls -l ansible-roles/os_patching/reports || true'
-                }
+                sh '''#!/bin/bash
+                    set -euo pipefail
+                    
+                    echo "========== COMPILING PDF SYSTEM METRICS =========="
+                    
+                    # Ensure reportlab is available safely matching local distribution limits
+                    python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.html', fingerprint: true
+                    # Compile the structured report generation tool script
+                    cat << 'EOF' > generate_pdf.py
+import os, re, time
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+log_file = 'raw_patch_log.tmp'
+pdf_file = 'ansible-roles/os_patching/reports/patch_report.pdf'
+
+if not os.path.exists(log_file):
+    print("Error: Missing execution data logs.")
+    exit(1)
+
+with open(log_file, 'r') as f:
+    content = f.read()
+
+match = re.search(r'REPORT_DATA_START(.*?)REPORT_DATA_END', content, re.DOTALL)
+if not match:
+    print("Warning: Log metadata stream block tokens missing.")
+    exit(0)
+
+raw_data = match.group(1).replace(r'\\n', chr(10)).replace(r'\\"', '"')
+
+os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
+doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
+story = []
+styles = getSampleStyleSheet()
+
+# Typography configuration profiles
+title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
+meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
+body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
+header_cell_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.white)
+tbl_cell_style = ParagraphStyle('TblCellStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica')
+
+story.append(Paragraph("ENTERPRISE LINUX PATCHING REPORT", title_style))
+gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
+story.append(Spacer(1, 10))
+
+# Initialize dynamic tracking metrics table structure
+table_content = [[
+    Paragraph("Host Target", header_cell_style),
+    Paragraph("Operating System", header_cell_style),
+    Paragraph("Kernel Version Change", header_cell_style),
+    Paragraph("Updated", header_cell_style),
+    Paragraph("Reboot", header_cell_style),
+    Paragraph("Status", header_cell_style)
+]]
+
+records = re.split(r'HOST_RECORD:', raw_data)
+for record in records:
+    if not record.strip():
+        continue
+    
+    lines = record.splitlines()
+    meta = {}
+    for line in lines:
+        clean_line = line.strip()
+        if ':' in clean_line:
+            k, v = clean_line.split(':', 1)
+            meta[k.strip()] = v.strip()
+            
+    status_str = meta.get("STATUS", "FAILED")
+    status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
+    
+    kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
+    
+    table_content.append([
+        Paragraph(meta.get("HOST_RECORD", "Unknown"), tbl_cell_style),
+        Paragraph(meta.get("OS", "Unknown"), tbl_cell_style),
+        Paragraph(kernel_change, tbl_cell_style),
+        Paragraph(meta.get("UPDATED", "No"), tbl_cell_style),
+        Paragraph(meta.get("REBOOT", "No"), tbl_cell_style),
+        Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
+    ])
+
+# Build clean uniform column sizing grid layout widths (Totaling 540 max text space area)
+pkg_table = Table(table_content, colWidths=)
+pkg_table.setStyle(TableStyle([
+    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
+    ('PADDING', (0,0), (-1,-1), 6),
+    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
+    ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]),
+    ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+]))
+story.append(pkg_table)
+
+doc.build(story)
+print("PDF metrics compilation complete.")
+EOF
+
+                    python3 generate_pdf.py
+                    rm -f raw_patch_log.tmp generate_pdf.py
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "✅ Patching completed successfully"
+            echo "✅ Patching completed successfully."
         }
-
         failure {
-            echo "❌ Patching failed"
+            echo "❌ Patching execution failed."
         }
-
         always {
+            archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.pdf', allowEmptyArchive: false
+            sleep time: 3, unit: 'SECONDS'
             cleanWs()
         }
     }
