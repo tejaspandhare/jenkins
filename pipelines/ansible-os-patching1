@@ -88,10 +88,10 @@ if not match:
 
 raw_data = match.group(1)
 
-# FIX: Using character code string operations completely eliminates backslashes, making Groovy parse perfectly
+# Clean up ANSI color escaping blocks cleanly
 ansi_regex = chr(27) + chr(91) + '[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
-raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\\\"', '"')
+raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
 doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
@@ -144,7 +144,9 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-pkg_table = Table(table_content, colWidths=)
+# FIX: Declaring width integers outside square brackets prevents Jenkins parsing drops entirely
+calculated_widths = list((90, 110, 140, 60, 60, 80))
+pkg_table = Table(table_content, colWidths=calculated_widths)
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
