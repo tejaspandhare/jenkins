@@ -21,81 +21,120 @@ pipeline {
                             exit 1
                         fi
 
-                        # Run playbook to collect console data outputs
+                        # 1. Run the playbook to gather structural telemetry data logs
                         ansible-playbook \
                             -i inventory/hosts \
                             playbooks/pkg_update_list.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "hosts_param='${SERVER_NAME}'" > raw_ansible_log.tmp 2>&1 || true
 
-                        # Use an inline python parsing script to safely format the log data without sed errors
-                        python3 -c "
+                        # 2. Ensure reportlab is available for PDF compilation
+                        python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab
+
+                        # 3. Create the robust python engine script to parse data safely
+                        cat << 'EOF' > parse_to_pdf.py
 import os, re, time
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 log_file = 'raw_ansible_log.tmp'
-out_file = 'playbooks/os_update_report.txt'
+pdf_file = 'playbooks/os_update_report.pdf'
 
 if not os.path.exists(log_file):
-    print('Error: Ansible log not found.')
+    print("Error: Missing raw data log.")
     exit(1)
 
 with open(log_file, 'r') as f:
     content = f.read()
 
-# Locate data block between markers
 match = re.search(r'REPORT_JSON_DATA_START(.*?)REPORT_JSON_DATA_END', content, re.DOTALL)
 if not match:
-    print('Error: Data markers missing from output.')
+    print("Warning: Missing layout data tags inside log stream.")
     exit(0)
 
 data_block = match.group(1)
 
-with open(out_file, 'w') as out:
-    out.write('GLOBAL OS UPDATE REPORT\\n')
-    out.write(f'Generated on: {time.strftime(\"%a %b %d %H:%M:%S %Z %Y\")}\\n')
-    out.write('============================================================\\n\\n')
+# Initialize PDF components
+os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
+doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+story = []
+styles = getSampleStyleSheet()
+
+# Custom styles setup
+title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=22, spaceAfter=10, textColor=colors.HexColor('#1A365D'))
+meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=20, textColor=colors.HexColor('#4A5568'))
+section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, spaceBefore=15, spaceAfter=5, textColor=colors.HexColor('#2B6CB0'))
+body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
+code_style = ParagraphStyle('CodeStyle', parent=styles['Code'], fontSize=8, leading=11, fontName='Courier')
+
+story.append(Paragraph("GLOBAL OS UPDATE REPORT", title_style))
+gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
+story.append(Spacer(1, 10))
+
+# Find individual server record chunks
+records = re.findall(r'SERVER_RECORD:(.*?)(?=SERVER_RECORD:|$)', data_block, re.DOTALL)
+
+for record in records:
+    lines = record.strip().split('\n')
+    host_meta = {}
+    details = []
+    in_details = False
     
-    # Process individual hosts blocks
-    records = re.findall(r'SERVER_RECORD:(.*?)(?=SERVER_RECORD:|$)', data_block, re.DOTALL)
-    for record in records:
-        lines = record.strip().split('\\n')
-        host_meta = {}
-        details = []
-        in_details = False
-        
-        for line in lines:
-            line_str = line.strip().replace('\\\\\"', '\"')
-            if 'DETAILS_START' in line_str:
-                in_details = True
-                continue
-            if 'DETAILS_END' in line_str:
-                in_details = False
-                continue
-            if in_details:
-                # Clean up nested newline strings from debug serialization
-                details.append(line_str.replace('\\\\n', '\\n'))
-            else:
-                if ':' in line_str:
-                    k, v = line_str.split(':', 1)
-                    host_meta[k.strip()] = v.strip()
+    for line in lines:
+        line_str = line.strip().replace('\\\\"', '"')
+        if 'DETAILS_START' in line_str:
+            in_details = True
+            continue
+        if 'DETAILS_END' in line_str:
+            in_details = False
+            continue
+        if in_details:
+            details.append(line_str.replace('\\\\n', '\n'))
+        else:
+            if ':' in line_str:
+                k, v = line_str.split(':', 1)
+                host_meta[k.strip()] = v.strip()
 
-        # Generate structured clean text block
-        server_name = host_meta.get('SERVER_RECORD', 'Unknown')
-        out.write(f'Server name: {server_name}\\n')
-        out.write('============================================================\\n')
-        out.write(f'Server hostname: {host_meta.get(\"HOSTNAME\", \"Unknown\")}\\n')
-        out.write(f'Server OS: {host_meta.get(\"OS\", \"Unknown\")}\\n')
-        out.write(f'Number of updates available: {host_meta.get(\"COUNT\", \"0\")}\\n\\n')
-        
-        if details:
-            out.write('\\n'.join(details) + '\\n')
-            
-        out.write(f'\\nStatus: {host_meta.get(\"STATUS\", \"FAILED\")}\\n')
-        out.write('============================================================\\n\\n')
-"
+    srv = host_meta.get('SERVER_RECORD', 'Unknown Node')
+    story.append(Paragraph(f"Server Name: {srv}", section_style))
+    
+    # Metadata presentation matrix
+    meta_data = [
+        [Paragraph("<b>Hostname:</b>", body_style), Paragraph(host_meta.get("HOSTNAME", "Unknown"), body_style)],
+        [Paragraph("<b>Operating System:</b>", body_style), Paragraph(host_meta.get("OS", "Unknown"), body_style)],
+        [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
+        [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "FAILED"), body_style)]
+    ]
+    t = Table(meta_data, colWidths=[150, 350])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F7FAFC')),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+    
+    # Table details presentation block
+    if details:
+        clean_details = "\\n".join(details).replace('\n', '<br/>')
+        story.append(Paragraph("<b>Package Audit Details:</b>", body_style))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(clean_details, code_style))
+    
+    story.append(Spacer(1, 15))
 
-                        # Clean up intermediate workspace artifacts
-                        rm -f raw_ansible_log.tmp
+doc.build(story)
+print("PDF compilation successful.")
+EOF
+
+                        # 4. Execute the Python tool layer
+                        python3 parse_to_pdf.py
+
+                        # 5. Clean up temporary operational file paths
+                        rm -f raw_ansible_log.tmp parse_to_pdf.py
                     '''
                 }
             }
@@ -105,7 +144,7 @@ with open(out_file, 'w') as out:
     post {
         always {
             sh 'ls -lah playbooks/'
-            archiveArtifacts artifacts: 'playbooks/os_update_report.txt', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: true
         }
     }
 }
