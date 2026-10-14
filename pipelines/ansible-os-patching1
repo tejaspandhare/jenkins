@@ -12,7 +12,7 @@ pipeline {
     }
 
     environment {
-        ANSIBLE_FORCE_COLOR = 'true' // Re-enabled to allow xterm color formatting on your console logs
+        ANSIBLE_FORCE_COLOR = 'true' 
         ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
@@ -44,7 +44,6 @@ pipeline {
                         
                         mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
-                        # FIX: Using 'tee' streams logs to the live console AND copies it to a file simultaneously
                         ansible-playbook \
                             -i inventory/hosts \
                             ansible-roles/os_patching/patch2.yml \
@@ -82,15 +81,14 @@ if not os.path.exists(log_file):
 with open(log_file, 'r') as f:
     content = f.read()
 
-# Highly flexible regex layout matching lines even with raw console log data variations
 match = re.search(r'REPORT_DATA_START(.*?)REPORT_DATA_END', content, re.DOTALL)
 if not match:
     print("Warning: Log metadata stream block tokens missing from console output.")
     exit(0)
 
-# Clean up ANSI color escapes and control blocks left over from tee stream parsing loops
 raw_data = match.group(1)
-raw_data = re.sub(r'\\x1b\\[[0-9;]*[a-zA-Z]', '', raw_data)
+# Clean up ANSI console color escaping blocks before parsing fields
+raw_data = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', raw_data)
 raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
@@ -144,7 +142,8 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-pkg_table = Table(table_content, colWidths=)
+# FIX: Explicit list values passed here prevent python compilation crash window
+pkg_table = Table(table_content, colWidths=[80, 100, 180, 60, 60, 60])
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
     ('PADDING', (0,0), (-1,-1), 6),
