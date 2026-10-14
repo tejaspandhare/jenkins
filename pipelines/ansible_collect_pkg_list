@@ -6,7 +6,6 @@ pipeline {
     }
 
     parameters {
-        // No default value here; expects direct user configuration string input
         string(name: 'SERVER_NAME', defaultValue: '', description: 'Target hosts separated by a semicolon (;)')
     }
 
@@ -14,35 +13,38 @@ pipeline {
         stage('Audit OS Packages') {
             steps {
                 withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                    sh '''
-                        # Stop execution immediately if no servers are provided to prevent unexpected target parsing issues
+                    sh '''#!/bin/bash
+                        # Explicitly enforce Bash execution environment layer
+                        set -euo pipefail
+
                         if [ -z "${SERVER_NAME}" ]; then
                             echo "ERROR: SERVER_NAME parameter cannot be empty."
                             exit 1
                         fi
 
-                        # Run playbook to get console data outputs passing the raw parameter string directly
+                        # Run playbook to collect console data outputs
                         ansible-playbook \
                             -i inventory/hosts \
                             playbooks/pkg_update_list.yml \
                             --private-key="$ANSIBLE_KEY_FILE" \
                             -e "hosts_param='${SERVER_NAME}'" > raw_ansible_log.tmp 2>&1 || true
 
-                        # Compile clean output file directly via standard shell
+                        # Compile clean header directly via standard shell
                         echo "GLOBAL OS UPDATE REPORT" > playbooks/os_update_report.txt
                         echo "Generated on: $(date)" >> playbooks/os_update_report.txt
                         echo "============================================================" >> playbooks/os_update_report.txt
                         echo "" >> playbooks/os_update_report.txt
 
-                        # Extract only the data block between our custom tokens
+                        # Extract only the data block between our custom markers
                         sed -n '/REPORT_JSON_DATA_START/,/REPORT_JSON_DATA_END/p' raw_ansible_log.tmp > raw_extracted.tmp
 
-                        # Parse extracted tokens into a human-readable clean report layout
+                        # Parse extracted tokens safely using Bash regex matches
                         while IFS= read -r line || [ -n "$line" ]; do
                             line=$(echo "$line" | sed 's/\\\\n/\\n/g' | sed 's/\\\\\"/\"/g')
 
                             if [[ "$line" =~ SERVER_RECORD:(.*) ]]; then
-                                echo "Server name: ${BASH_REMATCH[1]}" >> playbooks/os_update_report.txt
+                                SERVER="${BASH_REMATCH[1]}"
+                                echo "Server name: ${SERVER}" >> playbooks/os_update_report.txt
                                 echo "============================================================" >> playbooks/os_update_report.txt
                             elif [[ "$line" =~ HOSTNAME:(.*) ]]; then
                                 echo "Server hostname: ${BASH_REMATCH[1]}" >> playbooks/os_update_report.txt
@@ -52,7 +54,7 @@ pipeline {
                                 echo "Number of updates available: ${BASH_REMATCH[1]}" >> playbooks/os_update_report.txt
                                 echo "" >> playbooks/os_update_report.txt
                             elif [[ "$line" =~ DETAILS_START ]]; then
-                                sed -n "/SERVER_RECORD:${BASH_REMATCH[1]}/,/DETAILS_END/p" raw_extracted.tmp | sed -e '1,/DETAILS_START/d' -e '/DETAILS_END/,$d' | sed 's/^\\s*//' >> playbooks/os_update_report.txt
+                                sed -n "/SERVER_RECORD:${SERVER}/,/DETAILS_END/p" raw_extracted.tmp | sed -e '1,/DETAILS_START/d' -e '/DETAILS_END/,$d' | sed 's/^\\s*//' >> playbooks/os_update_report.txt
                             elif [[ "$line" =~ STATUS:(.*) ]]; then
                                 echo "" >> playbooks/os_update_report.txt
                                 echo "Status: ${BASH_REMATCH[1]}" >> playbooks/os_update_report.txt
