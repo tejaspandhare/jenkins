@@ -31,7 +31,7 @@ pipeline {
                         # 2. Safely bypass PEP 668 to guarantee reportlab is available
                         python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                        # 3. Create a highly resilient Python parsing script
+                        # 3. Create a highly resilient Python parsing script without backslash conflicts
                         cat << 'EOF' > parse_to_pdf.py
 import os, re, time
 from reportlab.lib.pagesizes import letter
@@ -49,7 +49,7 @@ if not os.path.exists(log_file):
 with open(log_file, 'r') as f:
     content = f.read()
 
-# Highly resilient block extraction (handles embedded newlines or escaping)
+# Extract targeted log telemetry data block between tokens
 match = re.search(r'REPORT_JSON_DATA_START(.*?)REPORT_JSON_DATA_END', content, re.DOTALL)
 if not match:
     print("Warning: Missing layout data tags inside log stream.")
@@ -57,8 +57,8 @@ if not match:
 
 raw_data = match.group(1)
 
-# Clean up raw debug formatting junk added by Ansible console serialization
-raw_data = raw_data.replace('\\n', '\n').replace('\\\\"', '"')
+# Clean up raw data strings using ASCII codes to bypass Jenkins backslash substitution bugs
+raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
 
 # Initialize PDF components
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
@@ -78,7 +78,7 @@ gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
 story.append(Spacer(1, 10))
 
-# Resilient parsing loop looking for server keys anywhere on the line
+# Break out server records cleanly using our custom keyword prefix split rule
 records = re.split(r'SERVER_RECORD:', raw_data)
 
 for record in records:
@@ -90,7 +90,7 @@ for record in records:
     details = []
     in_details = False
     
-    # Extract the base server name from the split token's first line
+    # Store target head node value
     host_meta['SERVER_RECORD'] = lines[0].strip()
     
     for line in lines[1:]:
@@ -131,7 +131,7 @@ for record in records:
     story.append(t)
     story.append(Spacer(1, 10))
     
-    # Table details presentation block
+    # Render detail information cells gracefully
     if details:
         clean_details = "<br/>".join(details)
         story.append(Paragraph("<b>Package Audit Details:</b>", body_style))
