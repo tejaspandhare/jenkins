@@ -31,7 +31,7 @@ pipeline {
                         # 2. Safely bypass PEP 668 to guarantee reportlab is available
                         python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                        # 3. Create a highly resilient Python parsing script without backslash conflicts
+                        # 3. Create an enhanced Python parser to build a beautifully formatted PDF table
                         cat << 'EOF' > parse_to_pdf.py
 import os, re, time
 from reportlab.lib.pagesizes import letter
@@ -49,36 +49,32 @@ if not os.path.exists(log_file):
 with open(log_file, 'r') as f:
     content = f.read()
 
-# Extract targeted log telemetry data block between tokens
 match = re.search(r'REPORT_JSON_DATA_START(.*?)REPORT_JSON_DATA_END', content, re.DOTALL)
 if not match:
     print("Warning: Missing layout data tags inside log stream.")
     exit(0)
 
-raw_data = match.group(1)
+raw_data = match.group(1).replace(r'\\n', chr(10)).replace(r'\\"', '"')
 
-# Clean up raw data strings using ASCII codes to bypass Jenkins backslash substitution bugs
-raw_data = raw_data.replace(r'\\n', chr(10)).replace(r'\\"', '"')
-
-# Initialize PDF components
+# Initialize PDF properties
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
-doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
 story = []
 styles = getSampleStyleSheet()
 
-# Custom styles setup
-title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=22, spaceAfter=10, textColor=colors.HexColor('#1A365D'))
-meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=20, textColor=colors.HexColor('#4A5568'))
-section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, spaceBefore=15, spaceAfter=5, textColor=colors.HexColor('#2B6CB0'))
+# Custom color palette and text formatting definitions
+title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
+meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
+section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, spaceBefore=10, spaceAfter=8, textColor=colors.HexColor('#2B6CB0'))
 body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14)
-code_style = ParagraphStyle('CodeStyle', parent=styles['Code'], fontSize=8, leading=11, fontName='Courier')
+header_cell_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.white)
+tbl_cell_style = ParagraphStyle('TblCellStyle', parent=styles['Normal'], fontSize=9, fontName='Courier')
 
 story.append(Paragraph("GLOBAL OS UPDATE REPORT", title_style))
 gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
-story.append(Spacer(1, 10))
+story.append(Spacer(1, 5))
 
-# Break out server records cleanly using our custom keyword prefix split rule
 records = re.split(r'SERVER_RECORD:', raw_data)
 
 for record in records:
@@ -87,15 +83,14 @@ for record in records:
         
     lines = record.splitlines()
     host_meta = {}
-    details = []
+    package_rows = []
     in_details = False
     
-    # Store target head node value
     host_meta['SERVER_RECORD'] = lines[0].strip()
     
     for line in lines[1:]:
         clean_line = line.strip()
-        if not clean_line:
+        if not clean_line or '----------------------------------------' in clean_line:
             continue
             
         if 'DETAILS_START' in clean_line:
@@ -106,39 +101,70 @@ for record in records:
             continue
             
         if in_details:
-            details.append(clean_line)
+            # Parse package column fields by splitting whitespace sequences
+            parts = clean_line.split()
+            if len(parts) >= 3:
+                package_rows.append([parts[0], parts[1], parts[2]])
+            elif len(parts) == 2:
+                package_rows.append([parts[0], "Unknown", parts[1]])
+            elif "System is up to date." in clean_line:
+                package_rows.append(["System is up to date.", "", ""])
         else:
             if ':' in clean_line:
                 k, v = clean_line.split(':', 1)
                 host_meta[k.strip()] = v.strip()
 
     srv = host_meta.get('SERVER_RECORD', 'Unknown Node')
-    story.append(Paragraph(f"Server Name: {srv}", section_style))
+    story.append(Paragraph(f"Server Instance Summary: {srv}", section_style))
     
-    # Metadata presentation matrix
+    # Render main host properties container grid
+    status_str = host_meta.get("STATUS", "SUCCESS")
+    status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
+    
     meta_data = [
         [Paragraph("<b>Hostname:</b>", body_style), Paragraph(host_meta.get("HOSTNAME", "Unknown"), body_style)],
         [Paragraph("<b>Operating System:</b>", body_style), Paragraph(host_meta.get("OS", "Unknown"), body_style)],
         [Paragraph("<b>Updates Available:</b>", body_style), Paragraph(host_meta.get("COUNT", "0"), body_style)],
-        [Paragraph("<b>Status:</b>", body_style), Paragraph(host_meta.get("STATUS", "SUCCESS"), body_style)]
+        [Paragraph("<b>Execution Status:</b>", body_style), Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", body_style)]
     ]
-    t = Table(meta_data, colWidths=[130, 390])
-    t.setStyle(TableStyle([
+    meta_table = Table(meta_data, colWidths=[140, 400])
+    meta_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#F7FAFC')),
-        ('PADDING', (0,0), (-1,-1), 6),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
     ]))
-    story.append(t)
+    story.append(meta_table)
     story.append(Spacer(1, 10))
     
-    # Render detail information cells gracefully
-    if details:
-        clean_details = "<br/>".join(details)
-        story.append(Paragraph("<b>Package Audit Details:</b>", body_style))
+    # Build package list in a clean table grid with matching header fields
+    if package_rows:
+        story.append(Paragraph("<b>Available Package Update Matrix:</b>", body_style))
         story.append(Spacer(1, 4))
-        story.append(Paragraph(clean_details, code_style))
-    
-    story.append(Spacer(1, 15))
+        
+        # Build headers row block
+        table_content = [[
+            Paragraph("Package Name", header_cell_style), 
+            Paragraph("Current Version", header_cell_style), 
+            Paragraph("Target Version", header_cell_style)
+        ]]
+        
+        for row in package_rows:
+            table_content.append([
+                Paragraph(row[0], tbl_cell_style),
+                Paragraph(row[1], tbl_cell_style),
+                Paragraph(row[2], tbl_cell_style)
+            ])
+            
+        pkg_table = Table(table_content, colWidths=[240, 150, 150])
+        pkg_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), # Indigo header fill
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]), # Zebra striping
+        ]))
+        story.append(pkg_table)
+        
+    story.append(Spacer(1, 20))
 
 doc.build(story)
 print("PDF compilation successful.")
@@ -147,7 +173,7 @@ EOF
                         # 4. Execute the Python tool layer
                         python3 parse_to_pdf.py
 
-                        # 5. Clean up temporary operational file paths
+                        # 5. Clean up temporary workspace artifacts
                         rm -f raw_ansible_log.tmp parse_to_pdf.py
                     '''
                 }
