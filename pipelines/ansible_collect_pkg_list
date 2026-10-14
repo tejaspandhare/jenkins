@@ -189,7 +189,6 @@ EOF
 
     post {
         always {
-            sh 'ls -lah playbooks/'
             archiveArtifacts artifacts: 'playbooks/os_update_report.pdf', allowEmptyArchive: true
         }
     }
