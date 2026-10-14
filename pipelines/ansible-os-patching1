@@ -64,12 +64,14 @@ pipeline {
                     
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                    cat << 'EOF' > generate_pdf.py
+                    # Safely build python engine using a single-quoted heredoc to block Groovy string interpolation drops
+                    cat << 'PYTHON' > generate_pdf.py
 import os, re, time
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from xml.sax.saxutils import escape
 
 log_file = 'raw_patch_log.tmp'
 pdf_file = 'ansible-roles/os_patching/reports/patch_report.pdf'
@@ -88,35 +90,32 @@ if not match:
 
 raw_data = match.group(1)
 
-# Clean up ANSI color escaping blocks cleanly
+# Clean up ANSI color escaping blocks using safe character evaluations
 ansi_regex = chr(27) + chr(91) + '[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
-raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
+raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
-doc = SimpleDocTemplate(pdf_file, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=40, bottomMargin=40)
+doc = SimpleDocTemplate(pdf_file, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=35, bottomMargin=35)
 story = []
 styles = getSampleStyleSheet()
 
-# Typography configuration profiles
-title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=24, spaceAfter=6, textColor=colors.HexColor('#1A365D'))
-meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=10, spaceAfter=15, textColor=colors.HexColor('#4A5568'))
-section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=14, spaceBefore=12, spaceAfter=6, textColor=colors.HexColor('#2B6CB0'))
-header_cell_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', textColor=colors.white)
-tbl_cell_style = ParagraphStyle('TblCellStyle', parent=styles['Normal'], fontSize=9, fontName='Helvetica')
-code_cell_style = ParagraphStyle('CodeCellStyle', parent=styles['Normal'], fontSize=9, fontName='Courier')
+title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, spaceAfter=8, textColor=colors.HexColor('#1A365D'))
+meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=9, spaceAfter=12, textColor=colors.HexColor('#4A5568'))
+section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=12, spaceBefore=10, spaceAfter=6, textColor=colors.HexColor('#2B6CB0'))
+header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=8, fontName='Helvetica-Bold', textColor=colors.white)
+cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK')
+code_style = ParagraphStyle('CodeStyle', parent=cell_style, fontName='Courier', fontSize=7)
 
-story.append(Paragraph("ENTERPRISE LINUX PATCHING REPORT", title_style))
+story.append(Paragraph('ENTERPRISE LINUX PATCHING REPORT', title_style))
 gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
 story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
-story.append(Spacer(1, 10))
+story.append(Spacer(1, 8))
 
 records = re.split(r'HOST_RECORD:', raw_data)
 for record in records:
     if not record.strip():
         continue
-    
-    # Extract package section from data chunk safely
     pkg_match = re.search(r'PATCHED_PACKAGES_START(.*?)PATCHED_PACKAGES_END', record, re.DOTALL)
     pkg_lines = []
     if pkg_match:
@@ -124,7 +123,7 @@ for record in records:
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
-
+        
     lines = record_meta_part.splitlines()
     meta = {}
     for line in lines:
@@ -133,110 +132,80 @@ for record in records:
             k, v = clean_line.split(':', 1)
             meta[k.strip()] = v.strip()
             
-    host_name = meta.get("HOST_RECORD", "Unknown Target")
-    story.append(Paragraph(f"Host Execution Target: {host_name}", section_style))
-    
-    status_str = meta.get("STATUS", "FAILED")
-    status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
+    host_name = meta.get('HOST_RECORD', 'Unknown Target')
+    story.append(Paragraph(f"Host Execution Target: {escape(host_name)}", section_style))
+    status = meta.get('STATUS', 'FAILED')
+    status_color = '#38A169' if status.upper() == 'SUCCESS' else '#E53E3E'
     kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
     
-    # 1. Main Overview Summary Grid Table
-    summary_content = [
-        [Paragraph("Host Target", header_cell_style),
-         Paragraph("Operating System", header_cell_style),
-         Paragraph("Kernel Version Change", header_cell_style),
-         Paragraph("Updated", header_cell_style),
-         Paragraph("Reboot", header_cell_style),
-         Paragraph("Status", header_cell_style)],
-        [Paragraph(host_name, tbl_cell_style),
-         Paragraph(meta.get("OS", "Unknown"), tbl_cell_style),
-         Paragraph(kernel_change, tbl_cell_style),
-         Paragraph(meta.get("UPDATED", "No"), tbl_cell_style),
-         Paragraph(meta.get("REBOOT", "No"), tbl_cell_style),
-         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)]
+    summary_data = [
+        [Paragraph('Host Target', header_style), Paragraph('Operating System', header_style), 
+         Paragraph('Kernel Version Change', header_style), Paragraph('Updated', header_style), 
+         Paragraph('Reboot', header_style), Paragraph('Status', header_style)],
+        [Paragraph(escape(host_name), cell_style), Paragraph(escape(meta.get('OS', 'Unknown')), cell_style), 
+         Paragraph(escape(kernel_change), cell_style), Paragraph(escape(meta.get('UPDATED', 'No')), cell_style), 
+         Paragraph(escape(meta.get('REBOOT', 'No')), cell_style), Paragraph(f"<font color='{status_color}'><b>{escape(status)}</b></font>", cell_style)]
     ]
     
-    width_string = "90,110,140,60,60,80"
-    calculated_widths = [int(w) for w in width_string.split(',')]
-    
-    summary_table = Table(summary_content, colWidths=calculated_widths)
+    # Raw string comma-splitting method safe from Groovy compiler modifications
+    summary_table = Table(summary_data, colWidths=[int(w) for w in '120,130,155,65,65,80'.split(',')])
     summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
-        ('PADDING', (0,0), (-1,-1), 6),
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
+        ('PADDING', (0,0), (-1,-1), 5),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 10))
     
-    # 2. Package Details Breakdown Table Grid with DPKG DNF State Normalization
-    package_content = [[
-        Paragraph("Package Name", header_cell_style),
-        Paragraph("Last Version", header_cell_style),
-        Paragraph("Updated Version", header_cell_style)
-    ]]
-    
+    package_data = [[Paragraph('Package Name', header_style), Paragraph('Last Version', header_style), Paragraph('Updated Version', header_style)]]
     unique_packages = {}
     for p_line in pkg_lines:
-        if "No packages updated." in p_line:
+        if 'No packages updated.' in p_line:
             break
-            
         parts = p_line.split()
         if not parts:
             continue
-            
-        # FIX: pop(0) removes brackets to bypass Jenkins compilation issues cleanly
         if parts[0] in ['half-installed', 'installed', 'upgraded', 'unpacked', 'half-configured']:
             parts.pop(0)
-            
         if len(parts) >= 2:
-            pkg_name = parts[0].split(':')[0] # Strip architecture tags (e.g. :amd64, :all)
-            ver_val = parts[1]
-            if ver_val == "<none>":
-                ver_val = "N/A"
-                
-            if pkg_name not in unique_packages:
-                unique_packages[pkg_name] = {'old': 'Unknown', 'new': ver_val}
+            p_name = parts[0].split(':')[0]
+            v_val = parts[1]
+            if v_val == '<none>':
+                v_val = 'N/A'
+            if p_name not in unique_packages:
+                unique_packages[p_name] = {'old': 'Unknown', 'new': v_val}
             else:
-                if unique_packages[pkg_name]['old'] == 'Unknown' and unique_packages[pkg_name]['new'] != ver_val:
-                    unique_packages[pkg_name]['old'] = unique_packages[pkg_name]['new']
-                    unique_packages[pkg_name]['new'] = ver_val
+                if unique_packages[p_name]['old'] == 'Unknown' and unique_packages[p_name]['new'] != v_val:
+                    unique_packages[p_name]['old'] = unique_packages[p_name]['new']
+                    unique_packages[p_name]['new'] = v_val
                 else:
-                    unique_packages[pkg_name]['new'] = ver_val
-
+                    unique_packages[p_name]['new'] = v_val
+                    
     has_packages = False
     for name, vdata in sorted(unique_packages.items()):
         has_packages = True
-        package_content.append([
-            Paragraph(name, code_cell_style),
-            Paragraph(vdata['old'], code_cell_style),
-            Paragraph(vdata['new'], code_cell_style)
-        ])
-            
+        package_data.append([Paragraph(escape(name), code_style), Paragraph(escape(vdata['old']), code_style), Paragraph(escape(vdata['new']), code_style)])
+        
     if has_packages:
-        story.append(Paragraph("<b>Patched Packages Details Breakdown:</b>", tbl_cell_style))
+        story.append(Paragraph('<b>Patched Packages Details Breakdown:</b>', cell_style))
         story.append(Spacer(1, 4))
-        
-        pkg_width_str = "240,150,150"
-        pkg_widths = [int(w) for w in pkg_width_str.split(',')]
-        
-        pkg_table = Table(package_content, colWidths=pkg_widths)
+        pkg_table = Table(package_data, colWidths=[int(w) for w in '240,150,150'.split(',')])
         pkg_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4A5568')), 
-            ('PADDING', (0,0), (-1,-1), 4),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4A5568')),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
+            ('PADDING', (0,0), (-1,-1), 4),
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
         ]))
         story.append(pkg_table)
     else:
-        story.append(Paragraph("<i>No package modifications occurred during this run layout window.</i>", tbl_cell_style))
-        
+        story.append(Paragraph('<i>No package modifications occurred during this run layout window.</i>', cell_style))
     story.append(Spacer(1, 15))
 
 doc.build(story)
 print("PDF compilation successful.")
-EOF
+PYTHON
 
                     python3 generate_pdf.py
                     rm -f generate_pdf.py raw_patch_log.tmp
@@ -245,3 +214,17 @@ EOF
         }
     }
 
+    post {
+        success {
+            echo "✅ Patching completed successfully."
+        }
+        failure {
+            echo "❌ Patching execution failed."
+        }
+        always {
+            archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.pdf', allowEmptyArchive: false
+            sleep time: 3, unit: 'SECONDS'
+            cleanWs()
+        }
+    }
+}
