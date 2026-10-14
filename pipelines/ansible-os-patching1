@@ -136,7 +136,7 @@ for record in records:
     host_name = meta.get("HOST_RECORD", "Unknown Target")
     story.append(Paragraph(f"Host Execution Target: {host_name}", section_style))
     
-    status_str = meta.get("STATUS", "SUCCESS")
+    status_str = meta.get("STATUS", "FAILED")
     status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
     kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
     
@@ -185,9 +185,9 @@ for record in records:
         if not parts:
             continue
             
-        # Strip system operational prefixes (half-installed, installed, upgraded, etc.)
+        # FIX: pop(0) removes brackets to bypass Jenkins compilation issues cleanly
         if parts[0] in ['half-installed', 'installed', 'upgraded', 'unpacked', 'half-configured']:
-            parts = parts[1:]
+            parts.pop(0)
             
         if len(parts) >= 2:
             pkg_name = parts[0].split(':')[0] # Strip architecture tags (e.g. :amd64, :all)
@@ -198,7 +198,6 @@ for record in records:
             if pkg_name not in unique_packages:
                 unique_packages[pkg_name] = {'old': 'Unknown', 'new': ver_val}
             else:
-                # If we parse multiple status lines, prioritize tracking chronological upgrade progressions
                 if unique_packages[pkg_name]['old'] == 'Unknown' and unique_packages[pkg_name]['new'] != ver_val:
                     unique_packages[pkg_name]['old'] = unique_packages[pkg_name]['new']
                     unique_packages[pkg_name]['new'] = ver_val
@@ -238,4 +237,11 @@ for record in records:
 doc.build(story)
 print("PDF compilation successful.")
 EOF
+
+                    python3 generate_pdf.py
+                    rm -f generate_pdf.py raw_patch_log.tmp
+                '''
+            }
+        }
+    }
 
