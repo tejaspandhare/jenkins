@@ -32,7 +32,24 @@
 
   tasks:
     # ----------------------------------------------------------
-    # Update /etc/lastpatchdate on the TARGET HOST
+    # NATIVE LIVE PACKAGE UPDATE CAPTURE
+    # ----------------------------------------------------------
+    - name: Capture packages updated today (Debian/Ubuntu)
+      when: ansible_os_family == "Debian"
+      ansible.builtin.shell: |
+        grep -E "$(date +'%Y-%m-%d').*inst" /var/log/dpkg.log | awk '{print $4, $5, $6}' || true
+      register: dpkg_updates
+      changed_when: false
+
+    - name: Capture packages updated today (RedHat/CentOS)
+      when: ansible_os_family == "RedHat"
+      ansible.builtin.shell: |
+        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $1, "Installed", "Updated"}' || true
+      register: dnf_updates
+      changed_when: false
+
+    # ----------------------------------------------------------
+    # Update last patch date on the TARGET HOST
     # ----------------------------------------------------------
     - name: Get current date from target host
       ansible.builtin.command:
@@ -68,9 +85,13 @@
           REBOOT:{{ h.reboot | default('No') }}
           STATUS:{{ h.status | default('FAILED') }}
           PATCHED_PACKAGES_START
-          {% if hostvars[host]['packages_updated'] is defined and hostvars[host]['packages_updated'] | length > 0 %}
-          {% for pkg in hostvars[host]['packages_updated'] %}
-          {{ pkg.name }} {{ pkg.old_version }} {{ pkg.new_version }}
+          {% if hostvars[host]['dpkg_updates'] is defined and hostvars[host]['dpkg_updates']['stdout_lines'] | length > 0 %}
+          {% for line in hostvars[host]['dpkg_updates']['stdout_lines'] %}
+          {{ line }}
+          {% endfor %}
+          {% elif hostvars[host]['dnf_updates'] is defined and hostvars[host]['dnf_updates']['stdout_lines'] | length > 0 %}
+          {% for line in hostvars[host]['dnf_updates']['stdout_lines'] %}
+          {{ line }}
           {% endfor %}
           {% else %}
           No packages updated.
