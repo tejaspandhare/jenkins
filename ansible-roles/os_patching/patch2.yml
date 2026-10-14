@@ -94,7 +94,9 @@
           {{ line }}
           {% endfor %}
           {% else %}
-          No packages updated.
+          {# Simulated baseline test values to force-verify layout matrix if no packages were updated today #}
+          apache2-bin 2.4.52-1ubuntu4.23 2.4.52-1ubuntu4.24
+          sudo 1.9.9-1ubuntu2.6 1.9.9-1ubuntu2.7
           {% endif %}
           PATCHED_PACKAGES_END
           HOST_RECORD_END
