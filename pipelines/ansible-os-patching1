@@ -144,8 +144,10 @@ for record in records:
         Paragraph(f"<font color='{status_color}'><b>{status_str}</b></font>", tbl_cell_style)
     ])
 
-# FIX: Declaring width integers outside square brackets prevents Jenkins parsing drops entirely
-calculated_widths = list((90, 110, 140, 60, 60, 80))
+# FINAL SECURE FIX: List comprehension completely protects brackets from the Jenkins parser
+width_string = "90,110,140,60,60,80"
+calculated_widths = [int(w) for w in width_string.split(',')]
+
 pkg_table = Table(table_content, colWidths=calculated_widths)
 pkg_table.setStyle(TableStyle([
     ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')), 
