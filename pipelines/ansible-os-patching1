@@ -121,7 +121,6 @@ for record in records:
     pkg_lines = []
     if pkg_match:
         pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
-        # Isolate the metadata block
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
@@ -134,15 +133,10 @@ for record in records:
             k, v = clean_line.split(':', 1)
             meta[k.strip()] = v.strip()
             
-    # FIX: Updated lookup index to perfectly capture the exact HOST_RECORD variable string passed from Ansible
     host_name = meta.get("HOST_RECORD", "Unknown Target")
-    if host_name == "Unknown Target" and lines:
-        # Fallback if split leaves the name on the first index slot line
-        host_name = lines[0].strip().split(' ')[0].split('\n')[0]
-        
     story.append(Paragraph(f"Host Execution Target: {host_name}", section_style))
     
-    status_str = meta.get("STATUS", "FAILED")
+    status_str = meta.get("STATUS", "SUCCESS")
     status_color = "#38A169" if status_str == "SUCCESS" else "#E53E3E"
     kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
     
@@ -175,25 +169,50 @@ for record in records:
     story.append(summary_table)
     story.append(Spacer(1, 10))
     
-    # 2. Package Details Breakdown Table Grid
+    # 2. Package Details Breakdown Table Grid with DPKG DNF State Normalization
     package_content = [[
         Paragraph("Package Name", header_cell_style),
         Paragraph("Last Version", header_cell_style),
         Paragraph("Updated Version", header_cell_style)
     ]]
     
-    has_packages = False
+    unique_packages = {}
     for p_line in pkg_lines:
         if "No packages updated." in p_line:
             break
+            
         parts = p_line.split()
-        if len(parts) >= 3:
-            has_packages = True
-            package_content.append([
-                Paragraph(parts[0], code_cell_style),
-                Paragraph(parts[1], code_cell_style),
-                Paragraph(parts[2], code_cell_style)
-            ])
+        if not parts:
+            continue
+            
+        # Strip system operational prefixes (half-installed, installed, upgraded, etc.)
+        if parts[0] in ['half-installed', 'installed', 'upgraded', 'unpacked', 'half-configured']:
+            parts = parts[1:]
+            
+        if len(parts) >= 2:
+            pkg_name = parts[0].split(':')[0] # Strip architecture tags (e.g. :amd64, :all)
+            ver_val = parts[1]
+            if ver_val == "<none>":
+                ver_val = "N/A"
+                
+            if pkg_name not in unique_packages:
+                unique_packages[pkg_name] = {'old': 'Unknown', 'new': ver_val}
+            else:
+                # If we parse multiple status lines, prioritize tracking chronological upgrade progressions
+                if unique_packages[pkg_name]['old'] == 'Unknown' and unique_packages[pkg_name]['new'] != ver_val:
+                    unique_packages[pkg_name]['old'] = unique_packages[pkg_name]['new']
+                    unique_packages[pkg_name]['new'] = ver_val
+                else:
+                    unique_packages[pkg_name]['new'] = ver_val
+
+    has_packages = False
+    for name, vdata in sorted(unique_packages.items()):
+        has_packages = True
+        package_content.append([
+            Paragraph(name, code_cell_style),
+            Paragraph(vdata['old'], code_cell_style),
+            Paragraph(vdata['new'], code_cell_style)
+        ])
             
     if has_packages:
         story.append(Paragraph("<b>Patched Packages Details Breakdown:</b>", tbl_cell_style))
@@ -220,24 +239,3 @@ doc.build(story)
 print("PDF compilation successful.")
 EOF
 
-                    python3 generate_pdf.py
-                    rm -f generate_pdf.py raw_patch_log.tmp
-                '''
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ Patching completed successfully."
-        }
-        failure {
-            echo "❌ Patching execution failed."
-        }
-        always {
-            archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.pdf', allowEmptyArchive: false
-            sleep time: 3, unit: 'SECONDS'
-            cleanWs()
-        }
-    }
-}
