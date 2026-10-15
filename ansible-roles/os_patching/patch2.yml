@@ -32,15 +32,16 @@
 
   tasks:
     # ----------------------------------------------------------
-    # PRODUCTION FAIL-SAFE: FORCE SYSTEM DIST-UPGRADE FOR HELD BACK PKGS
+    # OVERRIDE FOR HELD-BACK KERNEL DEPENDENCY LOCKS
     # ----------------------------------------------------------
-    - name: Force apply outstanding held-back items via dist-upgrade (Debian/Ubuntu)
+    - name: Force resolve and upgrade held back iscsi packages (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get dist-upgrade -y -o Dpkg::Options::="--force-confold"
+        # Overrides the 'kept back' rule by forcing direct installation of the targets
+        apt-get install -y --with-new-pkgs -o Dpkg::Options::="--force-confold" libopeniscsiusr open-iscsi
       ignore_errors: true
 
     - name: Force apply outstanding upgradable items (RedHat/CentOS)
