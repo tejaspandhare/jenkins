@@ -26,22 +26,21 @@
 
   roles:
     - precheck
-    - patch     # Executed roles framework layer
+    - patch     
     - reboot
     - postcheck
 
   tasks:
     # ----------------------------------------------------------
-    # PRODUCTION FAIL-SAFE: FORCE APPLY HELD-BACK PACKAGES
+    # PRODUCTION FAIL-SAFE: FORCE SYSTEM DIST-UPGRADE FOR HELD BACK PKGS
     # ----------------------------------------------------------
-    - name: Force apply outstanding upgradable items (Debian/Ubuntu)
+    - name: Force apply outstanding held-back items via dist-upgrade (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
-      ansible.builtin.apt:
-        name: "*"
-        state: latest
-        update_cache: true
-        only_upgrade: true
+      ansible.builtin.shell: |
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get dist-upgrade -y -o Dpkg::Options::="--force-confold"
       ignore_errors: true
 
     - name: Force apply outstanding upgradable items (RedHat/CentOS)
