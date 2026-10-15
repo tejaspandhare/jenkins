@@ -69,32 +69,40 @@ for record in records:
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
-        
-    lines = record_meta_part.splitlines()
-    meta = {}
+
+    # FIX: Robust Regular Expression mapping locks variables accurately bypassing newline indents
+    host_match = re.search(r'^\s*([a-zA-Z0-9_\-\.]+)', record_meta_part)
+    host_name = host_match.group(1).strip() if host_match else "Unknown Target"
     
-    discovered_host = "Unknown Target"
-    for line in lines:
-        clean_line = line.strip()
-        if ':' in clean_line:
-            k, v = clean_line.split(':', 1)
-            meta[k.strip()] = v.strip()
-            if k.strip() == "HOST_RECORD" and v.strip():
-                discovered_host = v.strip()
-            
-    host_name = discovered_host if discovered_host != "Unknown Target" else meta.get('HOST_RECORD', 'Unknown Target')
+    os_match = re.search(r'OS\s*:\s*(.*)', record_meta_part)
+    os_val = os_match.group(1).strip() if os_match else "Unknown"
+    
+    old_k_match = re.search(r'OLD_KERNEL\s*:\s*(.*)', record_meta_part)
+    old_kernel = old_k_match.group(1).strip() if old_k_match else "N/A"
+    
+    new_k_match = re.search(r'NEW_KERNEL\s*:\s*(.*)', record_meta_part)
+    new_kernel = new_k_match.group(1).strip() if new_k_match else "N/A"
+    
+    upd_match = re.search(r'UPDATED\s*:\s*(.*)', record_meta_part)
+    updated_val = upd_match.group(1).strip() if upd_match else "No"
+    
+    reb_match = re.search(r'REBOOT\s*:\s*(.*)', record_meta_part)
+    reboot_val = reb_match.group(1).strip() if reb_match else "No"
+    
+    status_match = re.search(r'STATUS\s*:\s*(.*)', record_meta_part)
+    status = status_match.group(1).strip() if status_match else "FAILED"
+
     story.append(Paragraph(f"Host Execution Target: {escape(host_name)}", section_style))
-    status = meta.get('STATUS', 'FAILED')
     status_color = '#38A169' if status.upper() == 'SUCCESS' else '#E53E3E'
-    kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
+    kernel_change = f"{old_kernel} -> {new_kernel}"
     
     summary_data = [
         [Paragraph('Host Target', header_style), Paragraph('Operating System', header_style), 
          Paragraph('Kernel Version Change', header_style), Paragraph('Updated', header_style), 
          Paragraph('Reboot', header_style), Paragraph('Status', header_style)],
-        [Paragraph(escape(host_name), cell_style), Paragraph(escape(meta.get('OS', 'Unknown')), cell_style), 
-         Paragraph(escape(kernel_change), cell_style), Paragraph(escape(meta.get('UPDATED', 'No')), cell_style), 
-         Paragraph(escape(meta.get('REBOOT', 'No')), cell_style), Paragraph(f"<font color='{status_color}'><b>{escape(status)}</b></font>", cell_style)]
+        [Paragraph(escape(host_name), cell_style), Paragraph(escape(os_val), cell_style), 
+         Paragraph(escape(kernel_change), cell_style), Paragraph(escape(updated_val), cell_style), 
+         Paragraph(escape(reboot_val), cell_style), Paragraph(f"<font color='{status_color}'><b>{escape(status)}</b></font>", cell_style)]
     ]
     
     summary_table = Table(summary_data, colWidths=[120, 130, 155, 65, 65, 80])
