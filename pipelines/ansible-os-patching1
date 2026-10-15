@@ -64,7 +64,6 @@ pipeline {
                     
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                    # Safely build python engine using a single-quoted heredoc to block Groovy string interpolation drops
                     cat << 'PYTHON' > generate_pdf.py
 import os, re, time
 from reportlab.lib.pagesizes import letter, landscape
@@ -90,10 +89,9 @@ if not match:
 
 raw_data = match.group(1)
 
-# Clean up ANSI color escaping blocks using safe character evaluations
 ansi_regex = chr(27) + chr(91) + '[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
-raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\\\"', '"')
+raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
 
 os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
 doc = SimpleDocTemplate(pdf_file, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=35, bottomMargin=35)
@@ -120,6 +118,7 @@ for record in records:
     pkg_lines = []
     if pkg_match:
         pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
+        # FIX: Explicitly extraction of string index 0 resolves the 'Unknown Target' array parsing problem
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
@@ -147,7 +146,6 @@ for record in records:
          Paragraph(escape(meta.get('REBOOT', 'No')), cell_style), Paragraph(f"<font color='{status_color}'><b>{escape(status)}</b></font>", cell_style)]
     ]
     
-    # Raw string comma-splitting method safe from Groovy compiler modifications
     summary_table = Table(summary_data, colWidths=[int(w) for w in '120,130,155,65,65,80'.split(',')])
     summary_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')),
@@ -171,7 +169,7 @@ for record in records:
         if len(parts) >= 2:
             p_name = parts[0].split(':')[0]
             v_val = parts[1]
-            if v_val == '<none>':
+            if ver_val == '<none>':
                 v_val = 'N/A'
             if p_name not in unique_packages:
                 unique_packages[p_name] = {'old': 'Unknown', 'new': v_val}
@@ -200,7 +198,8 @@ for record in records:
         ]))
         story.append(pkg_table)
     else:
-        story.append(Paragraph('<i>No package modifications occurred during this run layout window.</i>', cell_style))
+        # FIX: Updated placeholder text for unpatched system report logs
+        story.append(Paragraph('<i>System is up to date, no packages available to update.</i>', cell_style))
     story.append(Spacer(1, 15))
 
 doc.build(story)
