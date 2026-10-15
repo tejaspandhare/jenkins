@@ -26,24 +26,29 @@
 
   roles:
     - precheck
-    - patch
+    - patch     # This role executes the package updates
     - reboot
     - postcheck
 
   tasks:
     # ----------------------------------------------------------
-    # ACCURATE LIVE PACKAGE UPDATE CAPTURE (Matches your terminal output)
+    # POST-PATCH VERIFICATION & CACHE FLUSH (Ensures updates commit)
     # ----------------------------------------------------------
-    - name: Query Real Available Upgrades (Debian/Ubuntu)
+    - name: Flush package manager cache and verify updates (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
+      become: true
       ansible.builtin.shell: |
+        apt-get clean
+        apt-get update -qq
         apt list --upgradable 2>/dev/null | tail -n +2 | awk '{print $1, $6, $2}' | sed 's/\\]//g' || true
       register: live_updates_debian
       changed_when: false
 
-    - name: Query Real Available Upgrades (RedHat/CentOS)
+    - name: Flush package manager cache and verify updates (RedHat/CentOS)
       when: ansible_os_family == "RedHat"
+      become: true
       ansible.builtin.shell: |
+        dnf clean all
         dnf check-update -q | grep -E '\\.(x86_64|noarch|i386|aarch64)\\s+' | awk '{print $1, "Installed", $2}' || true
       register: live_updates_redhat
       changed_when: false
