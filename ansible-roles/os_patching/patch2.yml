@@ -32,20 +32,20 @@
 
   tasks:
     # ----------------------------------------------------------
-    # NATIVE LIVE PACKAGE UPDATE CAPTURE
+    # ACCURATE LIVE PACKAGE UPDATE CAPTURE (Matches your terminal output)
     # ----------------------------------------------------------
-    - name: Capture packages updated today (Debian/Ubuntu)
+    - name: Query Real Available Upgrades (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       ansible.builtin.shell: |
-        grep -E "$(date +'%Y-%m-%d').*inst" /var/log/dpkg.log | awk '{print $4, $5, $6}' || true
-      register: dpkg_updates
+        apt list --upgradable 2>/dev/null | tail -n +2 | awk '{print $1, $6, $2}' | sed 's/\\]//g' || true
+      register: live_updates_debian
       changed_when: false
 
-    - name: Capture packages updated today (RedHat/CentOS)
+    - name: Query Real Available Upgrades (RedHat/CentOS)
       when: ansible_os_family == "RedHat"
       ansible.builtin.shell: |
-        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $1, "Installed", "Updated"}' || true
-      register: dnf_updates
+        dnf check-update -q | grep -E '\\.(x86_64|noarch|i386|aarch64)\\s+' | awk '{print $1, "Installed", $2}' || true
+      register: live_updates_redhat
       changed_when: false
 
     # ----------------------------------------------------------
@@ -85,12 +85,12 @@
           REBOOT:{{ h.reboot | default('No') }}
           STATUS:{{ h.status | default('FAILED') }}
           PATCHED_PACKAGES_START
-          {% if hostvars[host]['dpkg_updates'] is defined and hostvars[host]['dpkg_updates']['stdout_lines'] | length > 0 %}
-          {% for line in hostvars[host]['dpkg_updates']['stdout_lines'] %}
+          {% if hostvars[host]['live_updates_debian'] is defined and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
+          {% for line in hostvars[host]['live_updates_debian']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
-          {% elif hostvars[host]['dnf_updates'] is defined and hostvars[host]['dnf_updates']['stdout_lines'] | length > 0 %}
-          {% for line in hostvars[host]['dnf_updates']['stdout_lines'] %}
+          {% elif hostvars[host]['live_updates_redhat'] is defined and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
+          {% for line in hostvars[host]['live_updates_redhat']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
           {% else %}
