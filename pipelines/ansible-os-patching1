@@ -39,6 +39,9 @@ pipeline {
                         set -euo pipefail
                         
                         echo "========== PATCH EXECUTION =========="
+                        echo "Running patching on: ${SERVER_NAME}"
+                        echo "Excluding packages: ${EXCLUDE_PKGS:-none}"
+                        
                         mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
                         ansible-playbook \
@@ -60,150 +63,10 @@ pipeline {
                     echo "========== COMPILING PDF SYSTEM METRICS =========="
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                    cat << 'PYTHON' > generate_pdf.py
-import os, re, time, warnings
-from reportlab.lib.pagesizes import letter, landscape
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from xml.sax.saxutils import escape
-
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-log_file = 'raw_patch_log.tmp'
-pdf_file = 'ansible-roles/os_patching/reports/patch_report.pdf'
-
-if not os.path.exists(log_file):
-    print("Error: Missing log dataset.")
-    exit(1)
-
-with open(log_file, 'r') as f:
-    content = f.read()
-
-match = re.search(r'REPORT_DATA_START(.*?)REPORT_DATA_END', content, re.DOTALL)
-if not match:
-    print("Warning: Log block data markers missing.")
-    exit(0)
-
-raw_data = match.group(1)
-ansi_regex = chr(27) + chr(91) + r'[0-9;]*[a-zA-Z]'
-raw_data = re.sub(ansi_regex, '', raw_data)
-raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
-
-os.makedirs(os.path.dirname(pdf_file), exist_ok=True)
-doc = SimpleDocTemplate(pdf_file, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=35, bottomMargin=35)
-story = []
-styles = getSampleStyleSheet()
-
-title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=20, spaceAfter=8, textColor=colors.HexColor('#1A365D'))
-meta_style = ParagraphStyle('MetaStyle', parent=styles['Normal'], fontSize=9, spaceAfter=12, textColor=colors.HexColor('#4A5568'))
-section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontSize=12, spaceBefore=10, spaceAfter=6, textColor=colors.HexColor('#2B6CB0'))
-header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontSize=8, fontName='Helvetica-Bold', textColor=colors.white)
-cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, leading=10, wordWrap='CJK')
-code_style = ParagraphStyle('CodeStyle', parent=cell_style, fontName='Courier', fontSize=7)
-
-story.append(Paragraph('ENTERPRISE LINUX PATCHING REPORT', title_style))
-story.append(Paragraph(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S UTC')}", meta_style))
-story.append(Spacer(1, 8))
-
-records = re.split(r'HOST_RECORD:', raw_data)
-for record in records:
-    if not record.strip():
-        continue
-        
-    pkg_match = re.search(r'PATCHED_PACKAGES_START(.*?)PATCHED_PACKAGES_END', record, re.DOTALL)
-    pkg_lines = []
-    if pkg_match:
-        pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
-        # FIX: Explicit index matching [0] locks the metadata and keeps it from being overwritten by whitespace lines
-        record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
-    else:
-        record_meta_part = record
-        
-    lines = record_meta_part.splitlines()
-    meta = {}
-    for line in lines:
-        clean_line = line.strip()
-        if ':' in clean_line:
-            k, v = clean_line.split(':', 1)
-            meta[k.strip()] = v.strip()
-            
-    host_name = meta.get('HOST_RECORD', 'Unknown Target')
-    if host_name == 'Unknown Target' and len(lines) > 0:
-        host_name = lines[0].strip()
-
-    story.append(Paragraph(f"Host Execution Target: {escape(host_name)}", section_style))
-    status = meta.get('STATUS', 'FAILED')
-    status_color = '#38A169' if status.upper() == 'SUCCESS' else '#E53E3E'
-    kernel_change = f"{meta.get('OLD_KERNEL', 'N/A')} -> {meta.get('NEW_KERNEL', 'N/A')}"
-    
-    summary_data = [
-        [Paragraph('Host Target', header_style), Paragraph('Operating System', header_style), 
-         Paragraph('Kernel Version Change', header_style), Paragraph('Updated', header_style), 
-         Paragraph('Reboot', header_style), Paragraph('Status', header_style)],
-        [Paragraph(escape(host_name), cell_style), Paragraph(escape(meta.get('OS', 'Unknown')), cell_style), 
-         Paragraph(escape(kernel_change), cell_style), Paragraph(escape(meta.get('UPDATED', 'No')), cell_style), 
-         Paragraph(escape(meta.get('REBOOT', 'No')), cell_style), Paragraph(f"<font color='{status_color}'><b>{escape(status)}</b></font>", cell_style)]
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[int(w) for w in '120,130,155,65,65,80'.split(',')])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2B6CB0')),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#CBD5E0')),
-        ('PADDING', (0,0), (-1,-1), 5),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
-    ]))
-    story.append(summary_table)
-    story.append(Spacer(1, 10))
-    
-    package_data = [[Paragraph('Package Name', header_style), Paragraph('Last Version', header_style), Paragraph('Updated Version', header_style)]]
-    unique_packages = {}
-    for p_line in pkg_lines:
-        if 'No packages updated.' in p_line:
-            break
-        parts = p_line.split()
-        if not parts or len(parts) < 2:
-            continue
-            
-        pkg_name = parts[0].split(':')[0]
-        # Dynamically determine column layout fields from accurate apt output
-        if len(parts) == 3:
-            old_v = parts[1]
-            new_v = parts[2]
-        else:
-            old_v = "Unknown"
-            new_v = parts[1]
-            
-        if pkg_name not in unique_packages:
-            unique_packages[pkg_name] = {'old': old_v, 'new': new_v}
-
-    has_packages = False
-    for name, vdata in sorted(unique_packages.items()):
-        has_packages = True
-        package_data.append([Paragraph(escape(name), code_style), Paragraph(escape(vdata['old']), code_style), Paragraph(escape(vdata['new']), code_style)])
-        
-    if has_packages:
-        story.append(Paragraph('<b>Available Package Update Matrix:</b>', cell_style))
-        story.append(Spacer(1, 4))
-        pkg_table = Table(package_data, colWidths=[int(w) for w in '240,150,150'.split(',')])
-        pkg_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4A5568')),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#E2E8F0')),
-            ('PADDING', (0,0), (-1,-1), 4),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F7FAFC')]),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
-        ]))
-        story.append(pkg_table)
-    else:
-        story.append(Paragraph('<i>System is up to date, no packages available to update.</i>', cell_style))
-    story.append(Spacer(1, 15))
-
-doc.build(story)
-print("PDF compilation successful.")
-PYTHON
-
-                    python3 generate_pdf.py
-                    rm -f generate_pdf.py raw_patch_log.tmp
+                    # Execute the standalone script directly from the checked-out workspace
+                    python3 ansible-roles/os_patching/generate_pdf.py
+                    
+                    rm -f raw_patch_log.tmp
                 '''
             }
         }
@@ -217,7 +80,7 @@ PYTHON
             echo "❌ Patching execution failed."
         }
         always {
-            archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.pdf', allowEmptyArchive: false
+            archiveArtifacts artifacts: 'ansible-roles/os_patching/reports/*.pdf', allowEmptyArchive: true
             sleep time: 3, unit: 'SECONDS'
             cleanWs()
         }
