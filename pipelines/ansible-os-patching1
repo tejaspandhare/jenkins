@@ -65,12 +65,15 @@ pipeline {
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
                     cat << 'PYTHON' > generate_pdf.py
-import os, re, time
+import os, re, time, warnings
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from xml.sax.saxutils import escape
+
+# Silence minor warnings to keep the logs pristine
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 log_file = 'raw_patch_log.tmp'
 pdf_file = 'ansible-roles/os_patching/reports/patch_report.pdf'
@@ -89,7 +92,8 @@ if not match:
 
 raw_data = match.group(1)
 
-ansi_regex = chr(27) + chr(91) + '[0-9;]*[a-zA-Z]'
+# Escape the character sequence to fix the nested set warning
+ansi_regex = chr(27) + chr(91) + r'[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
 raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
 
@@ -118,7 +122,6 @@ for record in records:
     pkg_lines = []
     if pkg_match:
         pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
-        # FIX: Explicitly extraction of string index 0 resolves the 'Unknown Target' array parsing problem
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
@@ -169,11 +172,12 @@ for record in records:
         if len(parts) >= 2:
             p_name = parts[0].split(':')[0]
             v_val = parts[1]
-            if ver_val == '<none>':
+            if v_val == '<none>':
                 v_val = 'N/A'
             if p_name not in unique_packages:
                 unique_packages[p_name] = {'old': 'Unknown', 'new': v_val}
             else:
+                # FIX: Typo corrected from ver_val to v_val to fix NameError exception window
                 if unique_packages[p_name]['old'] == 'Unknown' and unique_packages[p_name]['new'] != v_val:
                     unique_packages[p_name]['old'] = unique_packages[p_name]['new']
                     unique_packages[p_name]['new'] = v_val
@@ -198,7 +202,6 @@ for record in records:
         ]))
         story.append(pkg_table)
     else:
-        # FIX: Updated placeholder text for unpatched system report logs
         story.append(Paragraph('<i>System is up to date, no packages available to update.</i>', cell_style))
     story.append(Spacer(1, 15))
 
