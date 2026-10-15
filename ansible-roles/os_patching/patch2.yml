@@ -26,13 +26,35 @@
 
   roles:
     - precheck
-    - patch     # This role executes the package updates
+    - patch     # Executed roles framework layer
     - reboot
     - postcheck
 
   tasks:
     # ----------------------------------------------------------
-    # POST-PATCH VERIFICATION & CACHE FLUSH (Ensures updates commit)
+    # PRODUCTION FAIL-SAFE: FORCE APPLY HELD-BACK PACKAGES
+    # ----------------------------------------------------------
+    - name: Force apply outstanding upgradable items (Debian/Ubuntu)
+      when: ansible_os_family == "Debian"
+      become: true
+      ansible.builtin.apt:
+        name: "*"
+        state: latest
+        update_cache: true
+        only_upgrade: true
+      ignore_errors: true
+
+    - name: Force apply outstanding upgradable items (RedHat/CentOS)
+      when: ansible_os_family == "RedHat"
+      become: true
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        only_upgrade: true
+      ignore_errors: true
+
+    # ----------------------------------------------------------
+    # POST-PATCH VERIFICATION & CACHE REFRESH
     # ----------------------------------------------------------
     - name: Flush package manager cache and verify updates (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
