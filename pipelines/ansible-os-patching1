@@ -64,6 +64,7 @@ pipeline {
                     
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
+                    # Single-quoted Heredoc blocks Groovy string interpolation drops completely
                     cat << 'PYTHON' > generate_pdf.py
 import os, re, time, warnings
 from reportlab.lib.pagesizes import letter, landscape
@@ -72,7 +73,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from xml.sax.saxutils import escape
 
-# Silence minor warnings to keep the logs pristine
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 log_file = 'raw_patch_log.tmp'
@@ -92,7 +92,6 @@ if not match:
 
 raw_data = match.group(1)
 
-# Escape the character sequence to fix the nested set warning
 ansi_regex = chr(27) + chr(91) + r'[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
 raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
@@ -128,13 +127,18 @@ for record in records:
         
     lines = record_meta_part.splitlines()
     meta = {}
+    
+    discovered_host = "Unknown Target"
+    
     for line in lines:
         clean_line = line.strip()
         if ':' in clean_line:
             k, v = clean_line.split(':', 1)
             meta[k.strip()] = v.strip()
+            if k.strip() == "HOST_RECORD" and v.strip():
+                discovered_host = v.strip()
             
-    host_name = meta.get('HOST_RECORD', 'Unknown Target')
+    host_name = discovered_host if discovered_host != "Unknown Target" else meta.get('HOST_RECORD', 'Unknown Target')
     story.append(Paragraph(f"Host Execution Target: {escape(host_name)}", section_style))
     status = meta.get('STATUS', 'FAILED')
     status_color = '#38A169' if status.upper() == 'SUCCESS' else '#E53E3E'
@@ -177,7 +181,6 @@ for record in records:
             if p_name not in unique_packages:
                 unique_packages[p_name] = {'old': 'Unknown', 'new': v_val}
             else:
-                # FIX: Typo corrected from ver_val to v_val to fix NameError exception window
                 if unique_packages[p_name]['old'] == 'Unknown' and unique_packages[p_name]['new'] != v_val:
                     unique_packages[p_name]['old'] = unique_packages[p_name]['new']
                     unique_packages[p_name]['new'] = v_val
