@@ -39,9 +39,6 @@ pipeline {
                         set -euo pipefail
                         
                         echo "========== PATCH EXECUTION =========="
-                        echo "Running patching on: ${SERVER_NAME}"
-                        echo "Excluding packages: ${EXCLUDE_PKGS:-none}"
-                        
                         mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
 
                         ansible-playbook \
@@ -61,10 +58,8 @@ pipeline {
                     set -euo pipefail
                     
                     echo "========== COMPILING PDF SYSTEM METRICS =========="
-                    
                     python3 -c "import reportlab" 2>/dev/null || pip3 install --user reportlab --break-system-packages
 
-                    # Single-quoted Heredoc blocks Groovy string interpolation drops completely
                     cat << 'PYTHON' > generate_pdf.py
 import os, re, time, warnings
 from reportlab.lib.pagesizes import letter, landscape
@@ -79,7 +74,7 @@ log_file = 'raw_patch_log.tmp'
 pdf_file = 'ansible-roles/os_patching/reports/patch_report.pdf'
 
 if not os.path.exists(log_file):
-    print("Error: Missing execution data logs.")
+    print("Error: Missing log dataset.")
     exit(1)
 
 with open(log_file, 'r') as f:
@@ -87,11 +82,10 @@ with open(log_file, 'r') as f:
 
 match = re.search(r'REPORT_DATA_START(.*?)REPORT_DATA_END', content, re.DOTALL)
 if not match:
-    print("Warning: Log metadata stream block tokens missing from console output.")
+    print("Warning: Log block data markers missing.")
     exit(0)
 
 raw_data = match.group(1)
-
 ansi_regex = chr(27) + chr(91) + r'[0-9;]*[a-zA-Z]'
 raw_data = re.sub(ansi_regex, '', raw_data)
 raw_data = raw_data.replace(r'\\\\n', chr(10)).replace(r'\\"', '"')
@@ -109,36 +103,35 @@ cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'], fontSize=8, le
 code_style = ParagraphStyle('CodeStyle', parent=cell_style, fontName='Courier', fontSize=7)
 
 story.append(Paragraph('ENTERPRISE LINUX PATCHING REPORT', title_style))
-gen_time = time.strftime("%Y-%m-%d %H:%M:%S UTC")
-story.append(Paragraph(f"Generated on: {gen_time}", meta_style))
+story.append(Paragraph(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S UTC')}", meta_style))
 story.append(Spacer(1, 8))
 
 records = re.split(r'HOST_RECORD:', raw_data)
 for record in records:
     if not record.strip():
         continue
+        
     pkg_match = re.search(r'PATCHED_PACKAGES_START(.*?)PATCHED_PACKAGES_END', record, re.DOTALL)
     pkg_lines = []
     if pkg_match:
         pkg_lines = [l.strip() for l in pkg_match.group(1).splitlines() if l.strip()]
+        # FIX: Explicit index matching [0] locks the metadata and keeps it from being overwritten by whitespace lines
         record_meta_part = record.split('PATCHED_PACKAGES_START')[0]
     else:
         record_meta_part = record
         
     lines = record_meta_part.splitlines()
     meta = {}
-    
-    discovered_host = "Unknown Target"
-    
     for line in lines:
         clean_line = line.strip()
         if ':' in clean_line:
             k, v = clean_line.split(':', 1)
             meta[k.strip()] = v.strip()
-            if k.strip() == "HOST_RECORD" and v.strip():
-                discovered_host = v.strip()
             
-    host_name = discovered_host if discovered_host != "Unknown Target" else meta.get('HOST_RECORD', 'Unknown Target')
+    host_name = meta.get('HOST_RECORD', 'Unknown Target')
+    if host_name == 'Unknown Target' and len(lines) > 0:
+        host_name = lines[0].strip()
+
     story.append(Paragraph(f"Host Execution Target: {escape(host_name)}", section_style))
     status = meta.get('STATUS', 'FAILED')
     status_color = '#38A169' if status.upper() == 'SUCCESS' else '#E53E3E'
@@ -169,31 +162,28 @@ for record in records:
         if 'No packages updated.' in p_line:
             break
         parts = p_line.split()
-        if not parts:
+        if not parts or len(parts) < 2:
             continue
-        if parts[0] in ['half-installed', 'installed', 'upgraded', 'unpacked', 'half-configured']:
-            parts.pop(0)
-        if len(parts) >= 2:
-            p_name = parts[0].split(':')[0]
-            v_val = parts[1]
-            if v_val == '<none>':
-                v_val = 'N/A'
-            if p_name not in unique_packages:
-                unique_packages[p_name] = {'old': 'Unknown', 'new': v_val}
-            else:
-                if unique_packages[p_name]['old'] == 'Unknown' and unique_packages[p_name]['new'] != v_val:
-                    unique_packages[p_name]['old'] = unique_packages[p_name]['new']
-                    unique_packages[p_name]['new'] = v_val
-                else:
-                    unique_packages[p_name]['new'] = v_val
-                    
+            
+        pkg_name = parts[0].split(':')[0]
+        # Dynamically determine column layout fields from accurate apt output
+        if len(parts) == 3:
+            old_v = parts[1]
+            new_v = parts[2]
+        else:
+            old_v = "Unknown"
+            new_v = parts[1]
+            
+        if pkg_name not in unique_packages:
+            unique_packages[pkg_name] = {'old': old_v, 'new': new_v}
+
     has_packages = False
     for name, vdata in sorted(unique_packages.items()):
         has_packages = True
         package_data.append([Paragraph(escape(name), code_style), Paragraph(escape(vdata['old']), code_style), Paragraph(escape(vdata['new']), code_style)])
         
     if has_packages:
-        story.append(Paragraph('<b>Patched Packages Details Breakdown:</b>', cell_style))
+        story.append(Paragraph('<b>Available Package Update Matrix:</b>', cell_style))
         story.append(Spacer(1, 4))
         pkg_table = Table(package_data, colWidths=[int(w) for w in '240,150,150'.split(',')])
         pkg_table.setStyle(TableStyle([
