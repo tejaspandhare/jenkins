@@ -40,7 +40,6 @@
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        # FIX: Removed --with-new-pkgs since 'install' pulls new dependencies natively
         apt-get install -y -o Dpkg::Options::="--force-confold" libopeniscsiusr open-iscsi
       ignore_errors: true
 
@@ -112,11 +111,11 @@
           REBOOT:{{ h.reboot | default('No') }}
           STATUS:{{ h.status | default('FAILED') }}
           PATCHED_PACKAGES_START
-          {% if hostvars[host]['live_updates_debian'] is defined and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
+          {% if hostvars[host]['live_updates_debian'] is defined and hostvars[host]['live_updates_debian'] is mapping and 'stdout_lines' in hostvars[host]['live_updates_debian'] and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
           {% for line in hostvars[host]['live_updates_debian']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
-          {% elif hostvars[host]['live_updates_redhat'] is defined and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
+          {% elif hostvars[host]['live_updates_redhat'] is defined and hostvars[host]['live_updates_redhat'] is mapping and 'stdout_lines' in hostvars[host]['live_updates_redhat'] and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
           {% for line in hostvars[host]['live_updates_redhat']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
