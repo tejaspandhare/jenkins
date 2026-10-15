@@ -40,8 +40,8 @@
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        # Overrides the 'kept back' rule by forcing direct installation of the targets
-        apt-get install -y --with-new-pkgs -o Dpkg::Options::="--force-confold" libopeniscsiusr open-iscsi
+        # FIX: Removed --with-new-pkgs since 'install' pulls new dependencies natively
+        apt-get install -y -o Dpkg::Options::="--force-confold" libopeniscsiusr open-iscsi
       ignore_errors: true
 
     - name: Force apply outstanding upgradable items (RedHat/CentOS)
