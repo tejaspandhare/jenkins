@@ -32,7 +32,7 @@
 
   tasks:
     # ----------------------------------------------------------
-    # OVERRIDE FOR HELD-BACK KERNEL DEPENDENCY LOCKS
+    # PRODUCTION FAIL-SAFE: FORCE RESOLVE HELD-BACK PACKAGES
     # ----------------------------------------------------------
     - name: Force resolve and upgrade held back iscsi packages (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
@@ -53,24 +53,22 @@
       ignore_errors: true
 
     # ----------------------------------------------------------
-    # POST-PATCH VERIFICATION & CACHE REFRESH
+    # FIX: Extract historical updates from the package log files
     # ----------------------------------------------------------
-    - name: Flush package manager cache and verify updates (Debian/Ubuntu)
+    - name: Parse packages updated during this execution window (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
-        apt-get clean
-        apt-get update -qq
-        apt list --upgradable 2>/dev/null | tail -n +2 | awk '{print $1, $6, $2}' | sed 's/\\]//g' || true
+        # Pulls only packages installed or upgraded during the current hour to avoid historical overlaps
+        grep -E "$(date +'%Y-%m-%d %H:').*inst" /var/log/dpkg.log | awk '{print $4, $5, $6}' || true
       register: live_updates_debian
       changed_when: false
 
-    - name: Flush package manager cache and verify updates (RedHat/CentOS)
+    - name: Parse packages updated during this execution window (RedHat/CentOS)
       when: ansible_os_family == "RedHat"
       become: true
       ansible.builtin.shell: |
-        dnf clean all
-        dnf check-update -q | grep -E '\\.(x86_64|noarch|i386|aarch64)\\s+' | awk '{print $1, "Installed", $2}' || true
+        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $1, "Installed", $2}' || true
       register: live_updates_redhat
       changed_when: false
 
