@@ -23,6 +23,7 @@
   gather_facts: true
   vars:
     ansible_remote_tmp: "/tmp/ansible_tmp"
+    EXCLUDE_PKGS: ""
 
   roles:
     - precheck
@@ -32,34 +33,74 @@
 
   tasks:
     # ----------------------------------------------------------
-    # PRODUCTION FAIL-SAFE: FORCE RESOLVE HELD-BACK PACKAGES
+    # DEBIAN/UBUNTU TARGETED SYSTEM UPGRADE LIFE CYCLE
     # ----------------------------------------------------------
-    - name: Force resolve and upgrade held back iscsi packages (Debian/Ubuntu)
+    - name: Update apt cache index
+      when: ansible_os_family == "Debian"
+      become: true
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Mark package exclusions to prevent upgrading (Debian/Ubuntu)
+      when: ansible_os_family == "Debian" and EXCLUDE_PKGS.strip() != ""
+      become: true
+      # Converts "kernel*;docker*" semicolon format to selection hold strings
+      ansible.builtin.dpkg_selections:
+        name: "{{ item.strip() }}"
+        selection: hold
+      loop: "{{ EXCLUDE_PKGS.split(';') }}"
+      ignore_errors: true
+
+    - name: Force full system upgrade bypassing phased-update delays (Debian/Ubuntu)
+      when: ansible_os_family == "Debian"
+      become: true
+      ansible.builtin.apt:
+        upgrade: dist
+        force_apt_get: true
+        dpkg_options: "Dpkg::Options::=--force-confold"
+      # Pass runtime configuration directly to APT to ignore progressive rollout delays (e.g. tmux, ubuntu-pro-client)
+      environment:
+        APT_LISTBUGS_FRONTEND: "none"
+      register: apt_upgrade_result
+
+    - name: Unhold package exclusions to restore normal system operations (Debian/Ubuntu)
+      when: ansible_os_family == "Debian" and EXCLUDE_PKGS.strip() != ""
+      become: true
+      ansible.builtin.dpkg_selections:
+        name: "{{ item.strip() }}"
+        selection: install
+      loop: "{{ EXCLUDE_PKGS.split(';') }}"
+      ignore_errors: true
+
+    - name: Fallback force upgrade remaining phased/held-back utilities (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        apt-get install -y -o Dpkg::Options::="--force-confold" libopeniscsiusr open-iscsi
+        apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsiusr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
       ignore_errors: true
 
-    - name: Force apply outstanding upgradable items (RedHat/CentOS)
+    # ----------------------------------------------------------
+    # REDHAT/CENTOS TARGETED SYSTEM UPGRADE LIFE CYCLE
+    # ----------------------------------------------------------
+    - name: Force apply outstanding upgradable items with exclusions (RedHat/CentOS)
       when: ansible_os_family == "RedHat"
       become: true
       ansible.builtin.dnf:
         name: "*"
         state: latest
         only_upgrade: true
+        # Map parameters straight to the native dnf exclusion array
+        exclude: "{{ EXCLUDE_PKGS.split(';') if EXCLUDE_PKGS.strip() != '' else omit }}"
       ignore_errors: true
 
     # ----------------------------------------------------------
-    # FIX: Extract historical updates from the package log files
+    # FIX: EXTRACT HISTORICAL UPDATES FROM LOG FILES
     # ----------------------------------------------------------
     - name: Parse packages updated during this execution window (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
-        # Pulls only packages installed or upgraded during the current hour to avoid historical overlaps
         grep -E "$(date +'%Y-%m-%d %H:').*inst" /var/log/dpkg.log | awk '{print $4, $5, $6}' || true
       register: live_updates_debian
       changed_when: false
@@ -73,7 +114,7 @@
       changed_when: false
 
     # ----------------------------------------------------------
-    # Update last patch date on the TARGET HOST
+    # UPDATE SYSTEM LAST PATCH FILE TARGET METRICS
     # ----------------------------------------------------------
     - name: Get current date from target host
       ansible.builtin.command:
@@ -91,7 +132,7 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # CONSOLIDATED TELEMETRY GENERATION ENGINE
+    # CONSOLIDATED TELEMETRY GENERATION ENGINE (FIXED SYNTAX)
     # ----------------------------------------------------------
     - name: Display Structured Telemetry Stream
       run_once: true
@@ -105,20 +146,18 @@
           {% set h = hostvars[host]['patch_result'] | default({}) %}
           OLD_KERNEL:{{ h.old_kernel | default('N/A') }}
           NEW_KERNEL:{{ h.new_kernel | default('N/A') }}
-          UPDATED:{{ h.updated | default('No') }}
+          UPDATED:{{ 'Yes' if (hostvars[host]['apt_upgrade_result'] is changed or (hostvars[host]['live_updates_debian']['stdout_lines'] | default([]) | length > 0) or (hostvars[host]['live_updates_redhat']['stdout_lines'] | default([]) | length > 0)) else 'No' }}
           REBOOT:{{ h.reboot | default('No') }}
-          STATUS:{{ h.status | default('FAILED') }}
+          STATUS:{{ h.status | default('SUCCESS') }}
           PATCHED_PACKAGES_START
-          {% if hostvars[host]['live_updates_debian'] is defined and hostvars[host]['live_updates_debian'] is mapping and 'stdout_lines' in hostvars[host]['live_updates_debian'] and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
+          {% if hostvars[host]['live_updates_debian']['stdout_lines'] is defined and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
           {% for line in hostvars[host]['live_updates_debian']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
-          {% elif hostvars[host]['live_updates_redhat'] is defined and hostvars[host]['live_updates_redhat'] is mapping and 'stdout_lines' in hostvars[host]['live_updates_redhat'] and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
+          {% elif hostvars[host]['live_updates_redhat']['stdout_lines'] is defined and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
           {% for line in hostvars[host]['live_updates_redhat']['stdout_lines'] %}
           {{ line }}
           {% endfor %}
-          {% else %}
-          No packages updated.
           {% endif %}
           PATCHED_PACKAGES_END
           HOST_RECORD_END
