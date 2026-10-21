@@ -33,6 +33,17 @@
 
   tasks:
     # ----------------------------------------------------------
+    # PRECISION LOG MARKER - RUNS BEFORE PATCHING LIFE CYCLE
+    # ----------------------------------------------------------
+    - name: Establish precision pre-patch log tracking boundary
+      when: ansible_os_family == "Debian"
+      become: true
+      ansible.builtin.file:
+        path: /tmp/.patch_window_start
+        state: touch
+        mode: '0644'
+
+    # ----------------------------------------------------------
     # DEBIAN/UBUNTU TARGETED SYSTEM UPGRADE LIFE CYCLE
     # ----------------------------------------------------------
     - name: Update apt cache index
@@ -44,7 +55,6 @@
     - name: Mark package exclusions to prevent upgrading (Debian/Ubuntu)
       when: ansible_os_family == "Debian" and EXCLUDE_PKGS.strip() != ""
       become: true
-      # Converts "kernel*;docker*" semicolon format to selection hold strings
       ansible.builtin.dpkg_selections:
         name: "{{ item.strip() }}"
         selection: hold
@@ -58,7 +68,6 @@
         upgrade: dist
         force_apt_get: true
         dpkg_options: "Dpkg::Options::=--force-confold"
-      # Pass runtime configuration directly to APT to ignore progressive rollout delays (e.g. tmux, ubuntu-pro-client)
       environment:
         APT_LISTBUGS_FRONTEND: "none"
       register: apt_upgrade_result
@@ -90,18 +99,18 @@
         name: "*"
         state: latest
         only_upgrade: true
-        # Map parameters straight to the native dnf exclusion array
         exclude: "{{ EXCLUDE_PKGS.split(';') if EXCLUDE_PKGS.strip() != '' else omit }}"
       ignore_errors: true
 
     # ----------------------------------------------------------
-    # FIX: EXTRACT HISTORICAL UPDATES FROM LOG FILES
+    # HARVEST REAL-TIME COMPLIANCE CHANGES VIA SNAPSHOT DELTAS
     # ----------------------------------------------------------
-    - name: Parse packages updated during this execution window (Debian/Ubuntu)
+    - name: Parse packages updated strictly during this execution window (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
+      # Extracted records modified strictly after our runtime marker file
       ansible.builtin.shell: |
-        grep -E "$(date +'%Y-%m-%d %H:').*inst" /var/log/dpkg.log | awk '{print $4, $5, $6}' || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (status|trigproc|install) " {} + | awk '{print $4, $5, $6}' || true
       register: live_updates_debian
       changed_when: false
 
@@ -112,6 +121,14 @@
         dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $1, "Installed", $2}' || true
       register: live_updates_redhat
       changed_when: false
+
+    - name: Clean up temporary execution tracking markers
+      when: ansible_os_family == "Debian"
+      become: true
+      ansible.builtin.file:
+        path: /tmp/.patch_window_start
+        state: absent
+      ignore_errors: true
 
     # ----------------------------------------------------------
     # UPDATE SYSTEM LAST PATCH FILE TARGET METRICS
@@ -132,7 +149,7 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # CONSOLIDATED TELEMETRY GENERATION ENGINE (FIXED SYNTAX)
+    # CONSOLIDATED TELEMETRY GENERATION ENGINE (FIXED TELEMETRY)
     # ----------------------------------------------------------
     - name: Display Structured Telemetry Stream
       run_once: true
