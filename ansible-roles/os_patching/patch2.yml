@@ -196,7 +196,7 @@
       delegate_to: localhost
       changed_when: false
       ansible.builtin.copy:
-        dest: "raw_patch_log.tmp"
+        dest: "/tmp/raw_patch_log.tmp"
         content: |
           REPORT_DATA_START
           {% for host in groups['patching_execution_group'] | default([]) %}
