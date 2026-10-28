@@ -96,7 +96,7 @@ table_rows = ""
 package_details = ""
 
 for block in host_blocks:
-    lines = block.strip().split('\n')
+    lines = block.strip().splitlines()
     data = {}
     pkgs = []
     in_pkgs = False
@@ -142,7 +142,7 @@ for block in host_blocks:
     """
     
     if pkgs:
-        package_details += f"<h3>{host} - Package Execution Output</h3><pre class='package-list'>" + "\n".join(pkgs) + "</pre>"
+        package_details += f"<h3>{host} - Package Execution Output</h3><pre class='package-list'>" + chr(10).join(pkgs) + "</pre>"
 
 timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
 
