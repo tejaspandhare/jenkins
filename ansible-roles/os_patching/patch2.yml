@@ -29,7 +29,7 @@
 
   tasks:
     # ----------------------------------------------------------
-    # CRITICAL BASELINE SNAPSHOT - MUST RUN FIRST
+    # CRITICAL BASELINE SNAPSHOT - CAPTURE INITAL BOOT DATA
     # ----------------------------------------------------------
     - name: Record True Baseline Kernel Version
       ansible.builtin.set_fact:
@@ -172,6 +172,15 @@
     - name: Execute Postcheck Suite
       ansible.builtin.include_role:
         name: postcheck
+
+    # ----------------------------------------------------------
+    # FORCE FACT REFRESH TO CAPTURE POST-UPGRADE PACKAGE METRICS
+    # ----------------------------------------------------------
+    - name: Force collect current system status from underlying disk architecture
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - 'min'
 
     # ----------------------------------------------------------
     # UPDATE SYSTEM LAST PATCH FILE TARGET METRICS
