@@ -13,8 +13,9 @@ pipeline {
 
     environment {
         ANSIBLE_FORCE_COLOR = 'true' 
-        ANSIBLE_STDOUT_CALLBACK = 'yaml'
+        ANSIBLE_STDOUT_CALLBACK = 'default'
         ANSIBLE_CALLBACK_RESULT_FORMAT = 'yaml'
+        ANSIBLE_DEPRECATION_WARNINGS = 'false'
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_HOST_KEY_CHECKING = 'false'
