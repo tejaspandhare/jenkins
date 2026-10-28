@@ -76,7 +76,7 @@ pipeline {
         always {
             echo "========== ARCHIVING AVAILABLE METRICS =========="
             archiveArtifacts artifacts: 'raw_patch_log.tmp', allowEmptyArchive: true
-            // Bypassing workspace deletion to avoid crashing on the faulty I/O path mount
+            // Bypassing active workspace deletion due to the filesystem lock error
             // deleteDir()
         }
     }
