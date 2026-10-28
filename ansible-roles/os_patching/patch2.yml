@@ -14,6 +14,8 @@
         groups: patching_execution_group
       loop: "{{ target_hosts.split(';') }}"
       when: target_hosts.strip() != ""
+      loop_control:
+        label: "{{ item.strip() }}"
 
 # -----------------------------------------------------------------
 # PLAY 2: ENTERPRISE PATCHING ENGINE & TELEMETRY GENERATION
@@ -27,7 +29,7 @@
 
   tasks:
     # ----------------------------------------------------------
-    # EXECUTE PRE-CHECK ROLE FIRST
+    # ROLE INCLUSION Lifecycle Execution Order
     # ----------------------------------------------------------
     - name: Execute Precheck Suite
       ansible.builtin.include_role:
@@ -48,7 +50,6 @@
         state: touch
         mode: '0644'
 
-    # Execute Custom Patch Role if needed
     - name: Execute Core Patch Role
       ansible.builtin.include_role:
         name: patch
@@ -69,6 +70,8 @@
         name: "{{ item.strip() }}"
         selection: hold
       loop: "{{ EXCLUDE_PKGS.split(';') }}"
+      loop_control:
+        label: "{{ item.strip() }}"
       ignore_errors: true
 
     - name: Force full system upgrade bypassing phased-update delays (Debian/Ubuntu)
@@ -81,6 +84,7 @@
       environment:
         APT_LISTBUGS_FRONTEND: "none"
       register: apt_upgrade_result
+      no_log: true
 
     - name: Unhold package exclusions to restore normal system operations (Debian/Ubuntu)
       when: ansible_os_family == "Debian" and EXCLUDE_PKGS.strip() != ""
@@ -89,6 +93,8 @@
         name: "{{ item.strip() }}"
         selection: install
       loop: "{{ EXCLUDE_PKGS.split(';') }}"
+      loop_control:
+        label: "{{ item.strip() }}"
       ignore_errors: true
 
     - name: Fallback force upgrade remaining phased/held-back utilities (Debian/Ubuntu)
@@ -99,6 +105,7 @@
         apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsiusr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
       register: fallback_upgrade_result
       ignore_errors: true
+      no_log: true
 
     # ----------------------------------------------------------
     # REDHAT/CENTOS TARGETED SYSTEM UPGRADE LIFE CYCLE
@@ -113,6 +120,7 @@
         exclude: "{{ EXCLUDE_PKGS.split(';') if EXCLUDE_PKGS.strip() != '' else omit }}"
       register: dnf_upgrade_result
       ignore_errors: true
+      no_log: true
 
     # ----------------------------------------------------------
     # HARVEST REAL-TIME COMPLIANCE CHANGES VIA SNAPSHOT DELTAS
@@ -142,7 +150,7 @@
       ignore_errors: true
 
     # ----------------------------------------------------------
-    # CHECK IF REBOOT IS ACTUALLY NEEDED BEFORE RUNNING REBOOT
+    # EVALUATE SYSTEM REBOOT STATE
     # ----------------------------------------------------------
     - name: Determine if Debian/Ubuntu requires reboot
       when: ansible_os_family == "Debian"
@@ -154,12 +162,10 @@
       ansible.builtin.set_fact:
         needs_reboot: "{{ true if (debian_reboot_marker.stat is defined and debian_reboot_marker.stat.exists) else false }}"
 
-    # Execute Reboot Management Role
     - name: Execute Reboot Suite
       ansible.builtin.include_role:
         name: reboot
 
-    # Execute Post-Check Verification Validation Role
     - name: Execute Postcheck Suite
       ansible.builtin.include_role:
         name: postcheck
@@ -183,13 +189,15 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # CONSOLIDATED TELEMETRY GENERATION ENGINE
+    # CONSOLIDATED TELEMETRY GENERATION ENGINE (SILENT WRITE)
     # ----------------------------------------------------------
-    - name: Display Structured Telemetry Stream
+    - name: Generate Telemetry Report File Silently
       run_once: true
       delegate_to: localhost
-      ansible.builtin.debug:
-        msg: |
+      changed_when: false
+      ansible.builtin.copy:
+        dest: "raw_patch_log.tmp"
+        content: |
           REPORT_DATA_START
           {% for host in groups['patching_execution_group'] | default([]) %}
           HOST_RECORD:{{ host }}
