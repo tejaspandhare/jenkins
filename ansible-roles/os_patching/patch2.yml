@@ -29,15 +29,18 @@
 
   tasks:
     # ----------------------------------------------------------
+    # CRITICAL BASELINE SNAPSHOT - MUST RUN FIRST
+    # ----------------------------------------------------------
+    - name: Record True Baseline Kernel Version
+      ansible.builtin.set_fact:
+        baseline_kernel: "{{ ansible_kernel }}"
+
+    # ----------------------------------------------------------
     # ROLE INCLUSION Lifecycle Execution Order
     # ----------------------------------------------------------
     - name: Execute Precheck Suite
       ansible.builtin.include_role:
         name: precheck
-
-    - name: Record Baseline Kernel Version
-      ansible.builtin.set_fact:
-        baseline_kernel: "{{ ansible_kernel }}"
 
     # ----------------------------------------------------------
     # PRECISION LOG MARKER - RUNS BEFORE PATCHING LIFE CYCLE
