@@ -43,15 +43,23 @@ pipeline {
                     RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
                     ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "SUCCESS")
                     [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
-                    PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | xargs || echo "")
-                    [ -z "${PL}" ] && PL="System is up to date. No updates applied."
-                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc'>" > "$O"
+                    
+                    # Removed xargs from the end here to fully preserve original file linebreaks
+                    PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_")
+                    
+                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
                     echo "<h2>Enterprise Patching Dashboard</h2><p>Run Time: ${TIME}</p>" >> "$O"
-                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff'>" >> "$O"
-                    echo "<tr style='background:#f8fafc'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
+                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0'>" >> "$O"
+                    echo "<tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
-                    echo "</table><h3>Package Output</h3>" >> "$O"
-                    echo "<pre style='background:#0f172a;color:#cbd5e1;padding:15px;white-space:pre-wrap'>${PL}</pre>" >> "$O"
+                    echo "</table><h3>Package Output Execution Logs</h3>" >> "$O"
+                    
+                    # Wrapped inside structural HTML conditionals and added quotes around variable to fix string wrapping
+                    if [ -z "${PL}" ]; then
+                        echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied.</div>" >> "$O"
+                    else
+                        echo "<pre style='background:#0f172a;color:#cbd5e1;padding:15px;border-radius:6px;white-space:pre-wrap;word-break:break-all'>${PL}</pre>" >> "$O"
+                    fi
                     echo "</body></html>" >> "$O"
                 '''
             }
