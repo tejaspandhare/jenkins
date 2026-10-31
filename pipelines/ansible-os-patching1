@@ -9,6 +9,11 @@ pipeline {
         ANSIBLE_FORCE_COLOR = 'true'
         ANSIBLE_STDOUT_CALLBACK = 'yaml'
         ANSIBLE_DEPRECATION_WARNINGS = 'false'
+        // Completely disables ansiballz file system cache clutter:
+        ANSIBLE_CACHE_PLUGIN = 'memory'
+        ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
+        ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
+        ANSIBLE_HOST_KEY_CHECKING = 'false'
     }
     stages {
         stage('Patching') {
@@ -17,7 +22,8 @@ pipeline {
                     withEnv(["TSERVERS=${params.SERVER_NAME}", "EXPKGS=${params.EXCLUDE_PKGS}"]) {
                         sh '''#!/bin/bash
                             set -euo pipefail
-                            mkdir -p /tmp/ansible_cp
+                            mkdir -p /tmp/ansible_tmp
+                            
                             ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch2.yml \
                                 --private-key="${ANSIBLE_KEY_FILE}" \
                                 -e "target_hosts='${TSERVERS}'" \
@@ -58,7 +64,6 @@ pipeline {
                     else
                         echo "<table border='1' cellpadding='8' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0;font-size:13px'>" >> "$O"
                         echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Version Details</th></tr>" >> "$O"
-                        
                         echo "${PL}" | while read -r line || [ -n "$line" ]; do
                             [ -z "$line" ] && continue
                             ACTION=$(echo "$line" | awk '{print $1}')
