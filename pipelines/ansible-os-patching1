@@ -44,7 +44,6 @@ pipeline {
                     ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "SUCCESS")
                     [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
 
-                    # 1. Output Global Document Styles and Header Elements
                     echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
                     echo "<h2>Enterprise Patching Dashboard</h2><p>Run Time: ${TIME}</p>" >> "$O"
                     echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0'>" >> "$O"
@@ -52,46 +51,20 @@ pipeline {
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
-                    # 2. Extract Package Boundaries to Check for Modifications Data
                     PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_")
 
                     if [ -z "${PL}" ]; then
                         echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied.</div>" >> "$O"
                     else
-                        # 3. Create Package Detail Table Headers
                         echo "<table border='1' cellpadding='8' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0;font-size:13px'>" >> "$O"
-                        echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Architecture</th><th>Version Metadata</th></tr>" >> "$O"
+                        echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Version Details</th></tr>" >> "$O"
                         
-                        # 4. Read Lines Safely Without Compressing Delimiters
                         echo "${PL}" | while read -r line || [ -n "$line" ]; do
                             [ -z "$line" ] && continue
-                            
-                            # Parse space-separated fields out of raw log line data maps
                             ACTION=$(echo "$line" | awk '{print $1}')
-                            PKG_RAW=$(echo "$line" | awk '{print $2}')
-                            V1=$(echo "$line" | awk '{print $3}')
-                            V2=$(echo "$line" | awk '{print $4}')
-                            
-                            # Separate package names from architectures
-                            if [[ "$PKG_RAW" == *":"* ]]; then
-                                P_NAME=$(echo "$PKG_RAW" | cut -d':' -f1)
-                                P_ARCH=$(echo "$PKG_RAW" | cut -d':' -f2)
-                            else
-                                P_NAME="$PKG_RAW"
-                                P_ARCH="all"
-                            fi
-                            
-                            # Combine remaining metadata columns into a clean version column entry
-                            [ -n "$V2" ] && P_VERSION="${V1} -> ${V2}" || P_VERSION="${V1}"
-                            
-                            # Style action states with custom weights
-                            if [ "$ACTION" = "installed" ] || [ "$ACTION" = "upgrade" ]; then
-                                ACT_CELL="<b style='color:#166534'>$ACTION</b>"
-                            else
-                                ACT_CELL="<span style='color:#475569'>$ACTION</span>"
-                            fi
-
-                            echo "<tr><td>${ACT_CELL}</td><td><b>${P_NAME}</b></td><td><small>${P_ARCH}</small></td><td>${P_VERSION}</td></tr>" >> "$O"
+                            P_NAME=$(echo "$line" | awk '{print $2}')
+                            P_VER=$(echo "$line" | awk '{print $3}')
+                            echo "<tr><td><b style='color:#166534'>${ACTION}</b></td><td><b>${P_NAME}</b></td><td>${P_VER}</td></tr>" >> "$O"
                         done
                         echo "</table>" >> "$O"
                     fi
