@@ -155,8 +155,11 @@ for block in host_blocks:
     </tr>
     """
     
-    if pkgs:
-        package_details += f"<h3>{host} - Package Execution Output</h3><pre class='package-list'>" + chr(10).join(pkgs) + "</pre>"
+    # Show the specific dynamic informational text if zero package updates exist
+    if not pkgs:
+        pkgs.append("System is up to date, no packages available to update")
+        
+    package_details += f"<h3>{host} - Package Execution Output</h3><pre class='package-list'>" + chr(10).join(pkgs) + "</pre>"
 
 timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
 
@@ -218,7 +221,6 @@ print("HTML layout generated completely.")
     post {
         always {
             echo "========== ARCHIVING AVAILABLE METRICS =========="
-            // Using standard Groovy comment blocks to maintain declarative rule checks
             archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
         }
     }
