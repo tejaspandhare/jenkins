@@ -89,8 +89,8 @@ if not os.path.exists(log_path):
 with open(log_path, 'r') as f:
     content = f.read()
 
-# Parse target records out of raw tracking telemetry boundaries
-host_blocks = re.findall(r'HOST_RECORD:(.*?)(?=HOST_RECORD_END|$)', content, re.DOTALL)
+# Use strict boundary limits to parse host metadata records
+host_blocks = re.findall(r'HOST_RECORD:(.*?)(?=HOST_RECORD_END)', content, re.DOTALL)
 
 table_rows = ""
 package_details = ""
@@ -102,20 +102,25 @@ for block in host_blocks:
     in_pkgs = False
     
     for line in lines:
-        if 'PATCHED_PACKAGES_START' in line:
+        cleaned_line = line.strip()
+        if not cleaned_line:
+            continue
+            
+        if 'PATCHED_PACKAGES_START' in cleaned_line:
             in_pkgs = True
             continue
-        if 'PATCHED_PACKAGES_END' in line:
+        if 'PATCHED_PACKAGES_END' in cleaned_line:
             in_pkgs = False
             continue
+            
         if in_pkgs:
-            if line.strip():
-                pkgs.append(line.strip())
-        elif ':' in line:
-            k, v = line.split(':', 1)
+            pkgs.append(cleaned_line)
+        elif ':' in cleaned_line:
+            k, v = cleaned_line.split(':', 1)
             data[k.strip()] = v.strip()
             
-    host = data.get('HOST_RECORD', 'Unknown')
+    # Explicitly check for host fields inside the block first, fallback to structural extraction
+    host = data.get('HOST_RECORD') or (lines[0].split(':', 1)[1].strip() if lines and ':' in lines[0] else 'Unknown')
     os_ver = data.get('OS', 'Unknown')
     old_k = data.get('OLD_KERNEL', 'Unknown')
     new_k = data.get('NEW_KERNEL', 'Unknown')
@@ -204,7 +209,8 @@ print("HTML layout generated completely.")
     post {
         always {
             echo "========== ARCHIVING AVAILABLE METRICS =========="
-            archiveArtifacts artifacts: 'raw_patch_log.tmp, patch_report.html', allowEmptyArchive: true
+            # Removed raw_patch_log.tmp to archive only the final HTML dashboard
+            archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
         }
     }
 }
