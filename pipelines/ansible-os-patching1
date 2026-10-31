@@ -16,16 +16,8 @@ pipeline {
     stages {
         stage('Patching') {
             steps {
-                withCredentials([
-                    file(
-                        credentialsId: 'automation-key', 
-                        variable: 'ANSIBLE_KEY_FILE'
-                    )
-                ]) {
-                    withEnv([
-                        "TSERVERS=${params.SERVER_NAME}",
-                        "EXPKGS=${params.EXCLUDE_PKGS}"
-                    ]) {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    withEnv(["TSERVERS=${params.SERVER_NAME}", "EXPKGS=${params.EXCLUDE_PKGS}"]) {
                         sh '''#!/bin/bash
                             set -euo pipefail
                             mkdir -p /tmp/ansible_cp
@@ -62,59 +54,22 @@ pipeline {
                     RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
                     ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
                     
-                    if [ "$UP" = "Yes" ]; then C_U="succ"; else C_U="neut"; fi
-                    if [ "$RB" = "Yes" ]; then C_R="warn"; else C_R="neut"; fi
-                    if [ "$ST" = "SUCCESS" ]; then C_S="succ"; else C_S="dang"; fi
-                    
-                    if [ "$OK" != "$NK" ]; then
-                        KD="$OK &rarr; $NK"
-                    else
-                        KD="$OK"
-                    fi
-                    
+                    if [ "$OK" != "$NK" ]; then KD="$OK -> $NK"; else KD="$OK"; fi
                     PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | xargs)
+                    if [ -z "$PL" ]; then PL="System up to date. No updates applied."; fi
                     
-                    if [ -z "$PL" ]; then
-                        PB="<div class='info'>✨ System up to date.</div>"
-                    else
-                        PB="<pre class='list'>$PL</pre>"
-                    fi
+                    # Print HTML wrapper line-by-line to prevent display box overflow errors
+                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
+                    echo "<h2>Enterprise Patching Dashboard</h2>" >> "$O"
+                    echo "<p><b>Run Time:</b> ${TIME}</p>" >> "$O"
+                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border:1px solid #e2e8f0'>" >> "$O"
+                    echo "<tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
+                    echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
+                    echo "</table>" >> "$O"
+                    echo "<h3>Package Execution Logs</h3>" >> "$O"
+                    echo "<pre style='background:#0f172a;color:#cbd5e1;padding:15px;border-radius:6px;white-space:pre-wrap'>${PL}</pre>" >> "$O"
+                    echo "</body></html>" >> "$O"
                     
-                    cat <<EOF > "$O"
-<!DOCTYPE html>
-<html>
-<head>
-<title>Patch Report</title>
-<style>
-  body { font-family: sans-serif; background: #f8fafc; padding: 20px; }
-  .box { background: #fff; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 20px; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-  .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-  .succ { background: #dcfce7; color: #15803d; }
-  .warn { background: #fef3c7; color: #b45309; }
-  .neut { background: #f1f5f9; color: #475569; }
-  .dang { background: #fee2e2; color: #b91c1c; }
-  .list { background: #0f172a; color: #cbd5e1; padding: 15px; border-radius: 6px; }
-  .info { background: #f0fdf4; color: #166534; padding: 15px; border-radius: 6px; }
-</style>
-</head>
-<body>
-<div class="box">
-  <h2>Patching Dashboard</h2>
-  <p>Run Time: ${TIME}</p>
-  <table>
-    <tr><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>
-    <tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td><span class="badge ${C_U}">${UP}</span></td><td><span class="badge ${C_R}">${RB}</span></td><td><span class="badge ${C_S}">${ST}</span></td></tr>
-  </table>
-</div>
-<div class="box">
-  <h3>Package Output</h3>
-  ${PB}
-</div>
-</body>
-</html>
-EOF
                     echo "HTML generated successfully."
                 '''
             }
