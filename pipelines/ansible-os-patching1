@@ -89,18 +89,28 @@ if not os.path.exists(log_path):
 with open(log_path, 'r') as f:
     content = f.read()
 
-# Use explicit boundary tags to target active records cleanly
-host_blocks = re.findall(r'HOST_RECORD:(.*?)(?=HOST_RECORD_END)', content, re.DOTALL)
+# Capture host record tracking payloads precisely between structural boundaries
+host_blocks = re.findall(r'HOST_RECORD:(.*?)(?=HOST_RECORD_END|$)', content, re.DOTALL)
 
 table_rows = ""
 package_details = ""
 
 for block in host_blocks:
+    if not block.strip():
+        continue
+        
     lines = block.strip().splitlines()
     data = {}
     pkgs = []
     in_pkgs = False
     
+    # Extract the host name value directly from the raw header split boundary
+    first_line = lines[0].strip() if lines else ""
+    if ':' in first_line:
+        host_candidate = first_line.split(':', 1)[1].strip()
+    else:
+        host_candidate = first_line.strip()
+        
     for line in lines:
         cleaned_line = line.strip()
         if not cleaned_line:
@@ -119,14 +129,7 @@ for block in host_blocks:
             k, v = cleaned_line.split(':', 1)
             data[k.strip()] = v.strip()
             
-    # Safely look up targeted metadata keys out of raw parsed records
-    host = data.get('HOST_RECORD')
-    if not host and lines:
-        first_line = lines[0].strip()
-        if ':' in first_line:
-            host = first_line.split(':', 1)[1].strip()
-            
-    host = host or 'Unknown'
+    host = data.get('HOST_RECORD') or host_candidate or 'Unknown'
     os_ver = data.get('OS', 'Unknown')
     old_k = data.get('OLD_KERNEL', 'Unknown')
     new_k = data.get('NEW_KERNEL', 'Unknown')
@@ -134,7 +137,7 @@ for block in host_blocks:
     reboot = data.get('REBOOT', 'No')
     status = data.get('STATUS', 'UNKNOWN')
     
-    # Configure semantic dashboard styling markers
+    # Configure dynamic state dashboard labels
     badge_upd = f'<span class="badge badge-{"success" if updated == "Yes" else "neutral"}">{updated}</span>'
     badge_reboot = f'<span class="badge badge-{"warning" if reboot == "Yes" else "neutral"}">{reboot}</span>'
     badge_status = f'<span class="badge badge-{"success" if status == "SUCCESS" else "danger"}">{status}</span>'
@@ -215,7 +218,7 @@ print("HTML layout generated completely.")
     post {
         always {
             echo "========== ARCHIVING AVAILABLE METRICS =========="
-            // Using standard Groovy comment notation to prevent compilation failures
+            // Using standard Groovy comment blocks to maintain declarative rule checks
             archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
         }
     }
