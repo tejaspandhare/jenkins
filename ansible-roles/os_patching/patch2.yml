@@ -208,5 +208,5 @@
       delegate_to: localhost
       changed_when: false
       ansible.builtin.template:
-        src: "{{ playbook_dir }}/templates/patch_report.html.j2"
+        src: "{{ playbook_dir }}/../../templates/patch_report.html.j2"
         dest: "/tmp/patch_report.html"
