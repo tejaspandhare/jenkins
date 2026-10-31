@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Enterprise Linux Patching Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #f8fafc; line-height: 1.5; }
+        .container { max-width: 1200px; margin: auto; }
+        .header { background: #ffffff; padding: 24px 32px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: #0f172a; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+        .meta { color: #64748b; font-size: 13px; font-weight: 500; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; }
+        .card { background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; }
+        .card-header { background: #f8fafc; padding: 16px 24px; font-weight: 600; color: #334155; border-bottom: 1px solid #e2e8f0; font-size: 15px; }
+        .card-body { padding: 24px; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th { background-color: #f8fafc; color: #64748b; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+        td { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        .host-name { font-weight: 600; color: #0f172a; font-size: 15px; }
+        .badge { display: inline-flex; align-items: center; padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 6px; }
+        .badge-success { background-color: #dcfce7; color: #15803d; }
+        .badge-warning { background-color: #fef3c7; color: #b45309; }
+        .badge-neutral { background-color: #f1f5f9; color: #475569; }
+        .badge-danger { background-color: #fee2e2; color: #b91c1c; }
+        .kernel-container { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+        .kernel-stable { color: #0f172a; font-weight: 500; }
+        .kernel-old { color: #64748b; text-decoration: line-through; }
+        .kernel-new { color: #2563eb; font-weight: 600; }
+        .no-packages { background: #f0fdf4; border: 1px dashed #bbf7d0; color: #166534; padding: 16px; border-radius: 8px; font-weight: 500; font-size: 14px; }
+        .package-list { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; background: #0f172a; color: #cbd5e1; padding: 18px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; margin: 0; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Enterprise Linux Patching Dashboard</h1>
+            <div class="meta">Generated: {{ lookup('pipe', 'date -u +"%Y-%m-%d %H:%M:%S UTC"') }}</div>
+        </div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Host Name</th>
+                        <th>Distribution</th>
+                        <th>Kernel Delta State</th>
+                        <th>Packages Applied</th>
+                        <th>Reboot Pending</th>
+                        <th>Run State</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for host in groups['patching_execution_group'] | default([]) %}
+                    {% set host_updated = 'Yes' if ((hostvars[host]['live_updates_debian']['stdout_lines'] | default([]) | length > 0) or (hostvars[host]['live_updates_redhat']['stdout_lines'] | default([]) | length > 0)) else 'No' %}
+                    <tr>
+                        <td><span class="host-name">{{ host }}</span></td>
+                        <td>{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}</td>
+                        <td>
+                            <div class="kernel-container">
+                                {% if hostvars[host]['baseline_kernel'] != hostvars[host]['ansible_kernel'] %}
+                                <span class="kernel-old">{{ hostvars[host]['baseline_kernel'] }}</span> &rarr; <span class="kernel-new">{{ hostvars[host]['ansible_kernel'] }}</span>
+                                {% else %}
+                                <span class="kernel-stable">{{ hostvars[host]['baseline_kernel'] }}</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td><span class="badge badge-{{ 'success' if host_updated == 'Yes' else 'neutral' }}">{{ host_updated }}</span></td>
+                        <td><span class="badge badge-{{ 'warning' if hostvars[host]['needs_reboot'] | default(false) else 'neutral' }}">{{ 'Yes' if hostvars[host]['needs_reboot'] | default(false) else 'No' }}</span></td>
+                        <td><span class="badge badge-success">SUCCESS</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% for host in groups['patching_execution_group'] | default([]) %}
+        <div class="card" style="margin-top: 25px;">
+            <div class="card-header">{{ host }} - Package Execution Output</div>
+            <div class="card-body">
+                {% if hostvars[host]['live_updates_debian']['stdout_lines'] is defined and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
+                <pre class="package-list">
+{% for line in hostvars[host]['live_updates_debian']['stdout_lines'] %}
+{{ line }}
+{% endfor %}
+                </pre>
+                {% elif hostvars[host]['live_updates_redhat']['stdout_lines'] is defined and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
+                <pre class="package-list">
+{% for line in hostvars[host]['live_updates_redhat']['stdout_lines'] %}
+{{ line }}
+{% endfor %}
+                </pre>
+                {% else %}
+                <div class="no-packages">✨ System is up to date, no packages available to update</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
