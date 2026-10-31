@@ -1,9 +1,6 @@
 pipeline {
     agent any
-    options {
-        timestamps()
-        ansiColor('xterm')
-    }
+    options { timestamps(); ansiColor('xterm') }
     parameters {
         string(name: 'SERVER_NAME', defaultValue: '')
         string(name: 'EXCLUDE_PKGS', defaultValue: '')
@@ -21,14 +18,10 @@ pipeline {
                         sh '''#!/bin/bash
                             set -euo pipefail
                             mkdir -p /tmp/ansible_cp
-                            
-                            ansible-playbook \
-                                -i inventory/hosts \
-                                ansible-roles/os_patching/patch2.yml \
+                            ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch2.yml \
                                 --private-key="${ANSIBLE_KEY_FILE}" \
                                 -e "target_hosts='${TSERVERS}'" \
-                                -e "EXCLUDE_PKGS='${EXPKGS:-}'" \
-                                2>&1 | grep -v "localhost" || true
+                                -e "EXCLUDE_PKGS='${EXPKGS:-}'" 2>&1 | grep -v "localhost" || true
                         '''
                     }
                 }
@@ -40,44 +33,29 @@ pipeline {
                     set -euo pipefail
                     L="/tmp/raw_patch_log.tmp"
                     O="./patch_report.html"
-                    
-                    if [ ! -f "$L" ]; then
-                        echo "Log missing"; exit 0
-                    fi
-                    
+                    [ ! -f "$L" ] && { echo "Log missing"; exit 0; }
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-                    H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    OS=$(grep "OS:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    OK=$(grep "OLD_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    NK=$(grep "NEW_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    UP=$(grep "UPDATED:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs)
-                    
-                    if [ "$OK" != "$NK" ]; then KD="$OK -> $NK"; else KD="$OK"; fi
-                    PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | xargs)
-                    if [ -z "$PL" ]; then PL="System up to date. No updates applied."; fi
-                    
-                    # Print HTML wrapper line-by-line to prevent display box overflow errors
-                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
-                    echo "<h2>Enterprise Patching Dashboard</h2>" >> "$O"
-                    echo "<p><b>Run Time:</b> ${TIME}</p>" >> "$O"
-                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border:1px solid #e2e8f0'>" >> "$O"
-                    echo "<tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
+                    H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
+                    OS=$(grep "OS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
+                    OK=$(grep "OLD_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "N/A")
+                    NK=$(grep "NEW_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "N/A")
+                    UP=$(grep "UPDATED:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
+                    RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
+                    ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "SUCCESS")
+                    [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
+                    PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | xargs || echo "")
+                    [ -z "${PL}" ] && PL="System is up to date. No updates applied."
+                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc'>" > "$O"
+                    echo "<h2>Enterprise Patching Dashboard</h2><p>Run Time: ${TIME}</p>" >> "$O"
+                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff'>" >> "$O"
+                    echo "<tr style='background:#f8fafc'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
-                    echo "</table>" >> "$O"
-                    echo "<h3>Package Execution Logs</h3>" >> "$O"
-                    echo "<pre style='background:#0f172a;color:#cbd5e1;padding:15px;border-radius:6px;white-space:pre-wrap'>${PL}</pre>" >> "$O"
+                    echo "</table><h3>Package Output</h3>" >> "$O"
+                    echo "<pre style='background:#0f172a;color:#cbd5e1;padding:15px;white-space:pre-wrap'>${PL}</pre>" >> "$O"
                     echo "</body></html>" >> "$O"
-                    
-                    echo "HTML generated successfully."
                 '''
             }
         }
     }
-    post {
-        always {
-            archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
-        }
-    }
+    post { always { archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true } }
 }
