@@ -7,8 +7,8 @@ pipeline {
     }
 
     parameters {
-        string(name: 'SERVER_NAME', defaultValue: '', description: 'Enter target server targets')
-        string(name: 'EXCLUDE_PKGS', defaultValue: '', description: 'Exclusions list')
+        string(name: 'SERVER_NAME', defaultValue: '', description: 'Enter servers (semicolon separated): server1;server2')
+        string(name: 'EXCLUDE_PKGS', defaultValue: '', description: 'Packages to exclude (semicolon separated): kernel*;docker*')
     }
 
     environment {
@@ -23,38 +23,181 @@ pipeline {
     }
 
     stages {
-        stage('Validate & Execute Patch') {
+        stage('Validate Input') {
             steps {
                 script {
-                    if (!params.SERVER_NAME?.trim()) { error("SERVER_NAME cannot be empty.") }
-                    
-                    withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
-                        withEnv(["TARGET_SERVERS=${params.SERVER_NAME}", "EXCLUDED_PACKAGES=${params.EXCLUDE_PKGS}"]) {
-                            sh '''#!/bin/bash
-                                set -euo pipefail
-                                mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
-
-                                ansible-playbook \
-                                    -i inventory/hosts \
-                                    ansible-roles/os_patching/patch2.yml \
-                                  --private-key="${ANSIBLE_KEY_FILE}" \
-                                    -e "target_hosts='${TARGET_SERVERS}'" \
-                                    -e "EXCLUDE_PKGS='${EXCLUDED_PACKAGES:-}'" 2>&1 | grep -v "localhost" || true
-
-                                # Safely pull the generated dashboard asset from the /tmp storage mount
-                                if [ -f /tmp/patch_report.html ]; then
-                                    cp /tmp/patch_report.html ./patch_report.html
-                                fi
-                            '''
-                        }
+                    if (!params.SERVER_NAME?.trim()) {
+                        error("SERVER_NAME parameter cannot be empty.")
                     }
                 }
+            }
+        }
+
+        stage('Run Ansible Patching') {
+            steps {
+                withCredentials([file(credentialsId: 'automation-key', variable: 'ANSIBLE_KEY_FILE')]) {
+                    withEnv([
+                        "TARGET_SERVERS=${params.SERVER_NAME}",
+                        "EXCLUDED_PACKAGES=${params.EXCLUDE_PKGS}"
+                    ]) {
+                        sh '''#!/bin/bash
+                            set -euo pipefail
+                            
+                            mkdir -p /tmp/ansible_cp /tmp/ansible_tmp/run
+
+                            echo "========== RUNNING ENTERPRISE PATCHING ENGINE =========="
+                            
+                            ansible-playbook \
+                                -i inventory/hosts \
+                                ansible-roles/os_patching/patch2.yml \
+                                --private-key="${ANSIBLE_KEY_FILE}" \
+                                -e "target_hosts='${TARGET_SERVERS}'" \
+                                -e "EXCLUDE_PKGS='${EXCLUDED_PACKAGES:-}'" 2>&1 | grep -v "localhost" || true
+
+                            echo ""
+                            echo "========================================================"
+                            echo "            ISOLATED TELEMETRY METRIC STREAM            "
+                            echo "========================================================"
+                            if [ -f /tmp/raw_patch_log.tmp ]; then
+                                cp /tmp/raw_patch_log.tmp ./raw_patch_log.tmp || true
+                                cat /tmp/raw_patch_log.tmp
+                            else
+                                echo "ERROR: Telemetry log file was not found in /tmp."
+                                exit 1
+                            fi
+                            echo "========================================================"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Generate HTML Report') {
+            steps {
+                sh '''#!/bin/bash
+                    set -euo pipefail
+                    
+                    LOG_FILE="/tmp/raw_patch_log.tmp"
+                    OUT_FILE="./patch_report.html"
+                    
+                    if [ ! -f "$LOG_FILE" ]; then
+                        echo "Telemetry log missing."
+                        exit 0
+                    fi
+
+                    TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+                    # Extract values safely using grep and awk
+                    HOST=$(grep "HOST_RECORD:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    OS=$(grep "OS:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    OLD_K=$(grep "OLD_KERNEL:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    NEW_K=$(grep "NEW_KERNEL:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    UPDATED=$(grep "UPDATED:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    REBOOT=$(grep "REBOOT:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+                    STATUS=$(grep "STATUS:" "$LOG_FILE" | head -n 1 | cut -d':' -f2)
+
+                    # Dynamic color styles based on variables values
+                    [ "$UPDATED" = "Yes" ] && BG_UPD="success" || BG_UPD="neutral"
+                    [ "$REBOOT" = "Yes" ] && BG_REB="warning" || BG_REB="neutral"
+                    [ "$STATUS" = "SUCCESS" ] && BG_STA="success" || BG_STA="danger"
+
+                    if [ "$OLD_K" != "$NEW_K" ]; then
+                        KERNEL_DISP="<span class='kernel-old'>$OLD_K</span> &rarr; <span class='kernel-new'>$NEW_K</span>"
+                    else
+                        KERNEL_DISP="<span class='kernel-stable'>$OLD_K</span>"
+                    fi
+
+                    # Capture packages array between tags
+                    PKG_LIST=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$LOG_FILE" | grep -v "PATCHED_PACKAGES_")
+
+                    if [ -z "$PKG_LIST" ]; then
+                        PKG_BOX="<div class='no-packages'>✨ System is up to date, no packages available to update</div>"
+                    else
+                        PKG_BOX="<pre class='package-list'>$PKG_LIST</pre>"
+                    fi
+
+                    # Construct clean HTML file
+                    cat <<EOF > "$OUT_FILE"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Enterprise Linux Patching Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 40px; background-color: #f8fafc; line-height: 1.5; }
+        .container { max-width: 1200px; margin: auto; }
+        .header { background: #ffffff; padding: 24px 32px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: #0f172a; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+        .meta { color: #64748b; font-size: 13px; font-weight: 500; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; }
+        .card { background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden; }
+        .card-header { background: #f8fafc; padding: 16px 24px; font-weight: 600; color: #334155; border-bottom: 1px solid #e2e8f0; font-size: 15px; }
+        .card-body { padding: 24px; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th { background-color: #f8fafc; color: #64748b; font-weight: 600; padding: 14px 20px; border-bottom: 2px solid #e2e8f0; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+        td { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; color: #334155; vertical-align: middle; }
+        .host-name { font-weight: 600; color: #0f172a; font-size: 15px; }
+        .badge { display: inline-flex; align-items: center; padding: 4px 10px; font-size: 12px; font-weight: 600; border-radius: 6px; }
+        .badge-success { background-color: #dcfce7; color: #15803d; }
+        .badge-warning { background-color: #fef3c7; color: #b45309; }
+        .badge-neutral { background-color: #f1f5f9; color: #475569; }
+        .badge-danger { background-color: #fee2e2; color: #b91c1c; }
+        .kernel-container { font-family: ui-monospace, monospace; font-size: 13px; }
+        .kernel-stable { color: #0f172a; font-weight: 500; }
+        .kernel-old { color: #64748b; text-decoration: line-through; }
+        .kernel-new { color: #2563eb; font-weight: 600; }
+        .no-packages { background: #f0fdf4; border: 1px dashed #bbf7d0; color: #166534; padding: 16px; border-radius: 8px; font-weight: 500; font-size: 14px; }
+        .package-list { font-family: ui-monospace, monospace; font-size: 13px; background: #0f172a; color: #cbd5e1; padding: 18px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; margin: 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Enterprise Linux Patching Dashboard</h1>
+            <div class="meta">Generated: ${TIMESTAMP}</div>
+        </div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Host Name</th>
+                        <th>Distribution</th>
+                        <th>Kernel Delta State</th>
+                        <th>Packages Applied</th>
+                        <th>Reboot Pending</th>
+                        <th>Run State</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="host-name">${HOST}</span></td>
+                        <td>${OS}</td>
+                        <td><div class="kernel-container">${KERNEL_DISP}</div></td>
+                        <td><span class="badge badge-${BG_UPD}">${UPDATED}</span></td>
+                        <td><span class="badge badge-${BG_REB}">${REBOOT}</span></td>
+                        <td><span class="badge badge-${BG_STA}">${STATUS}</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card" style="margin-top: 25px;">
+            <div class="card-header">${HOST} - Package Execution Output</div>
+            <div class="card-body">
+                ${PKG_BOX}
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+                    echo "HTML dashboard generated successfully."
+                '''
             }
         }
     }
     
     post {
         always {
+            echo "========== ARCHIVING AVAILABLE METRICS =========="
             archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
         }
     }
