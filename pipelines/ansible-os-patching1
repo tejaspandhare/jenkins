@@ -89,7 +89,7 @@ if not os.path.exists(log_path):
 with open(log_path, 'r') as f:
     content = f.read()
 
-# Use strict boundary limits to parse host metadata records
+# Use explicit boundary tags to target active records cleanly
 host_blocks = re.findall(r'HOST_RECORD:(.*?)(?=HOST_RECORD_END)', content, re.DOTALL)
 
 table_rows = ""
@@ -119,8 +119,14 @@ for block in host_blocks:
             k, v = cleaned_line.split(':', 1)
             data[k.strip()] = v.strip()
             
-    # Explicitly check for host fields inside the block first, fallback to structural extraction
-    host = data.get('HOST_RECORD') or (lines[0].split(':', 1)[1].strip() if lines and ':' in lines[0] else 'Unknown')
+    # Safely look up targeted metadata keys out of raw parsed records
+    host = data.get('HOST_RECORD')
+    if not host and lines:
+        first_line = lines[0].strip()
+        if ':' in first_line:
+            host = first_line.split(':', 1)[1].strip()
+            
+    host = host or 'Unknown'
     os_ver = data.get('OS', 'Unknown')
     old_k = data.get('OLD_KERNEL', 'Unknown')
     new_k = data.get('NEW_KERNEL', 'Unknown')
@@ -128,7 +134,7 @@ for block in host_blocks:
     reboot = data.get('REBOOT', 'No')
     status = data.get('STATUS', 'UNKNOWN')
     
-    # Configure dynamic state dashboard labels
+    # Configure semantic dashboard styling markers
     badge_upd = f'<span class="badge badge-{"success" if updated == "Yes" else "neutral"}">{updated}</span>'
     badge_reboot = f'<span class="badge badge-{"warning" if reboot == "Yes" else "neutral"}">{reboot}</span>'
     badge_status = f'<span class="badge badge-{"success" if status == "SUCCESS" else "danger"}">{status}</span>'
@@ -209,7 +215,7 @@ print("HTML layout generated completely.")
     post {
         always {
             echo "========== ARCHIVING AVAILABLE METRICS =========="
-            # Removed raw_patch_log.tmp to archive only the final HTML dashboard
+            // Using standard Groovy comment notation to prevent compilation failures
             archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
         }
     }
