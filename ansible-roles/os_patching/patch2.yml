@@ -201,40 +201,12 @@
         mode: '0600'
 
     # ----------------------------------------------------------
-    # CONSOLIDATED TELEMETRY GENERATION ENGINE (SILENT WRITE)
+    # NATIVE JINJA2 DASHBOARD RENDERING ENGINE (SILENT GENERATION)
     # ----------------------------------------------------------
-    - name: Generate Telemetry Report File Silently
+    - name: Compile and Render Elegant HTML Patch Dashboard Natively
       run_once: true
       delegate_to: localhost
       changed_when: false
-      ansible.builtin.copy:
-        dest: "/tmp/raw_patch_log.tmp"
-        content: |
-          REPORT_DATA_START
-          {% for host in groups['patching_execution_group'] | default([]) %}
-          HOST_RECORD:{{ host }}
-          OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
-          OLD_KERNEL:{{ hostvars[host]['baseline_kernel'] | default('Unknown') }}
-          NEW_KERNEL:{{ hostvars[host]['ansible_kernel'] | default('Unknown') }}
-          UPDATED:{{ 'Yes' if (
-            (hostvars[host]['apt_upgrade_result'] is defined and hostvars[host]['apt_upgrade_result'] is changed) or 
-            (hostvars[host]['fallback_upgrade_result'] is defined and hostvars[host]['fallback_upgrade_result'] is changed) or 
-            (hostvars[host]['dnf_upgrade_result'] is defined and hostvars[host]['dnf_upgrade_result'] is changed) or
-            (hostvars[host]['live_updates_debian']['stdout_lines'] | default([]) | length > 0)
-          ) else 'No' }}
-          REBOOT:{{ 'Yes' if hostvars[host]['needs_reboot'] | default(false) else 'No' }}
-          STATUS:SUCCESS
-          PATCHED_PACKAGES_START
-          {% if hostvars[host]['live_updates_debian']['stdout_lines'] is defined and hostvars[host]['live_updates_debian']['stdout_lines'] | length > 0 %}
-          {% for line in hostvars[host]['live_updates_debian']['stdout_lines'] %}
-          {{ line }}
-          {% endfor %}
-          {% elif hostvars[host]['live_updates_redhat']['stdout_lines'] is defined and hostvars[host]['live_updates_redhat']['stdout_lines'] | length > 0 %}
-          {% for line in hostvars[host]['live_updates_redhat']['stdout_lines'] %}
-          {{ line }}
-          {% endfor %}
-          {% endif %}
-          PATCHED_PACKAGES_END
-          HOST_RECORD_END
-          {% endfor %}
-          REPORT_DATA_END
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/templates/patch_report.html.j2"
+        dest: "/tmp/patch_report.html"
