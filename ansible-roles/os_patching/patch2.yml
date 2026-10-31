@@ -29,7 +29,7 @@
 
   tasks:
     # ----------------------------------------------------------
-    # CRITICAL BASELINE SNAPSHOT - CAPTURE INITAL BOOT DATA
+    # CRITICAL BASELINE SNAPSHOT - MUST RUN FIRST
     # ----------------------------------------------------------
     - name: Record True Baseline Kernel Version
       ansible.builtin.set_fact:
@@ -132,7 +132,7 @@
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (status|trigproc|install|upgrade) " {} + | awk '{print $4, $5, $6}' || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (unpacked|installed) " {} + | awk '{print $4, $5, $6}' | sort -u || true
       register: live_updates_debian
       changed_when: false
 
@@ -140,7 +140,7 @@
       when: ansible_os_family == "RedHat"
       become: true
       ansible.builtin.shell: |
-        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $1, "Installed", $2}' || true
+        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print $2, $3, $4}' || true
       register: live_updates_redhat
       changed_when: false
 
