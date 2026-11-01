@@ -68,12 +68,24 @@ pipeline {
                             [ -z "$line" ] && continue
                             [[ "$line" == *":"* && "$line" == *"/"* ]] && continue
                             
-                            # Cleaned up assignment scopes to accurately target the package name and version strings
-                            P_NAME=$(echo "$line" | awk '{print $1}')
-                            P_VER=$(echo "$line" | awk '{print $2}')
+                            # Clean up potential "installed" or "upgraded" prefix artifacts from the log stream dynamically
+                            RAW_1=$(echo "$line" | awk '{print $1}')
+                            RAW_2=$(echo "$line" | awk '{print $2}')
+                            RAW_3=$(echo "$line" | awk '{print $3}')
                             
-                            if [ -n "$P_NAME" ]; then
-                                echo "<tr><td><b style='color:#166534'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER}</td></tr>" >> "$O"
+                            if [ "$RAW_1" = "installed" ] || [ "$RAW_1" = "upgraded" ] || [ "$RAW_1" = "unpacked" ]; then
+                                P_NAME="$RAW_2"
+                                P_VER="$RAW_3"
+                            elif [ "$RAW_2" = "installed" ] || [ "$RAW_2" = "upgraded" ] || [ "$RAW_2" = "unpacked" ]; then
+                                P_NAME="$RAW_1"
+                                P_VER="$RAW_3"
+                            else
+                                P_NAME="$RAW_1"
+                                P_VER="$RAW_2"
+                            fi
+                            
+                            if [ -n "$P_NAME" ] && [ "$P_NAME" != "installed" ] && [ "$P_NAME" != "unpacked" ]; then
+                                echo "<tr><td><b style='color:#15803d'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER:-N/A}</td></tr>" >> "$O"
                             fi
                         done
                         echo "</table>" >> "$O"
