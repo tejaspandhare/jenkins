@@ -131,9 +131,9 @@
     - name: Parse packages updated strictly during this execution window (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
-      # Changed $4 and $6 to explicitly target package name and version without status action words
+      # Fixed fields tracker map from $4, $6 to $5, $6 to properly capture package name + version
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (status) " {} + | grep -E " (installed) " | awk '{print $4, $6}' | sort -u || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " status installed " {} + | awk '{print $5, $6}' | sort -u || true
       register: live_updates_debian
       changed_when: false
 
@@ -141,7 +141,7 @@
       when: ansible_os_family == "RedHat"
       become: true
       ansible.builtin.shell: |
-        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Upgrade)' | awk '{print $2, $4}' || true
+        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Upgrade|Install)' | awk '{print $2, $4}' || true
       register: live_updates_redhat
       changed_when: false
 
