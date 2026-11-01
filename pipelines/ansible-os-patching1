@@ -36,11 +36,7 @@ pipeline {
                 sh '''#!/bin/bash
                     L="/tmp/raw_patch_log.tmp"
                     O="./patch_report.html"
-                    
-                    if [ ! -f "$L" ]; then
-                        echo "Telemetry log missing."
-                        exit 0
-                    fi
+                    if [ ! -f "$L" ]; then echo "Telemetry log missing."; exit 0; fi
                     
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
                     H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
@@ -50,7 +46,6 @@ pipeline {
                     UP=$(grep "UPDATED:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
                     RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
                     ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "SUCCESS")
-                    
                     [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
 
                     echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
@@ -61,8 +56,6 @@ pipeline {
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
                     PL=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" || true)
-
-                    # Removed backslash entirely to prevent Groovy compilation syntax failures
                     CLEAN_PL=$(echo "${PL}" | grep -v "TASK " | grep -v "PLAY RECAP" | grep -v "ok:" || true)
 
                     if [ -z "$(echo "${CLEAN_PL}" | xargs)" ]; then
@@ -75,12 +68,12 @@ pipeline {
                             [ -z "$line" ] && continue
                             [[ "$line" == *":"* && "$line" == *"/"* ]] && continue
                             
-                            ACTION=$(echo "$line" | awk '{print $1}')
-                            P_NAME=$(echo "$line" | awk '{print $2}')
-                            P_VER=$(echo "$line" | awk '{print $3}')
+                            # Cleaned up assignment scopes to accurately target the package name and version strings
+                            P_NAME=$(echo "$line" | awk '{print $1}')
+                            P_VER=$(echo "$line" | awk '{print $2}')
                             
                             if [ -n "$P_NAME" ]; then
-                                echo "<tr><td><b style='color:#166534'>${ACTION}</b></td><td><b>${P_NAME}</b></td><td>${P_VER}</td></tr>" >> "$O"
+                                echo "<tr><td><b style='color:#166534'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER}</td></tr>" >> "$O"
                             fi
                         done
                         echo "</table>" >> "$O"
