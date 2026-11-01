@@ -105,7 +105,7 @@
       become: true
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsusr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
+        apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsi-usr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
       register: fallback_upgrade_result
       ignore_errors: true
       no_log: true
@@ -131,8 +131,9 @@
     - name: Parse packages updated strictly during this execution window (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
+      # Changed $4 and $6 to explicitly target package name and version without status action words
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (status|trigproc|install|upgrade) " {} + | grep -E " (unpacked|installed) " | awk '{print "upgraded", $4, $6}' | sort -u || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " (status) " {} + | grep -E " (installed) " | awk '{print $4, $6}' | sort -u || true
       register: live_updates_debian
       changed_when: false
 
@@ -140,7 +141,7 @@
       when: ansible_os_family == "RedHat"
       become: true
       ansible.builtin.shell: |
-        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Alter|Install|Upgrade)' | awk '{print "upgraded", $2, $4}' || true
+        dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Upgrade)' | awk '{print $2, $4}' || true
       register: live_updates_redhat
       changed_when: false
 
