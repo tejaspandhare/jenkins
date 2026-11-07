@@ -43,7 +43,8 @@
   block:
     - name: Inventory installed linux kernel elements safely
       ansible.builtin.shell: |
-        dpkg --get-selections | grep -E '^linux-(image|modules)-[0-9]' | awk '{print $1}' || true
+        set -o pipefail
+        dpkg --get-selections | grep -E '^linux-(image|headers|modules|tools|modules-extra)-[0-9]' | awk '{print $1}' | sort -r || true
       register: installed_kernel_packages
       changed_when: false
 
@@ -52,7 +53,7 @@
         kernels_to_purge: >-
           {%- set purge_list = [] -%}
           {%- for pkg in installed_kernel_packages.stdout_lines | default([]) -%}
-            {%- if ansible_kernel not in pkg -%}
+            {%- if ansible_kernel not in pkg and "6.8.0-149" not in pkg -%}
               {%- set _ = purge_list.append(pkg) -%}
             {%- endif -%}
           {%- endfor -%}
@@ -91,7 +92,6 @@
       become: true
       when: first_repair_attempt.rc is defined and first_repair_attempt.rc != 0
       block:
-        # This matches old kernels like 6.8.0-138 or 6.8.0-139 that are NOT running
         - name: Erase conflicting static files directly from /boot mount space
           ansible.builtin.shell: |
             find /boot -name "*6.8.0-13*" -delete || true
