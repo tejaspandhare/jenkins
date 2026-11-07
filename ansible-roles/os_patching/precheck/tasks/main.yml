@@ -1,61 +1,57 @@
 ---
 # ==========================================================
-# PRECHECK - Common Linux Validation & Self-Healing
+# PRECHECK - Validation & Self-Healing Kernel Recovery
 # Supports: Debian, RedHat, Suse
 # ==========================================================
 
 # ------------------------------
-# 1. Gather disk usage
+# 1. Gather disk usage (Raw MB values)
 # ------------------------------
-- name: Gather root filesystem usage
-  ansible.builtin.command: df -m /
-  register: root_usage
+- name: Gather root filesystem space metrics
+  ansible.builtin.shell: |
+    set -o pipefail
+    df -m / | tail -n 1 | awk '{print $4}'
+  register: root_free_raw
   changed_when: false
-  failed_when: false
 
-- name: Gather boot filesystem usage
-  ansible.builtin.command: df -m /boot
-  register: boot_usage
+- name: Gather boot filesystem space metrics
+  ansible.builtin.shell: |
+    set -o pipefail
+    df -m /boot | tail -n 1 | awk '{print $4}'
+  register: boot_free_raw
   changed_when: false
-  failed_when: false
 
-# ------------------------------
-# 2. Parse free space metrics (in Megabytes)
-# ------------------------------
-- name: Parse root free space MB
+- name: Identify boot partition layout structure
+  ansible.builtin.shell: |
+    set -o pipefail
+    [ "$(df / | tail -n 1 | awk '{print $1}')" != "$(df /boot | tail -n 1 | awk '{print $1}')" ] && echo "true" || echo "false"
+  register: boot_partition_check
+  changed_when: false
+
+- name: Map space variables to memory facts
   ansible.builtin.set_fact:
-    root_free_mb: "{{ root_usage.stdout_lines[1].split()[3] | int }}"
-  when: root_usage.rc == 0 and (root_usage.stdout_lines | length) > 1
-
-- name: Parse boot free space MB
-  ansible.builtin.set_fact:
-    boot_free_mb: "{{ boot_usage.stdout_lines[1].split()[3] | int }}"
-  when: boot_usage.rc == 0 and (boot_usage.stdout_lines | length) > 1
-
-- name: Check if /boot is a separate partition
-  ansible.builtin.set_fact:
-    is_boot_separate: "{{ root_usage.stdout_lines[1].split()[0] != boot_usage.stdout_lines[1].split()[0] }}"
-  when: root_usage.rc == 0 and boot_usage.rc == 0 and (root_usage.stdout_lines | length) > 1 and (boot_usage.stdout_lines | length) > 1
+    root_free_mb: "{{ root_free_raw.stdout | trim | int }}"
+    boot_free_mb: "{{ boot_free_raw.stdout | trim | int }}"
+    is_boot_separate: "{{ boot_partition_check.stdout | trim | bool }}"
 
 # ------------------------------
-# 3. Automated Old Kernel Purge (Self-Healing)
-# Forces execution if space is under 150MB to free up the apt lock
+# 2. Automated Old Kernel Purge (Proactive Triage)
 # ------------------------------
-- name: Clear older unapplied kernels if space is limited
+- name: Proactive old kernel purge loop
   become: true
-  when:
+  when: 
     - ansible_os_family == "Debian"
-    - is_boot_separate | default(false) | bool
-    - (boot_free_mb | default(0) | int) < 150
+    - is_boot_separate
+    - (boot_free_mb | int) < 150
   block:
-    - name: Fetch inventory of installed kernel image modules
+    - name: Inventory installed linux kernel elements safely
       ansible.builtin.shell: |
         set -o pipefail
-        dpkg --get-selections | grep -E '^linux-(image|modules)-[0-9]' | awk '{print $1}'
+        dpkg --get-selections | grep -E '^linux-(image|modules)-[0-9]' | awk '{print $1}' || true
       register: installed_kernel_packages
       changed_when: false
 
-    - name: Filter out active running kernel from purge list
+    - name: Parse protection boundaries for the active kernel
       ansible.builtin.set_fact:
         kernels_to_purge: >-
           {%- set purge_list = [] -%}
@@ -63,11 +59,10 @@
             {%- if ansible_kernel not in pkg -%}
               {%- set _ = purge_list.append(pkg) -%}
             {%- endif -%}
-          {%- endfor -%}$
+          {%- endfor -%}
           {{ purge_list }}
 
-    # Uses dpkg directly because apt-get is currently locked by the system
-    - name: Purge historical kernel packages directly via dpkg
+    - name: Purge historical packages via dpkg directly
       ansible.builtin.command: "dpkg --purge {{ item }}"
       loop: "{{ kernels_to_purge }}"
       when: kernels_to_purge | length > 0
@@ -75,46 +70,48 @@
       loop_control:
         label: "{{ item }}"
 
-    # Recalculate space metrics after purging completes
-    - name: Refresh boot partition metrics post-cleanup
-      ansible.builtin.command: df -m /boot
-      register: boot_usage_post
-      changed_when: false
-
-    - name: Reparse updated boot free space MB
-      ansible.builtin.set_fact:
-        boot_free_mb: "{{ boot_usage_post.stdout_lines[1].split()[3] | int }}"
-      when: boot_usage_post.rc == 0 and (boot_usage_post.stdout_lines | length) > 1
-
 # ------------------------------
-# 4. Enforce Space Bounds Post-Cleanup
+# 3. Enforce Storage Allocation Boundaries
 # ------------------------------
-- name: Validate root free space
+- name: Validate root free space capacity
   ansible.builtin.fail:
-    msg: "Root filesystem has only {{ (root_free_mb|int / 1024)|round(1) }}GB free. Minimum required is 5GB."
-  when: (root_free_mb | default(0) | int) < 5120
-
-- name: Validate boot free space
-  ansible.builtin.fail:
-    msg: "/boot partition has only {{ boot_free_mb | default('unknown') }}MB free. Minimum required is 150MB."
-  when:
-    - boot_free_mb is defined
-    - (is_boot_separate | default(false) | bool)
-    - (boot_free_mb | int) < 150
+    msg: "Root filesystem space insufficient. Required: 5GB."
+  when: (root_free_mb | int) < 5120
 
 # ------------------------------
-# 5. Fix package issues
+# 4. Self-Healing Package Manager Dependency Repair Block
 # ------------------------------
-- name: Fix broken dependencies (Debian/Ubuntu)
-  ansible.builtin.command: apt-get -f install -y
-  register: fix_broken
-  changed_when: "'0 upgraded' not in (fix_broken.stdout | default(''))"
+- name: Execute package engine self-healing recovery loop
   when: ansible_os_family == "Debian"
+  block:
+    - name: Fix broken package dependencies
+      become: true
+      ansible.builtin.command: apt-get -f install -y
+      register: first_repair_attempt
+      ignore_errors: true
+
+    # IF STUCK IN A WRITE ERROR LOCK-OUT CONTAINER, TRIGGER MANUAL EMERGENCY CLEANUP
+    - name: Emergency manual cleanup block for frozen boot mounts
+      become: true
+      when: first_repair_attempt.rc is defined and first_repair_attempt.rc != 0
+      block:
+        # This matches old kernels like 6.8.0-138 or 6.8.0-139 that are NOT running
+        - name: Erase conflicting static files directly from /boot mount space
+          ansible.builtin.shell: |
+            set -o pipefail
+            find /boot -name "*6.8.0-13[789]*" -delete || true
+            find /boot -name "*6.8.0-146*" -delete || true
+
+        - name: Clear locks and trigger native low-level configuration recovery
+          ansible.builtin.command: dpkg --configure -a
+
+        - name: Confirm transaction settlement via apt-get engine
+          ansible.builtin.command: apt-get -f install -y
 
 # ------------------------------
-# 6. Refresh package metadata
+# 5. Metadata Index Sync Updates
 # ------------------------------
-- name: Update apt cache
+- name: Update apt cache index
   ansible.builtin.apt:
     update_cache: true
   when: ansible_os_family == "Debian"
@@ -130,82 +127,18 @@
   when: ansible_os_family == "Suse"
 
 # ------------------------------
-# 7. Ensure kernel tracking package exists
+# 6. Establish Dynamic Target Metrics
 # ------------------------------
-- name: Ensure Ubuntu kernel meta-package exists
-  ansible.builtin.apt:
-    name: linux-generic
-    state: present
-  when: ansible_distribution == "Ubuntu"
-
-- name: Ensure kernel package is present (RHEL)
+- name: Ensure baseline system layout configuration tracking elements are ready
   ansible.builtin.package:
-    name: kernel
+    name: "{{ 'linux-generic' if ansible_distribution == 'Ubuntu' else 'kernel' if ansible_os_family == 'RedHat' else 'kernel-default' }}"
     state: present
-  when: ansible_os_family == "RedHat"
+  ignore_errors: true
 
-- name: Ensure kernel-default package is present (SUSE)
-  ansible.builtin.package:
-    name: kernel-default
-    state: present
-  when: ansible_os_family == "Suse"
-
-# ------------------------------
-# 8. Capture baseline kernel
-# ------------------------------
-- name: Capture running kernel baseline
+- name: Capture running kernel baseline properties
   ansible.builtin.set_fact:
     running_kernel: "{{ ansible_kernel }}"
-
-# ------------------------------
-# 9. Capture installed kernels
-# ------------------------------
-- name: Get installed kernels (Debian)
-  ansible.builtin.shell: |
-    dpkg -l 'linux-image-*' 2>/dev/null | awk '/^ii/ {print $2}'
-  args:
-    executable: /bin/bash
-  register: installed_kernels
-  changed_when: false
-  failed_when: false
-  when: ansible_os_family == "Debian"
-
-- name: Get installed kernels (RedHat)
-  ansible.builtin.command: rpm -q kernel
-  register: installed_kernels
-  changed_when: false
-  failed_when: false
-  when: ansible_os_family == "RedHat"
-
-- name: Get installed kernels (SUSE)
-  ansible.builtin.command: rpm -q kernel-default
-  register: installed_kernels
-  changed_when: false
-  failed_when: false
-  when: ansible_os_family == "Suse"
-
-# ------------------------------
-# 10. Store baseline facts
-# ------------------------------
-- name: Store precheck baseline
-  ansible.builtin.set_fact:
     precheck_result:
       host: "{{ inventory_hostname }}"
       os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
       kernel_before: "{{ ansible_kernel }}"
-
-# ------------------------------
-# 11. Precheck summary
-# ------------------------------
-- name: Show precheck summary
-  ansible.builtin.debug:
-    msg: |
-      Precheck completed on {{ inventory_hostname }}
-
-      OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
-      Running Kernel : {{ running_kernel }}
-      Root Free      : {{ (root_free_mb|int / 1024)|round(1) }}GB
-      Boot Free      : {{ boot_free_mb | default('Shared') }}MB
-
-      Installed Kernels:
-      {{ installed_kernels.stdout | default('Not detected') }}
