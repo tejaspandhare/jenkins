@@ -43,7 +43,6 @@
   block:
     - name: Inventory installed linux kernel elements safely
       ansible.builtin.shell: |
-        set -o pipefail
         dpkg --get-selections | grep -E '^linux-(image|headers|modules|tools|modules-extra)-[0-9]' | awk '{print $1}' | sort -r || true
       register: installed_kernel_packages
       changed_when: false
