@@ -9,21 +9,18 @@
 # ------------------------------
 - name: Gather root filesystem space metrics
   ansible.builtin.shell: |
-    set -o pipefail
     df -m / | tail -n 1 | awk '{print $4}'
   register: root_free_raw
   changed_when: false
 
 - name: Gather boot filesystem space metrics
   ansible.builtin.shell: |
-    set -o pipefail
     df -m /boot | tail -n 1 | awk '{print $4}'
   register: boot_free_raw
   changed_when: false
 
 - name: Identify boot partition layout structure
   ansible.builtin.shell: |
-    set -o pipefail
     [ "$(df / | tail -n 1 | awk '{print $1}')" != "$(df /boot | tail -n 1 | awk '{print $1}')" ] && echo "true" || echo "false"
   register: boot_partition_check
   changed_when: false
@@ -46,7 +43,6 @@
   block:
     - name: Inventory installed linux kernel elements safely
       ansible.builtin.shell: |
-        set -o pipefail
         dpkg --get-selections | grep -E '^linux-(image|modules)-[0-9]' | awk '{print $1}' || true
       register: installed_kernel_packages
       changed_when: false
@@ -98,8 +94,7 @@
         # This matches old kernels like 6.8.0-138 or 6.8.0-139 that are NOT running
         - name: Erase conflicting static files directly from /boot mount space
           ansible.builtin.shell: |
-            set -o pipefail
-            find /boot -name "*6.8.0-13[789]*" -delete || true
+            find /boot -name "*6.8.0-13*" -delete || true
             find /boot -name "*6.8.0-146*" -delete || true
 
         - name: Clear locks and trigger native low-level configuration recovery
