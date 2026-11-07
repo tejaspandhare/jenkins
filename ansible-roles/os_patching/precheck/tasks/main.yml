@@ -4,18 +4,38 @@
 # Supports: Debian, RedHat, Suse
 # ==========================================================
 
-# ------------------------------
-# 1. Gather disk usage (Raw MB values)
-# ------------------------------
+# ----------------------------------------------------------
+# 1. Break Stuck Package Manager Frontend Locks
+# ----------------------------------------------------------
+- name: Force clear stuck apt/dpkg process locks defensively
+  when: ansible_os_family == "Debian"
+  become: true
+  block:
+    - name: Kill background apt/dpkg processes holding locks
+      ansible.builtin.shell: |
+        pidof apt apt-get dpkg | xargs kill -9 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove stale lock files to prevent system deadlocks
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/dpkg/lock
+        - /var/lib/dpkg/lock-frontend
+        - /var/lib/apt/lists/lock
+        - /var/cache/apt/archives/lock
+
+# ----------------------------------------------------------
+# 2. Gather Real-Time Disk Space Metrics Natively
+# ----------------------------------------------------------
 - name: Gather root filesystem space metrics
-  ansible.builtin.shell: |
-    df -m / | tail -n 1 | awk '{print $4}'
+  ansible.builtin.shell: df -m / | tail -n 1 | awk '{print $4}'
   register: root_free_raw
   changed_when: false
 
 - name: Gather boot filesystem space metrics
-  ansible.builtin.shell: |
-    df -m /boot | tail -n 1 | awk '{print $4}'
+  ansible.builtin.shell: df -m /boot | tail -n 1 | awk '{print $4}'
   register: boot_free_raw
   changed_when: false
 
@@ -31,79 +51,85 @@
     boot_free_mb: "{{ boot_free_raw.stdout | trim | int }}"
     is_boot_separate: "{{ boot_partition_check.stdout | trim | bool }}"
 
-# ------------------------------
-# 2. Automated Old Kernel Purge (Proactive Triage)
-# ------------------------------
-- name: Proactive old kernel purge loop
+# ----------------------------------------------------------
+# 3. Dynamic Kernel Purge (No Hardcoding)
+# Keeps only the current running kernel and the immediate previous kernel
+# ----------------------------------------------------------
+- name: Triage and execute dynamic old kernel purge
   become: true
   when: 
     - ansible_os_family == "Debian"
     - is_boot_separate
     - (boot_free_mb | int) < 150
   block:
-    - name: Inventory installed linux kernel elements safely
+    - name: Calculate which historical packages to purge dynamically
       ansible.builtin.shell: |
-        dpkg --get-selections | grep -E '^linux-(image|headers|modules|tools|modules-extra)-[0-9]' | awk '{print $1}' || true
-      register: installed_kernel_packages
+        all_vers=$(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | sed -E 's/linux-image-unsigned-//g' | sed -E 's/linux-image-//g' | sort -V | uniq)
+        running_ver=$(uname -r | sed 's/-generic//g')
+        prev_ver=$(echo "$all_vers" | grep -B 1 -F "$running_ver" | head -n 1)
+        
+        dpkg --get-selections | grep -E '^linux-(image|headers|modules|tools|modules-extra)-[0-9]' | awk '{print $1}' | while read -r pkg; do
+            if [[ "$pkg" != *"$running_ver"* && "$pkg" != *"$prev_ver"* ]]; then
+                echo "$pkg"
+            fi
+        done | sort -r
+      register: calculated_kernels_to_purge
       changed_when: false
 
-    - name: Parse protection boundaries for the active kernel
-      ansible.builtin.set_fact:
-        kernels_to_purge: >-
-          {%- set purge_list = [] -%}
-          {%- for pkg in installed_kernel_packages.stdout_lines | default([]) -%}
-            {# Added dynamic explicit string protections to shield current and next targets #}
-            {%- if ansible_kernel not in pkg and "6.8.0-149" not in pkg and "5.15.0-202" not in pkg -%}
-              {%- set _ = purge_list.append(pkg) -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ purge_list }}
-
-    # Passing the entire space-separated string of packages breaks the dependency lock instantly
-    - name: Purge historical packages via grouped dpkg execution line
-      ansible.builtin.command: "dpkg --purge {{ kernels_to_purge | join(' ') }}"
-      when: kernels_to_purge | length > 0
+    - name: Purge historical packages via grouped dpkg line execution
+      ansible.builtin.command: "dpkg --purge {{ calculated_kernels_to_purge.stdout_lines | join(' ') }}"
+      when: calculated_kernels_to_purge.stdout_lines | length > 0
       ignore_errors: true
 
-# ------------------------------
-# 3. Enforce Storage Allocation Boundaries
-# ------------------------------
+# ----------------------------------------------------------
+# 4. Enforce Storage Allocation Boundaries
+# ----------------------------------------------------------
 - name: Validate root free space capacity
   ansible.builtin.fail:
     msg: "Root filesystem space insufficient. Required: 5GB."
   when: (root_free_mb | int) < 5120
 
-# ------------------------------
-# 4. Self-Healing Package Manager Dependency Repair Block
-# ------------------------------
+# ----------------------------------------------------------
+# 5. Self-Healing Package Manager Dependency Repair Block
+# ----------------------------------------------------------
 - name: Execute package engine self-healing recovery loop
   when: ansible_os_family == "Debian"
   block:
+    - name: Clear locks and trigger native low-level configuration recovery
+      become: true
+      ansible.builtin.command: dpkg --configure -a
+
     - name: Fix broken package dependencies
       become: true
       ansible.builtin.command: apt-get -f install -y
       register: first_repair_attempt
       ignore_errors: true
 
-    # IF STUCK IN A WRITE ERROR LOCK-OUT CONTAINER, TRIGGER MANUAL EMERGENCY CLEANUP
     - name: Emergency manual cleanup block for frozen boot mounts
       become: true
       when: first_repair_attempt.rc is defined and first_repair_attempt.rc != 0
       block:
-        - name: Erase conflicting static files directly from /boot mount space
+        - name: Free space manually by cleaning older compressed initrd artifacts safely
           ansible.builtin.shell: |
-            find /boot -name "*5.15.0-19*" -delete || true
-            find /boot -name "*5.15.0-194*" -delete || true
+            all_vers=$(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | sed -E 's/linux-image-unsigned-//g' | sed -E 's/linux-image-//g' | sort -V | uniq)
+            running_ver=$(uname -r | sed 's/-generic//g')
+            prev_ver=$(echo "$all_vers" | grep -B 1 -F "$running_ver" | head -n 1)
 
-        - name: Clear locks and trigger native low-level configuration recovery
+            find /boot -type f \( -name "*initrd*" -o -name "*vmlinuz*" -o -name "*System.map*" -o -name "*config*" \) \
+                ! -name "*$running_ver*" \
+                ! -name "*$prev_ver*" \
+                -delete || true
+          changed_when: true
+
+        - name: Re-run low-level configuration recovery
           ansible.builtin.command: dpkg --configure -a
 
         - name: Confirm transaction settlement via apt-get engine
           ansible.builtin.command: apt-get -f install -y
 
-# ------------------------------
-# 5. Metadata Index Sync Updates
-# ------------------------------
+# ----------------------------------------------------------
+# 6. Metadata Index Sync Updates
+# ----------------------------------------------------------
 - name: Update apt cache index
   ansible.builtin.apt:
     update_cache: true
@@ -119,9 +145,9 @@
   changed_when: false
   when: ansible_os_family == "Suse"
 
-# ------------------------------
-# 6. Establish Dynamic Target Metrics
-# ------------------------------
+# ----------------------------------------------------------
+# 7. Establish Dynamic Target Metrics
+# ----------------------------------------------------------
 - name: Ensure baseline system layout configuration tracking elements are ready
   ansible.builtin.package:
     name: "{{ 'linux-generic' if ansible_distribution == 'Ubuntu' else 'kernel' if ansible_os_family == 'RedHat' else 'kernel-default' }}"
