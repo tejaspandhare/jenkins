@@ -105,10 +105,10 @@
       become: true
       ansible.builtin.shell: |
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsi-usr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
+        apt-get install -y -o Dpkg::Options::="--force-confold" -o APT::Get::Always-Include-Phased-Updates=True libopeniscsiusr open-iscsi tmux ubuntu-pro-client ubuntu-pro-client-l10n ubuntu-advantage-tools
       register: fallback_upgrade_result
       ignore_errors: true
-      no_log: false  # Disabled log masking to ensure fallback tracking analytics pass to the telemetry file
+      no_log: false
 
     # ----------------------------------------------------------
     # REDHAT/CENTOS TARGETED SYSTEM UPGRADE LIFE CYCLE
