@@ -8,28 +8,28 @@
 # 1. Gather disk usage
 # ------------------------------
 - name: Gather root filesystem usage
-  ansible.builtin.command: df -BG /
+  ansible.builtin.command: df -m /
   register: root_usage
   changed_when: false
   failed_when: false
 
 - name: Gather boot filesystem usage
-  ansible.builtin.command: df -BG /boot
+  ansible.builtin.command: df -m /boot
   register: boot_usage
   changed_when: false
   failed_when: false
 
 # ------------------------------
-# 2. Parse free space metrics
+# 2. Parse free space metrics (in Megabytes)
 # ------------------------------
-- name: Parse root free space
+- name: Parse root free space MB
   ansible.builtin.set_fact:
-    root_free_gb: "{{ root_usage.stdout_lines[1].split()[3] | regex_replace('G', '') | int }}"
+    root_free_mb: "{{ root_usage.stdout_lines[1].split()[3] | int }}"
   when: root_usage.rc == 0 and (root_usage.stdout_lines | length) > 1
 
-- name: Parse boot free space
+- name: Parse boot free space MB
   ansible.builtin.set_fact:
-    boot_free_gb: "{{ boot_usage.stdout_lines[1].split()[3] | regex_replace('G', '') | int }}"
+    boot_free_mb: "{{ boot_usage.stdout_lines[1].split()[3] | int }}"
   when: boot_usage.rc == 0 and (boot_usage.stdout_lines | length) > 1
 
 - name: Check if /boot is a separate partition
@@ -39,19 +39,19 @@
 
 # ------------------------------
 # 3. Automated Old Kernel Purge (Self-Healing)
-# Runs only if separate /boot partition is low on space
+# Forces execution if space is under 150MB to free up the apt lock
 # ------------------------------
 - name: Clear older unapplied kernels if space is limited
   become: true
   when:
     - ansible_os_family == "Debian"
     - is_boot_separate | default(false) | bool
-    - (boot_free_gb | default(0) | int) < 1
+    - (boot_free_mb | default(0) | int) < 150
   block:
     - name: Fetch inventory of installed kernel image modules
       ansible.builtin.shell: |
         set -o pipefail
-        dpkg --get-selections | grep -E '^linux-(image|headers|modules|tools)-[0-9]' | awk '{print $1}'
+        dpkg --get-selections | grep -E '^linux-(image|modules)-[0-9]' | awk '{print $1}'
       register: installed_kernel_packages
       changed_when: false
 
@@ -62,11 +62,11 @@
           {%- for pkg in installed_kernel_packages.stdout_lines | default([]) -%}
             {%- if ansible_kernel not in pkg -%}
               {%- set _ = purge_list.append(pkg) -%}
-            {%- endif -%}$
-          {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}$
           {{ purge_list }}
 
-    # Uses dpkg directly because apt-get is currently locked and blocked by dpkg failures
+    # Uses dpkg directly because apt-get is currently locked by the system
     - name: Purge historical kernel packages directly via dpkg
       ansible.builtin.command: "dpkg --purge {{ item }}"
       loop: "{{ kernels_to_purge }}"
@@ -75,15 +75,15 @@
       loop_control:
         label: "{{ item }}"
 
-    # Recalculate space metrics after the direct purging completes
+    # Recalculate space metrics after purging completes
     - name: Refresh boot partition metrics post-cleanup
-      ansible.builtin.command: df -BG /boot
+      ansible.builtin.command: df -m /boot
       register: boot_usage_post
       changed_when: false
 
-    - name: Reparse updated boot free space
+    - name: Reparse updated boot free space MB
       ansible.builtin.set_fact:
-        boot_free_gb: "{{ boot_usage_post.stdout_lines[1].split()[3] | regex_replace('G', '') | int }}"
+        boot_free_mb: "{{ boot_usage_post.stdout_lines[1].split()[3] | int }}"
       when: boot_usage_post.rc == 0 and (boot_usage_post.stdout_lines | length) > 1
 
 # ------------------------------
@@ -91,16 +91,16 @@
 # ------------------------------
 - name: Validate root free space
   ansible.builtin.fail:
-    msg: "Root filesystem has only {{ root_free_gb | default('unknown') }}GB free. Minimum required is 5GB."
-  when: (root_free_gb | default(0) | int) < 5
+    msg: "Root filesystem has only {{ (root_free_mb|int / 1024)|round(1) }}GB free. Minimum required is 5GB."
+  when: (root_free_mb | default(0) | int) < 5120
 
 - name: Validate boot free space
   ansible.builtin.fail:
-    msg: "/boot filesystem has only {{ boot_free_gb | default('unknown') }}GB free. Minimum required is 1GB."
+    msg: "/boot partition has only {{ boot_free_mb | default('unknown') }}MB free. Minimum required is 150MB."
   when:
-    - boot_free_gb is defined
+    - boot_free_mb is defined
     - (is_boot_separate | default(false) | bool)
-    - (boot_free_gb | int) < 1
+    - (boot_free_mb | int) < 150
 
 # ------------------------------
 # 5. Fix package issues
@@ -204,8 +204,8 @@
 
       OS             : {{ ansible_distribution }} {{ ansible_distribution_version }}
       Running Kernel : {{ running_kernel }}
-      Root Free      : {{ root_free_gb | default('unknown') }}GB
-      Boot Free      : {{ boot_free_gb | default('N/A (Shared with Root)') }}GB
+      Root Free      : {{ (root_free_mb|int / 1024)|round(1) }}GB
+      Boot Free      : {{ boot_free_mb | default('Shared') }}MB
 
       Installed Kernels:
       {{ installed_kernels.stdout | default('Not detected') }}
