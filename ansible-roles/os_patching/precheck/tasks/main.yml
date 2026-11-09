@@ -95,9 +95,11 @@
 - name: Execute package engine self-healing recovery loop
   when: ansible_os_family == "Debian"
   block:
-    - name: Clear locks and trigger native low-level configuration recovery
+    - name: Trigger native low-level configuration recovery
       become: true
       ansible.builtin.command: dpkg --configure -a
+      register: initial_configure_attempt
+      ignore_errors: true
 
     - name: Fix broken package dependencies
       become: true
@@ -105,23 +107,20 @@
       register: first_repair_attempt
       ignore_errors: true
 
+    # CRITICAL RESCUE HANDLER FOR THE CURRENT CIRCULAR SPACE LOCK
     - name: Emergency manual cleanup block for frozen boot mounts
       become: true
-      when: first_repair_attempt.rc is defined and first_repair_attempt.rc != 0
+      when: (initial_configure_attempt.rc is defined and initial_configure_attempt.rc != 0) or (first_repair_attempt.rc is defined and first_repair_attempt.rc != 0)
       block:
-        - name: Free space manually by cleaning older compressed initrd artifacts safely
+        - name: Free space manually by deleting older conflicting initrd assets safely
           ansible.builtin.shell: |
-            all_vers=$(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | sed -E 's/linux-image-unsigned-//g' | sed -E 's/linux-image-//g' | sort -V | uniq)
             running_ver=$(uname -r | sed 's/-generic//g')
-            prev_ver=$(echo "$all_vers" | grep -B 1 -F "$running_ver" | head -n 1)
-
-            find /boot -type f \( -name "*initrd*" -o -name "*vmlinuz*" -o -name "*System.map*" -o -name "*config*" \) \
-                ! -name "*$running_ver*" \
-                ! -name "*$prev_ver*" \
-                -delete || true
+            # Deletes older initrd files but keeps the running kernel completely safe
+            find /boot -type f -name "*initrd*" ! -name "*$running_ver*" -delete || true
+            find /boot -type f -name "*vmlinuz*" ! -name "*$running_ver*" -delete || true
           changed_when: true
 
-        - name: Re-run low-level configuration recovery
+        - name: Re-run low-level configuration recovery with newly recovered space
           ansible.builtin.command: dpkg --configure -a
 
         - name: Confirm transaction settlement via apt-get engine
