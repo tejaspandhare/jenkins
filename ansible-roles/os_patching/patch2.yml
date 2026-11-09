@@ -28,7 +28,6 @@
     EXCLUDE_PKGS: ""
 
   tasks:
-    # 1. ESTABLISH BOUNDARY AT THE ABSOLUTE START OF THE EXECUTION
     - name: Establish precision pre-patch log boundary
       when: ansible_os_family == "Debian"
       become: true
@@ -152,9 +151,9 @@
     - name: Parse delta updates (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
-      # FILTERED OUT 'linux-' TO PREVENT PRECHECK CLEANUP DUMPS FROM DILUTING LOG ENTRIES
+      # TARGETED LOG PARSER EXCLUDES ONLY EXPLICIT KERNEL HEADERS FILES, PROTECTING FIRMWARE ENTRIES
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " status installed " {} + | grep -v " linux-" | awk '{print $5, $6}' | sort -u || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " status installed " {} + | grep -vE "linux-(image|headers|modules|tools|modules-extra)-" | awk '{print $5, $6}' | sort -u || true
       register: live_updates_debian
       changed_when: false
 
