@@ -70,7 +70,6 @@ pipeline {
                             [ -z "$line" ] && continue
                             [[ "$line" == *":"* && "$line" == *"/"* ]] && continue
                             
-                            # Directly maps the clean incoming columns from the log file
                             P_NAME=$(echo "$line" | awk '{print $1}')
                             P_VER=$(echo "$line" | awk '{print $2}')
                             
