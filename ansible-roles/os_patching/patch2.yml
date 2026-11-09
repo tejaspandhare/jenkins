@@ -28,14 +28,7 @@
     EXCLUDE_PKGS: ""
 
   tasks:
-    - name: Record True Baseline Kernel Version
-      ansible.builtin.set_fact:
-        baseline_kernel: "{{ ansible_kernel }}"
-
-    - name: Execute Precheck Suite
-      ansible.builtin.include_role:
-        name: precheck
-
+    # 1. ESTABLISH BOUNDARY AT THE ABSOLUTE START OF THE EXECUTION
     - name: Establish precision pre-patch log boundary
       when: ansible_os_family == "Debian"
       become: true
@@ -43,6 +36,14 @@
         path: /tmp/.patch_window_start
         state: touch
         mode: '0644'
+
+    - name: Record True Baseline Kernel Version
+      ansible.builtin.set_fact:
+        baseline_kernel: "{{ ansible_kernel }}"
+
+    - name: Execute Precheck Suite
+      ansible.builtin.include_role:
+        name: precheck
 
     - name: Execute Core Patch Role
       ansible.builtin.include_role:
@@ -65,7 +66,6 @@
         label: "{{ item.strip() }}"
       ignore_errors: true
 
-    # SELF-HEALING ENHANCED PATCH TRANSACTION BLOCK
     - name: Execute Core System Upgrade Loop
       when: ansible_os_family == "Debian"
       block:
@@ -152,8 +152,9 @@
     - name: Parse delta updates (Debian/Ubuntu)
       when: ansible_os_family == "Debian"
       become: true
+      # FILTERED OUT 'linux-' TO PREVENT PRECHECK CLEANUP DUMPS FROM DILUTING LOG ENTRIES
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " status installed " {} + | awk '{print $5, $6}' | sort -u || true
+        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -E " status installed " {} + | grep -v " linux-" | awk '{print $5, $6}' | sort -u || true
       register: live_updates_debian
       changed_when: false
 
