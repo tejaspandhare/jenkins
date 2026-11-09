@@ -70,10 +70,11 @@ pipeline {
                             [ -z "$line" ] && continue
                             [[ "$line" == *":"* && "$line" == *"/"* ]] && continue
                             
+                            # Directly maps the clean incoming columns from the log file
                             P_NAME=$(echo "$line" | awk '{print $1}')
                             P_VER=$(echo "$line" | awk '{print $2}')
                             
-                            if [ -n "$P_NAME" ] && [ "$P_NAME" != "installed" ] && [ "$P_NAME" != "unpacked" ]; then
+                            if [ -n "$P_NAME" ] && [ "$P_NAME" != "installed" ] && [ "$P_NAME" != "unpacked" ] && [ "$P_NAME" != "upgraded" ]; then
                                 SEEN_PKGS["$P_NAME"]="$P_VER"
                             fi
                         done
