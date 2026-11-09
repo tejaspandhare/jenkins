@@ -107,7 +107,6 @@
       register: first_repair_attempt
       ignore_errors: true
 
-    # CRITICAL RESCUE HANDLER FOR THE CURRENT CIRCULAR SPACE LOCK
     - name: Emergency manual cleanup block for frozen boot mounts
       become: true
       when: (initial_configure_attempt.rc is defined and initial_configure_attempt.rc != 0) or (first_repair_attempt.rc is defined and first_repair_attempt.rc != 0)
@@ -115,7 +114,6 @@
         - name: Free space manually by deleting older conflicting initrd assets safely
           ansible.builtin.shell: |
             running_ver=$(uname -r | sed 's/-generic//g')
-            # Deletes older initrd files but keeps the running kernel completely safe
             find /boot -type f -name "*initrd*" ! -name "*$running_ver*" -delete || true
             find /boot -type f -name "*vmlinuz*" ! -name "*$running_ver*" -delete || true
           changed_when: true
@@ -127,7 +125,27 @@
           ansible.builtin.command: apt-get -f install -y
 
 # ----------------------------------------------------------
-# 6. Metadata Index Sync Updates
+# 6. Post-Repair Package Database Optimization
+# ----------------------------------------------------------
+- name: Clean out remaining broken package cache leftovers natively
+  when: 
+    - ansible_os_family == "Debian"
+    - is_boot_separate
+  become: true
+  block:
+    - name: Purge unneeded historical kernel artifacts safely via apt
+      ansible.builtin.apt:
+        autoremove: true
+        purge: true
+      register: apt_purge_optimized_result
+      ignore_errors: true
+
+    - name: Clear local package download caches to optimize disk space
+      ansible.builtin.apt:
+        autoclean: true
+
+# ----------------------------------------------------------
+# 7. Metadata Index Sync Updates
 # ----------------------------------------------------------
 - name: Update apt cache index
   ansible.builtin.apt:
@@ -145,7 +163,7 @@
   when: ansible_os_family == "Suse"
 
 # ----------------------------------------------------------
-# 7. Establish Dynamic Target Metrics
+# 8. Establish Dynamic Target Metrics
 # ----------------------------------------------------------
 - name: Ensure baseline system layout configuration tracking elements are ready
   ansible.builtin.package:
