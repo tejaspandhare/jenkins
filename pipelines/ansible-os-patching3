@@ -13,6 +13,8 @@ pipeline {
         ANSIBLE_LOCAL_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_REMOTE_TEMP = '/tmp/ansible_tmp'
         ANSIBLE_HOST_KEY_CHECKING = 'false'
+        ANSIBLE_TIMEOUT = '30'
+        ANSIBLE_SSH_ARGS = '-o ControlMaster=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ConnectTimeout=15'
     }
     stages {
         stage('Patching') {
@@ -24,7 +26,6 @@ pipeline {
                             mkdir -p /tmp/ansible_tmp
                             rm -f /tmp/raw_patch_log.tmp ./patch_report.html
 
-                            # Removed '|| true' so pipefail properly fails Jenkins on UNREACHABLE or FAILED hosts
                             ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch2.yml \
                                 --private-key="${ANSIBLE_KEY_FILE}" \
                                 -e "target_hosts='${TSERVERS}'" \
@@ -40,7 +41,6 @@ pipeline {
                     L="/tmp/raw_patch_log.tmp"
                     O="./patch_report.html"
                     
-                    # Changed exit 0 to exit 1 so a missing telemetry log fails the pipeline
                     if [ ! -f "$L" ]; then
                         echo "ERROR: Telemetry log missing — Ansible did not complete."
                         exit 1
