@@ -56,7 +56,6 @@ pipeline {
 <tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>
 EOF
 
-                    # 1. Populate Summary Row for EVERY Host in the Telemetry Log
                     HOSTS=$(grep "HOST_RECORD:" "$L" | cut -d':' -f2 | xargs)
                     for H in $HOSTS; do
                         BLOCK=$(awk "/HOST_RECORD:${H}$/,/HOST_RECORD_END/" "$L")
@@ -73,17 +72,9 @@ EOF
 
                     echo "</table>" >> "$O"
 
-                    # 2. Populate Individual Package Changes Table per Host
                     for H in $HOSTS; do
                         BLOCK=$(awk "/HOST_RECORD:${H}$/,/HOST_RECORD_END/" "$L")
-                        PKGS=$(echo "$BLOCK" | sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' \
-                            | grep -v "PATCHED_PACKAGES_" \
-                            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-                            | grep -v '^$' \
-                            | sort -k1,1 -k2,2V \
-                            | awk '{ pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' \
-
-                            | sort || true)
+                        PKGS=$(echo "$BLOCK" | sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' | grep -v "PATCHED_PACKAGES_" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -k1,1 -k2,2V | awk '{ pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' | sort || true)
 
                         echo "<h3 style='margin-top:28px'>${H} - Package Changes</h3>" >> "$O"
                         if [ -z "$PKGS" ]; then
@@ -105,5 +96,10 @@ EOF
             }
         }
     }
-    post { always { archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true } }
+    post {
+        always {
+            archiveArtifacts artifacts: 'patch_report.html', allowEmptyArchive: true
+            sh 'rm -rf /tmp/raw_patch_log.tmp /tmp/ansible_tmp'
+        }
+    }
 }
