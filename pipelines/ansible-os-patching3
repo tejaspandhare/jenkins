@@ -22,10 +22,13 @@ pipeline {
                         sh '''#!/bin/bash
                             set -euo pipefail
                             mkdir -p /tmp/ansible_tmp
+                            rm -f /tmp/raw_patch_log.tmp ./patch_report.html
+
+                            # Removed '|| true' so pipefail properly fails Jenkins on UNREACHABLE or FAILED hosts
                             ansible-playbook -i inventory/hosts ansible-roles/os_patching/patch2.yml \
                                 --private-key="${ANSIBLE_KEY_FILE}" \
                                 -e "target_hosts='${TSERVERS}'" \
-                                -e "EXCLUDE_PKGS='${EXPKGS:-}'" 2>&1 | grep -v "localhost" || true
+                                -e "EXCLUDE_PKGS='${EXPKGS:-}'" 2>&1 | grep -v "localhost"
                         '''
                     }
                 }
@@ -36,7 +39,12 @@ pipeline {
                 sh '''#!/bin/bash
                     L="/tmp/raw_patch_log.tmp"
                     O="./patch_report.html"
-                    if [ ! -f "$L" ]; then echo "Telemetry log missing."; exit 0; fi
+                    
+                    # Changed exit 0 to exit 1 so a missing telemetry log fails the pipeline
+                    if [ ! -f "$L" ]; then
+                        echo "ERROR: Telemetry log missing — Ansible did not complete."
+                        exit 1
+                    fi
                     
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
                     H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
@@ -55,7 +63,6 @@ pipeline {
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
-                    # Zero backslashes inside printf to keep Groovy compilation completely clean
                     ROWS=$(awk '
                         /PATCHED_PACKAGES_START/ { flag=1; next }
                         /PATCHED_PACKAGES_END/   { flag=0 }
