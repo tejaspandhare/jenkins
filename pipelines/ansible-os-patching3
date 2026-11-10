@@ -45,6 +45,10 @@ pipeline {
                         echo "ERROR: Telemetry log missing — Ansible did not complete."
                         exit 1
                     fi
+
+                    echo "=== DEBUG: RAW TELEMETRY LOG ==="
+                    cat "$L"
+                    echo "================================"
                     
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
                     H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
@@ -63,25 +67,25 @@ pipeline {
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
-                    ROWS=$(awk '
-                        /PATCHED_PACKAGES_START/ { flag=1; next }
-                        /PATCHED_PACKAGES_END/   { flag=0 }
-                        flag && NF >= 2 && $1 !~ /^(TASK|PLAY|ok:|installed|unpacked|upgraded)$/ {
-                            pkg[$1] = $2
-                        }
-                        END {
-                            for (p in pkg) {
-                                printf "<tr><td><b style=color:#15803d>upgraded</b></td><td><b>%s</b></td><td>%s</td></tr>\n", p, pkg[p]
-                            }
-                        }
-                    ' "$L" | sort)
+                    # Extract package lines cleanly using sed + sort -u (keeps latest version per package)
+                    PKGS=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" \
+                        | grep -v "PATCHED_PACKAGES_" \
+                        | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+                        | grep -v '^$' \
+                        | sort -k1,1 -k2,2V \
+                        | awk '!seen[$1]++ { pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' \
 
-                    if [ -z "$ROWS" ]; then
+                        | sort || true)
+
+                    if [ -z "$PKGS" ]; then
                         echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied during this run.</div>" >> "$O"
                     else
                         echo "<table border='1' cellpadding='8' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0;font-size:13px'>" >> "$O"
                         echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Version Details</th></tr>" >> "$O"
-                        echo "$ROWS" >> "$O"
+                        echo "$PKGS" | while read -r P_NAME P_VER; do
+                            [ -z "$P_NAME" ] && continue
+                            echo "<tr><td><b style='color:#15803d'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER:-N/A}</td></tr>" >> "$O"
+                        done
                         echo "</table>" >> "$O"
                     fi
 
