@@ -32,13 +32,11 @@
     UCF_FORCE_CONFFOLD: "1"
 
   tasks:
-    - name: Establish precision pre-patch log boundary
+    - name: Capture exact patch window start timestamp
       when: ansible_os_family == "Debian"
-      become: true
-      ansible.builtin.file:
-        path: /tmp/.patch_window_start
-        state: touch
-        mode: '0644'
+      ansible.builtin.command: date "+%Y-%m-%d %H:%M:%S"
+      register: patch_window_start
+      changed_when: false
 
     - name: Record True Baseline Kernel Version
       ansible.builtin.set_fact:
@@ -140,7 +138,11 @@
       when: ansible_os_family == "Debian"
       become: true
       ansible.builtin.shell: |
-        find /var/log/dpkg.log -newer /tmp/.patch_window_start -exec grep -F " status installed " {} + | grep -vE "linux-(image|headers|modules|tools|modules-extra)-" | awk '{print $5, $6}' | sort -u || true
+        awk -v start="{{ patch_window_start.stdout }}" '
+          ($1 " " $2) >= start && $3 == "status" && $4 == "installed" && $5 !~ /^linux-(image|headers|modules|tools|modules-extra)-/ {
+            print $5, $6
+          }
+        ' /var/log/dpkg.log | sort -u || true
       register: live_updates_debian
       changed_when: false
 
@@ -151,14 +153,6 @@
         dnf history info $(dnf history list -q | head -n 1 | awk '{print $1}') | grep -E '^(Upgrade|Install)' | awk '{print $2, $4}' || true
       register: live_updates_redhat
       changed_when: false
-
-    - name: Clean up temporary tracking markers
-      when: ansible_os_family == "Debian"
-      become: true
-      ansible.builtin.file:
-        path: /tmp/.patch_window_start
-        state: absent
-      ignore_errors: true
 
     - name: Determine if Debian/Ubuntu requires reboot
       when: ansible_os_family == "Debian"
@@ -205,12 +199,12 @@
       ansible.builtin.shell: |
         cat << 'EOF' > /tmp/raw_patch_log.tmp
         REPORT_DATA_START
-        {% for host in groups['patching_execution_group'] | default([]) %}
+        {% for host in groups['patching_execution_group'] | default() %}
         HOST_RECORD:{{ host }}
         OS:{{ hostvars[host]['ansible_distribution'] | default('Unknown') }} {{ hostvars[host]['ansible_distribution_version'] | default('') }}
         OLD_KERNEL:{{ hostvars[host]['baseline_kernel'] | default('Unknown') }}
         NEW_KERNEL:{{ hostvars[host]['ansible_kernel'] | default('Unknown') }}
-        UPDATED:{{ 'Yes' if ((hostvars[host]['live_updates_debian']['stdout_lines'] | default([]) | length > 0) or (hostvars[host]['live_updates_redhat']['stdout_lines'] | default([]) | length > 0)) else 'No' }}
+        UPDATED:{{ 'Yes' if ((hostvars[host]['live_updates_debian']['stdout_lines'] | default() | length > 0) or (hostvars[host]['live_updates_redhat']['stdout_lines'] | default() | length > 0)) else 'No' }}
         REBOOT:{{ 'Yes' if hostvars[host]['needs_reboot'] | default(false) else 'No' }}
         STATUS:SUCCESS
         PATCHED_PACKAGES_START
