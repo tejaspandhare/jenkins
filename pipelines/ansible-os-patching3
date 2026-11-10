@@ -47,35 +47,57 @@ pipeline {
                     fi
 
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-                    H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
-                    OS=$(grep "OS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
-                    OK=$(grep "OLD_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "N/A")
-                    NK=$(grep "NEW_KERNEL:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "N/A")
-                    UP=$(grep "UPDATED:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
-                    RB=$(grep "REBOOT:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "No")
-                    ST=$(grep "STATUS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "SUCCESS")
-                    [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
 
-                    echo "<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>" > "$O"
-                    echo "<h2>Enterprise Patching Dashboard</h2><p>Run Time: ${TIME}</p>" >> "$O"
-                    echo "<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0'>" >> "$O"
-                    echo "<tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>" >> "$O"
-                    echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
-                    echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
+                    cat <<EOF > "$O"
+<html><body style='font-family:sans-serif;padding:30px;background:#f8fafc;color:#1e293b'>
+<h2>Enterprise Patching Dashboard</h2>
+<p>Run Time: ${TIME}</p>
+<table border='1' cellpadding='10' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0'>
+<tr style='background:#f8fafc;color:#64748b'><th>Host</th><th>OS</th><th>Kernel</th><th>Updates</th><th>Reboot</th><th>Status</th></tr>
+EOF
 
-                    PKGS=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -k1,1 -k2,2V | awk '{ pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' | sort || true)
+                    # 1. Populate Summary Row for EVERY Host in the Telemetry Log
+                    HOSTS=$(grep "HOST_RECORD:" "$L" | cut -d':' -f2 | xargs)
+                    for H in $HOSTS; do
+                        BLOCK=$(awk "/HOST_RECORD:${H}$/,/HOST_RECORD_END/" "$L")
+                        OS=$(echo "$BLOCK" | grep "OS:" | cut -d':' -f2- | xargs || echo "Unknown")
+                        OK=$(echo "$BLOCK" | grep "OLD_KERNEL:" | cut -d':' -f2- | xargs || echo "N/A")
+                        NK=$(echo "$BLOCK" | grep "NEW_KERNEL:" | cut -d':' -f2- | xargs || echo "N/A")
+                        UP=$(echo "$BLOCK" | grep "UPDATED:" | cut -d':' -f2- | xargs || echo "No")
+                        RB=$(echo "$BLOCK" | grep "REBOOT:" | cut -d':' -f2- | xargs || echo "No")
+                        ST=$(echo "$BLOCK" | grep "STATUS:" | cut -d':' -f2- | xargs || echo "SUCCESS")
+                        [ "$OK" != "$NK" ] && KD="${OK} -> ${NK}" || KD="${OK}"
 
-                    if [ -z "$PKGS" ]; then
-                        echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied during this run.</div>" >> "$O"
-                    else
-                        echo "<table border='1' cellpadding='8' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0;font-size:13px'>" >> "$O"
-                        echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Version Details</th></tr>" >> "$O"
-                        echo "$PKGS" | while read -r P_NAME P_VER; do
-                            [ -z "$P_NAME" ] && continue
-                            echo "<tr><td><b style='color:#15803d'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER:-N/A}</td></tr>" >> "$O"
-                        done
-                        echo "</table>" >> "$O"
-                    fi
+                        echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
+                    done
+
+                    echo "</table>" >> "$O"
+
+                    # 2. Populate Individual Package Changes Table per Host
+                    for H in $HOSTS; do
+                        BLOCK=$(awk "/HOST_RECORD:${H}$/,/HOST_RECORD_END/" "$L")
+                        PKGS=$(echo "$BLOCK" | sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' \
+                            | grep -v "PATCHED_PACKAGES_" \
+                            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+                            | grep -v '^$' \
+                            | sort -k1,1 -k2,2V \
+                            | awk '{ pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' \
+
+                            | sort || true)
+
+                        echo "<h3 style='margin-top:28px'>${H} - Package Changes</h3>" >> "$O"
+                        if [ -z "$PKGS" ]; then
+                            echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied during this run.</div>" >> "$O"
+                        else
+                            echo "<table border='1' cellpadding='8' style='border-collapse:collapse;width:100%;background:#fff;border-color:#e2e8f0;font-size:13px'>" >> "$O"
+                            echo "<tr style='background:#f8fafc;color:#475569'><th>Execution State</th><th>Package Name</th><th>Version Details</th></tr>" >> "$O"
+                            echo "$PKGS" | while read -r P_NAME P_VER; do
+                                [ -z "$P_NAME" ] && continue
+                                echo "<tr><td><b style='color:#15803d'>upgraded</b></td><td><b>${P_NAME}</b></td><td>${P_VER:-N/A}</td></tr>" >> "$O"
+                            done
+                            echo "</table>" >> "$O"
+                        fi
+                    done
 
                     echo "</body></html>" >> "$O"
                     exit 0
