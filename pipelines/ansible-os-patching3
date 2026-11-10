@@ -66,7 +66,8 @@ pipeline {
                         
                         declare -A SEEN_PKGS
                         
-                        echo "${CLEAN_PL}" | while read -r line || [ -n "$line" ]; do
+                        # Process substitution (< <(...)) keeps SEEN_PKGS in the main shell instead of a subshell
+                        while read -r line || [ -n "$line" ]; do
                             [ -z "$line" ] && continue
                             [[ "$line" == *":"* && "$line" == *"/"* ]] && continue
                             
@@ -76,7 +77,7 @@ pipeline {
                             if [ -n "$P_NAME" ] && [ "$P_NAME" != "installed" ] && [ "$P_NAME" != "unpacked" ] && [ "$P_NAME" != "upgraded" ]; then
                                 SEEN_PKGS["$P_NAME"]="$P_VER"
                             fi
-                        done
+                        done < <(echo "${CLEAN_PL}")
                         
                         for P in $(echo "${!SEEN_PKGS[@]}" | tr ' ' '\n' | sort); do
                             V="${SEEN_PKGS[$P]}"
