@@ -55,7 +55,7 @@ pipeline {
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
-                    # Pure awk parser: extracts block, ignores noise, deduplicates keeping latest version, outputs HTML rows
+                    # Zero backslashes inside printf to keep Groovy compilation completely clean
                     ROWS=$(awk '
                         /PATCHED_PACKAGES_START/ { flag=1; next }
                         /PATCHED_PACKAGES_END/   { flag=0 }
@@ -64,7 +64,7 @@ pipeline {
                         }
                         END {
                             for (p in pkg) {
-                                printf "<tr><td><b style=\x27color:#15803d\x27>upgraded</b></td><td><b>%s</b></td><td>%s</td></tr>\n", p, pkg[p]
+                                printf "<tr><td><b style=color:#15803d>upgraded</b></td><td><b>%s</b></td><td>%s</td></tr>\n", p, pkg[p]
                             }
                         }
                     ' "$L" | sort)
