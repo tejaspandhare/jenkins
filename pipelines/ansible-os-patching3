@@ -46,10 +46,6 @@ pipeline {
                         exit 1
                     fi
 
-                    echo "=== DEBUG: RAW TELEMETRY LOG ==="
-                    cat "$L"
-                    echo "================================"
-                    
                     TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
                     H=$(grep "HOST_RECORD:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
                     OS=$(grep "OS:" "$L" | head -n 1 | cut -d':' -f2 | xargs || echo "Unknown")
@@ -67,15 +63,7 @@ pipeline {
                     echo "<tr><td><b>${H}</b></td><td>${OS}</td><td>${KD}</td><td>${UP}</td><td>${RB}</td><td>${ST}</td></tr>" >> "$O"
                     echo "</table><h3>Detailed Package Changes Table</h3>" >> "$O"
 
-                    # Extract package lines cleanly using sed + sort -u (keeps latest version per package)
-                    PKGS=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" \
-                        | grep -v "PATCHED_PACKAGES_" \
-                        | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-                        | grep -v '^$' \
-                        | sort -k1,1 -k2,2V \
-                        | awk '!seen[$1]++ { pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' \
-
-                        | sort || true)
+                    PKGS=$(sed -n '/PATCHED_PACKAGES_START/,/PATCHED_PACKAGES_END/p' "$L" | grep -v "PATCHED_PACKAGES_" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -k1,1 -k2,2V | awk '{ pkgs[$1]=$2 } END { for (p in pkgs) print p, pkgs[p] }' | sort || true)
 
                     if [ -z "$PKGS" ]; then
                         echo "<div style='background:#f0fdf4;color:#166534;padding:15px;border-radius:6px'>✨ System is up to date. No updates applied during this run.</div>" >> "$O"
